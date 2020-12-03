@@ -444,6 +444,12 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     # -outBoolVec: boolean vec indicating streamlines that survived ALL operations
     #
     # NOTE: roisvec, includeVec, and operationsVec should all be the same lenth
+    # ADVICE: apply the harshest (fewest survivors) criteria first.  Will result 
+    # in signifigant speed ups.
+    # ADVICE: starting with specifying endpoints has the additional benefit of reducting
+    # the number of nodes considered per streamline to 2.  This would be an effective way
+    # of implementing a fast and harsh first criteria.
+    #
     import numpy as np
     
     #create an array to store the boolean result of each round of segmentation
@@ -644,7 +650,7 @@ def subsetStreamsByROIboundingBox(streamlines, maskNifti):
     dtc = dist_to_corner(maskNifti.affine)
     
     maskBounds=nib.affines.apply_affine(maskNifti.affine,returnMaskBoundingBoxVoxelIndexes(maskNifti))
-    #due to how this output is tructured, vertex 0 and vertex 8 are always opposing
+    #due to how this output is structured, vertex 0 and vertex 8 are always opposing
     
     maskBoundTolerance=[np.min(maskBounds[[1,7],0])-dtc,np.max(maskBounds[[1,7],0])+dtc,np.min(maskBounds[[1,7],1])-dtc,np.max(maskBounds[[1,7],1])+dtc,np.min(maskBounds[[1,7],2])-dtc,np.max(maskBounds[[1,7],2])+dtc]
     
@@ -662,3 +668,131 @@ def subsetStreamsByROIboundingBox(streamlines, maskNifti):
                                                 ])
    
     return criteriaVec.astype(int)
+
+
+
+def findTractNeckNode(streamlines):
+    #findTractNeckNode(streamlines):
+    # finds the node index for each streamline which corresponds to the most tightly constrained
+    # portion of the tract (i.e. the "neck).
+    #
+    # INPUTS
+    #
+    #-streamlines: appropriately formatted list of candidate streamlines, presumably corresponding to a coherent anatomical SUBSTRUCTURE (i.e. tract)
+    # NOTE: this computation isn't really sensible for a whole brain tractome, and would probably take a long time as well 
+    #
+    # OUTPUTS
+    #
+    # -neckNodeVec:  a 1d int vector array that indicates, for each streamline, the node that is associated with the "neck" of the input streamline collection.
+    #
+    from dipy.segment.clustering import QuickBundles
+    from dipy.segment.metric import ResampleFeature
+    from dipy.segment.metric import AveragePointwiseEuclideanMetric
+    from scipy.spatial.distance import cdist
+    import numpy as np
+    
+    #arbitrarily set the number of nodes to sample the centroid at.  Possible parameter input
+    centroidNodesNum=35
+    # Streamlines will be resampled to 24 points on the fly.
+    feature = ResampleFeature(nb_points=35)
+    #?
+    metric = AveragePointwiseEuclideanMetric(feature=feature)  # a.k.a. MDF
+    #threshold set very high to return 1 bundle
+    qb = QuickBundles(threshold=100., metric=metric)
+    #obtain a single cluser on the input streamlines
+    clusters = qb.cluster(streamlines)
+    
+    #create vectors for the average and standard deviation of the neck point distance
+    neckPointDistAvg=np.zeros(centroidNodesNum)
+    neckPointDistStDev=np.zeros(centroidNodesNum)
+    
+    #iterate across centroid nodes.  To speed this up for future implementations, could 
+    #only target middle ones, or sample some minimal number and continue to sample if min is fewer than 2 nodes from edge
+    # i.e. looking for local min
+    for iCentroidNodes in range(centroidNodesNum):
+
+        #I don't understand 2d array generation with 1 row, so this is how we do it
+        middleCentroidVec=np.zeros((1,3))
+        middleCentroidVec[0,:]=clusters.centroids[0][iCentroidNodes,:]
+    
+        #create a vector to catch the indexes and the node values
+        neckNodeIndexVec=np.zeros(len(streamlines)).astype(int)
+        neckNodeVec=np.zeros((len(streamlines),3))
+        
+        #iterate across streamlines
+        for iStreamline in range(len(streamlines)):
+            #distances for all nodes 
+            curNodesDist = cdist(streamlines[iStreamline], middleCentroidVec, 'euclidean')
+            neckNodeIndexVec[iStreamline]=np.where(curNodesDist==np.min(curNodesDist))[0].astype(int)
+            neckNodeVec[iStreamline,:]=streamlines[iStreamline][neckNodeIndexVec[iStreamline]]
+    
+        avgNeckPoint=np.zeros((1,3))
+        avgNeckPoint[0,:]=np.mean(neckNodeVec,axis=0)
+        curNearDistsFromAvg=cdist(neckNodeVec, avgNeckPoint, 'euclidean')
+        neckPointDistAvg[iCentroidNodes]=np.mean(curNearDistsFromAvg)
+        neckPointDistStDev[iCentroidNodes]=np.std(curNearDistsFromAvg)
+    
+    #find the neckNode on the centroid    
+    centroidNeckNode=np.where(neckPointDistAvg==np.min(neckPointDistAvg))[0]
+    
+    #run the computation one last time to get the nearest streamline nodes for the determined centroid node
+    neckNodeIndexVecOut=np.zeros(len(streamlines)).astype(int)
+    neckNodeVec=np.zeros((len(streamlines),3))
+        
+    #iterate across streamlines
+    for iStreamline in range(len(streamlines)):
+        #distances for all nodes 
+        curNodesDist = cdist(streamlines[iStreamline], clusters.centroids[0][centroidNeckNode,:], 'euclidean')
+        neckNodeIndexVecOut[iStreamline]=np.where(curNodesDist==np.min(curNodesDist))[0].astype(int)
+        neckNodeVec[iStreamline,:]=streamlines[iStreamline][neckNodeIndexVec[iStreamline]]
+        
+    return neckNodeIndexVecOut
+
+def removeStreamlineOutliersAtNeck(streamlines,cutStDev):
+    # removeStreamlineOutliersAtNeck(streamlines,cutStDev):
+    # INPUTS
+    #
+    #-streamlines: appropriately formatted list of candidate streamlines, presumably corresponding to a coherent anatomical SUBSTRUCTURE (i.e. tract)
+    # NOTE: this computation isn't really sensible for a whole brain tractome, and would probably take a long time as well 
+    #
+    # OUTPUTS
+    #
+    # -streamlinesCleaned:  a subset of the input streamlines, corresponding to those which have survived the cleaning process.
+    #
+    # NOTE: given that we are using a lognormal distribution and the 
+    #
+    import scipy.stats as stats  
+    import numpy as np
+    from scipy.spatial.distance import cdist
+    
+    
+    neckNodeIndexVecOut=findTractNeckNode(streamlines)
+    
+    #recover the nodes
+    neckNodes=np.zeros((len(streamlines),3))
+    for iStreamline in range(len(streamlines)):
+        #distances for all nodes 
+        neckNodes[iStreamline,:] =streamlines[iStreamline][neckNodeIndexVecOut[iStreamline]]
+    
+    #compute the statistics on the average neck point
+    avgNeckPoint=np.zeros((1,3))
+    avgNeckPoint[0,:]=np.mean(neckNodes,axis=0)
+    curNearDistsFromAvg=cdist(neckNodes, avgNeckPoint, 'euclidean')
+    #neckPointDistAvg=np.mean(curNearDistsFromAvg)
+    #neckPointDistStDev=np.std(curNearDistsFromAvg)
+    
+    #deviation from centroid is typical lognorm?
+    #lognormOut[0]=shape param, lognormOut[2]=scaleParam
+    sSigma, loc, scale = stats.lognorm.fit(curNearDistsFromAvg, floc=0)
+    muVar=np.log(scale)
+    #https://www.mathworks.com/help/stats/lognormal-distribution.html
+    computedMean=np.exp(muVar+np.square(sSigma)/2)
+    computedStDev=muVar
+    
+    #confidence interval
+    #np.sum(np.logical_or(curNearDistsFromAvg<computedMean-2*computedStDev,curNearDistsFromAvg<computedMean+2*computedStDev))
+    #curNearDistsFromAvg[curNearDistsFromAvg>computedMean+5*computedStDev]
+    
+    #finish later, maybe not necessary
+    
+    streamlinesCleaned=streamlines[curNearDistsFromAvg.flatten()>computedMean+cutStDev*computedStDev]
