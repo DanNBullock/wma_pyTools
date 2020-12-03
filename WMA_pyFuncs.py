@@ -221,6 +221,8 @@ def multiROIrequestToMask(atlas,roiNums):
     # OUTPUTS:
     # -outImg:  a mask with int(1) in those voxels where the associated labels were found.  If the label wasn't found, an empty nifti structure is output.
     
+    ##NOTE REPLACE WITH nil.masking.intersect_masks when you get a chance
+    
     import numpy as np
     import nibabel as nib
     
@@ -342,7 +344,7 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     
     #intersect the ROIs to return the remaining portion
     #will cause a problem if Niftis have different affines.
-    remainingROI=nil.masking.intersect_masks([sliceKeepNifti,inputROINifti], threshold=0, connected=False)
+    remainingROI=nil.masking.intersect_masks([sliceKeepNifti,inputROINifti], threshold=1, connected=False)
     #consider throwing an error here if the output Nifti is empty
     
     return remainingROI
@@ -438,7 +440,225 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     #    "either_end" : either of the end-points is within tol from ROI
     #    "both_end" : both end points are within tol from ROI.
     #
+    # OUTPUTS
+    # -outBoolVec: boolean vec indicating streamlines that survived ALL operations
+    #
     # NOTE: roisvec, includeVec, and operationsVec should all be the same lenth
+    import numpy as np
     
-    from dipy import tracking, utils
-    testCloud=dipy.tracking.utils.seeds_from_mask(inputPlanarROI.get_data(), inputPlanarROI.affine, density=[1, 1, 1])
+    #create an array to store the boolean result of each round of segmentation
+    
+    
+    outBoolArray=np.zeros(streamlines,len(roisvec))
+    
+    for iOperations in range(len(roisvec)):
+        
+        curBoolVec=applyNiftiCriteriaToTract(streamlines, roisvec[iOperations], includeVec[iOperations], operationsVec[iOperations])
+        
+        #if this is the first segmentation application
+        if iOperations == 0:
+            #set the relevant column to the current segmentation bool vec
+            outBoolArray[:,iOperations]=curBoolVec
+        #otherwise
+        else:
+            lastRoundSurvivingIndexes=np.where(outBoolArray[:,iOperations-1])[0]
+            thisRoundSurvivingIndexes=lastRoundSurvivingIndexes[np.where(outBoolArray[:,iOperations])[0]]
+        
+            #set relevant array entries to true
+            outBoolArray[thisRoundSurvivingIndexes,iOperations]=1
+        
+        #in either case, subsegment the streamlines to speed up the next iteration
+        streamlines=streamlines[np.where(curBoolVec)[0]]
+        
+    #when all iterations are complete collapse across the colums and return only those streams that met all criteria
+    outBoolVec=np.all(outBoolArray,axis=1)
+    
+    return outBoolVec
+   
+def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec):
+    #segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
+    #Iteratively applies ROI-based criteria
+    #
+    #adapted from https://github.com/dipy/dipy/blob/master/dipy/tracking/streamline.py#L200
+    #because we want (1) nifti inputs instead of coordinate cloud ROI inputs (2)a boolean output rather than a generator
+    #basically a variant of
+    #https://github.com/DanNBullock/wma/blob/33a02c0373d6742ddf07fd8ac3c8481662577743/utilities/wma_SegmentFascicleFromConnectome.m
+    #
+    #INPUTS
+    #
+    # -streamlines: appropriately formatted list of candidate streamlines, e.g. a candidate tractome
+    #
+    # -maskNifti: a nifti Mask containing only 1s and 0s
+    #
+    # -includeBool: a boolean indicator of whether you want the associated ROI to act as an INCLUSION or EXCLUSION ROI (True=inclusion)
+    #
+    # operationSpec: operation specification, one following instructions on which streamline nodes to asses (and how)
+    #    "any" : any point is within tol from ROI. Default.
+    #    "all" : all points are within tol from ROI.
+    #    "either_end" : either of the end-points is within tol from ROI
+    #    "both_end" : both end points are within tol from ROI.
+    #
+    # OUTPUTS
+    #
+    # - outBoolVec: boolean vec indicating streamlines that survived operation
+    
+    #still learning how to import from modules
+    from dipy.tracking.utils import seeds_from_mask
+    import numpy as np
+    from dipy.core.geometry import dist_to_corner
+    import dipy.tracking.utils as ut
+    import nilearn as nil
+    
+    #perform some input checks
+    validOperations=["any","all","either_end","both_end"]
+    if ~np.in1d(operationSpec, validOperations):
+         raise Exception("applyNiftiCriteriaToTract Error: input operationSpec not understood.")
+    
+    if ~type(maskNifti).__name__=='Nifti1Image':
+        raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not a nifti.")
+    
+    #the conversion to int may cause problems if the input isn't convertable to int.  Then again, the point of this is to raise an error, so...
+    elif ~np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1]): 
+        raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not convertable to 0,1 int mask.  Likely not a mask.")
+        
+    if ~isinstance(includeBool, bool ):
+        raise Exception("applyNiftiCriteriaToTract Error: input includeBool not a bool.  See input description for usage")
+        
+    
+    #in order to achieve a speedup we should minimize the number of coordinates we are testing.
+    #lets intersect the ROI and a mask of the streamlines so that we can subset the relevant portions of the ROI
+    
+    tractMask=pointCloudToMask(np.concatenate(streamlines),maskNifti)
+    
+    #take the intersection of the two
+    tractMasROIIntersection=nil.masking.intersect_masks([tractMask,maskNifti], threshold=1, connected=False)
+    #ideally we are reducing the number of points that teach node needs to be compared to
+    #for example, a 256x 256 planar ROI would result in 65536 coords, intersecting with a full brain tractogram reduces this by about 1/3
+    
+    #find the streamlines that are within the bounding box of the maskROI
+    boundedStreamsBool=subsetStreamsByROIboundingBox(streamlines, tractMasROIIntersection)
+    
+    #subset them
+    boundedStreamSubset=streamlines[np.where(boundedStreamsBool)[0]]
+    #second track mask application doesn't seem to do anything    
+    
+    #dipy interprets ROIs as point clouds, which necessitates following conversion.  Kind of
+    #similar to how vistasoft used to use point clouds instead of niftis.  I/We are 
+    #making the switch to using Niftis here because that's how Nibabel and the other stuff
+    #we have been using has done it.
+    
+    #here we are going to take the input mask at its word and use the resolution
+    # i.e. (diagonal of the affine, but taken from get_zooms due to unreliability of diagonal itself) to infer the actual data granularity of the mask
+    # we're assuming that this is the floor of the sensitivity of the source data
+    # and so it would be "making up data" to specify a point cloud spacing kernel
+    # smaller than this
+    densityKernel=np.asarray(tractMasROIIntersection.header.get_zooms())
+    
+    roiPointCloud=seeds_from_mask(tractMasROIIntersection.get_fdata(), tractMasROIIntersection.affine, density=densityKernel)
+    
+    # https://github.com/dipy/dipy/blob/558adb604865877e1835cd03433f71cb6d851d21/dipy/tracking/streamline.py#L302
+    # This calculates the maximal distance to a corner of the voxel:
+    dtc = dist_to_corner(maskNifti.affine)
+    #going to use this calculation to impose tolerance.  Can't see why users would need to specify this
+    
+    #still takes a while, don't know how to speed it up, maybe multithread it?
+    criteriaVec=np.zeros(len(boundedStreamSubset)).astype(int)
+    for iStreamline in range(len(boundedStreamSubset)):
+        criteriaVec[iStreamline] = ut.streamline_near_roi(boundedStreamSubset[iStreamline], roiPointCloud, tol=dtc, mode=operationSpec)
+    
+    #if the input instruction is NOT, negate the output
+    if ~includeBool:
+        criteriaVec=~criteriaVec
+    
+    #find the indexes of the original streamlines that the survivors correspond to
+    boundedStreamsIndexes=np.where(boundedStreamsBool)[0]
+    originalIndexes=boundedStreamsIndexes[np.where(criteriaVec.astype(int))[0]]
+    
+    #initalize an out bool vec
+    outBoolVec=np.zeros(len(streamlines))
+    #set the relevant entries to true
+    outBoolVec[originalIndexes]=1
+    
+    return outBoolVec
+    
+    
+def pointCloudToMask(pointCloudArray,referenceNifti):
+    #pointCloudToMask(streamlines, referenceNifti)
+    #creates a mask of a point cloud in the space and resolution of the input referenceNifti
+    #basically the reverse of seeds_from_mask
+    # 
+    # INPUTS
+    # -pointCloudArray: N X 3 array of points, corresponding to a point cloud
+    #
+    # -referenceNifti: reference nifti to obtain affine and data structure size
+    #
+    # OUTPUTS
+    #
+    #  cloudMaskNifti: mask of cloud, in nifti format
+    #
+    # NOTE: will throw error if tract mask doesn't fit in nifti bounds
+    
+    import nibabel as nib
+    import numpy as np
+    
+    referenceAffine=referenceNifti.affine
+    refrenceHeader=referenceNifti.header.copy()
+    maskData=np.zeros(referenceNifti.shape)
+    
+    densityKernel=np.asarray(referenceNifti.header.get_zooms())
+    
+    #there may be an offset issue here due to the smaller than 1 offset of the affine
+    maskImgCoords=np.unique(np.floor(nib.affines.apply_affine(np.linalg.inv(referenceNifti.affine),pointCloudArray)),axis=0).astype(int)
+    
+    #throw exception if mask bounds exceed niftiBounds
+    maskBounds=np.asarray([np.min(maskImgCoords[:,0]),np.max(maskImgCoords[:,0]),np.min(maskImgCoords[:,1]),np.max(maskImgCoords[:,1]),np.min(maskImgCoords[:,2]),np.max(maskImgCoords[:,2])])
+    if np.logical_or(np.any(maskBounds[0:6:2]<0),np.any([maskBounds[1]>referenceNifti.shape[0],maskBounds[3]>referenceNifti.shape[1],maskBounds[5]>referenceNifti.shape[2]])):
+        raise Exception("tractMask Error: cloud mask exceends reference nifti bounding box.  Possible mismatch")
+    
+    #fill in the mask data.
+    maskData[maskImgCoords]=1
+    
+    #create out structure
+    cloudMaskNifti=nib.nifti1.Nifti1Image(maskData, referenceAffine, header=refrenceHeader)
+    
+    return cloudMaskNifti
+
+def subsetStreamsByROIboundingBox(streamlines, maskNifti):
+    #subsetStreamsByROIboundingBox(streamlines, maskNifti):
+    #subsets the input set of streamlines to only those that have nodes within the box
+    #
+    # INPUTS
+    #
+    # -streamlines: streamlines to be subset
+    #
+    # -maskNifti:  the mask nifti from which a bounding box is to be extracted, whcih will be used to subset the streamlines
+    #
+    # OUTPUTS
+    #
+    # -criteriaVec:  a boolean vector indicating which streamlines contain nodes within the bounding box.
+    #
+    import nibabel as nib
+    import numpy as np
+    #compute distance tolerance
+    from dipy.core.geometry import dist_to_corner
+    dtc = dist_to_corner(maskNifti.affine)
+    
+    maskBounds=nib.affines.apply_affine(maskNifti.affine,returnMaskBoundingBoxVoxelIndexes(maskNifti))
+    #due to how this output is tructured, vertex 0 and vertex 8 are always opposing
+    
+    maskBoundTolerance=[np.min(maskBounds[[1,7],0])-dtc,np.max(maskBounds[[1,7],0])+dtc,np.min(maskBounds[[1,7],1])-dtc,np.max(maskBounds[[1,7],1])+dtc,np.min(maskBounds[[1,7],2])-dtc,np.max(maskBounds[[1,7],2])+dtc]
+    
+    criteriaVec=np.zeros(len(streamlines))
+    #iterating across streamlines seems inefficient...
+    #but i guess this avoids doing trig on these points
+    #seems WAAAAY faster than the standard per-streamline intersect code
+    for iStreamline in range(len(streamlines)):
+        
+        #is there an all() version of this that would be faster?
+        #checking for being bounded for each streamline
+        criteriaVec[iStreamline]=np.all([np.logical_and(np.any(streamlines[iStreamline][:,0]>maskBoundTolerance[0]),np.any(streamlines[iStreamline][:,0]<maskBoundTolerance[1])), \
+                                                 np.logical_and(np.any(streamlines[iStreamline][:,1]>maskBoundTolerance[2]),np.any(streamlines[iStreamline][:,1]<maskBoundTolerance[3])), \
+                                                 np.logical_and(np.any(streamlines[iStreamline][:,2]>maskBoundTolerance[4]),np.any(streamlines[iStreamline][:,2]<maskBoundTolerance[5]))
+                                                ])
+   
+    return criteriaVec.astype(int)
