@@ -514,6 +514,8 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
     from dipy.core.geometry import dist_to_corner
     import dipy.tracking.utils as ut
     import nilearn as nil
+    import nibabel as nib
+    from nilearn import masking 
     
     #perform some input checks
     validOperations=["any","all","either_end","both_end"]
@@ -537,12 +539,12 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
     tractMask=pointCloudToMask(np.concatenate(streamlines),maskNifti)
     
     #take the intersection of the two
-    tractMasROIIntersection=nil.masking.intersect_masks([tractMask,maskNifti], threshold=1, connected=False)
+    tractMaskROIIntersection=masking.intersect_masks([tractMask,maskNifti], threshold=1, connected=False)
     #ideally we are reducing the number of points that teach node needs to be compared to
     #for example, a 256x 256 planar ROI would result in 65536 coords, intersecting with a full brain tractogram reduces this by about 1/3
     
     #find the streamlines that are within the bounding box of the maskROI
-    boundedStreamsBool=subsetStreamsByROIboundingBox(streamlines, tractMasROIIntersection)
+    boundedStreamsBool=subsetStreamsByROIboundingBox(streamlines, tractMaskROIIntersection)
     
     #subset them
     boundedStreamSubset=streamlines[np.where(boundedStreamsBool)[0]]
@@ -558,19 +560,49 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
     # we're assuming that this is the floor of the sensitivity of the source data
     # and so it would be "making up data" to specify a point cloud spacing kernel
     # smaller than this
-    densityKernel=np.asarray(tractMasROIIntersection.header.get_zooms())
+    densityKernel=np.asarray(tractMaskROIIntersection.header.get_zooms())
     
-    roiPointCloud=seeds_from_mask(tractMasROIIntersection.get_fdata(), tractMasROIIntersection.affine, density=densityKernel)
+    roiPointCloud=seeds_from_mask(tractMaskROIIntersection.get_fdata(), tractMaskROIIntersection.affine, density=densityKernel)
     
     # https://github.com/dipy/dipy/blob/558adb604865877e1835cd03433f71cb6d851d21/dipy/tracking/streamline.py#L302
     # This calculates the maximal distance to a corner of the voxel:
     dtc = dist_to_corner(maskNifti.affine)
     #going to use this calculation to impose tolerance.  Can't see why users would need to specify this
     
-    #still takes a while, don't know how to speed it up, maybe multithread it?
+    #we can use the mask bounds to subset the nodes in each streamline which warrant consideration.
+    #this nets an even more signifigant speed-up per streamline, and is possible because our output is bool rather than streamline
+    maskBounds=nib.affines.apply_affine(maskNifti.affine,returnMaskBoundingBoxVoxelIndexes(maskNifti))
+    #due to how this output is structured, vertex 0 and vertex 8 are always opposing
+    maskBoundTolerance=[np.min(maskBounds[[1,7],0])-dtc,np.max(maskBounds[[1,7],0])+dtc,np.min(maskBounds[[1,7],1])-dtc,np.max(maskBounds[[1,7],1])+dtc,np.min(maskBounds[[1,7],2])-dtc,np.max(maskBounds[[1,7],2])+dtc]
+    
+
     criteriaVec=np.zeros(len(boundedStreamSubset)).astype(int)
     for iStreamline in range(len(boundedStreamSubset)):
-        criteriaVec[iStreamline] = ut.streamline_near_roi(boundedStreamSubset[iStreamline], roiPointCloud, tol=dtc, mode=operationSpec)
+        
+        #Here's where
+        #we can use the mask bounds to subset the nodes in each streamline which warrant consideration.
+        #this nets an even more signifigant speed-up per streamline, and is possible because our output is bool rather than streamline
+        #Why?
+        #because the distance computation is (1) an all to all computation and
+        # (2) because it involves a multi-step euclidian distance computation for each of those
+        #obtain current streamline
+        curStreamline=boundedStreamSubset[iStreamline]
+        #create a boolean array for each boundary indicating criteria satisfaction for each node
+        curBoundsBoolArray=np.vstack((curStreamline[:,0]>maskBoundTolerance[0], \
+                                      curStreamline[:,0]<maskBoundTolerance[1], \
+                                      curStreamline[:,1]>maskBoundTolerance[2], \
+                                      curStreamline[:,1]<maskBoundTolerance[3], \
+                                      curStreamline[:,2]>maskBoundTolerance[4], \
+                                      curStreamline[:,2]<maskBoundTolerance[5])).T                                 
+        #extract current nodes which satisfy the boundary criteria                              
+        curNodes=curStreamline[np.all(curBoundsBoolArray,axis=1),:]
+        
+        #if there are nodes for this streamline within the bounding box
+        if curNodes.size>0:
+            criteriaVec[iStreamline] = ut.streamline_near_roi(curNodes, roiPointCloud, tol=dtc, mode=operationSpec)
+        #otherwise, if there are no nodes within the bounding box, you don't need to do the computation, you know that none of them will satisfy the criteria
+        else:
+            criteriaVec[iStreamline]=0
     
     #if the input instruction is NOT, negate the output
     if ~includeBool:
@@ -795,4 +827,65 @@ def removeStreamlineOutliersAtNeck(streamlines,cutStDev):
     
     #finish later, maybe not necessary
     
-    streamlinesCleaned=streamlines[curNearDistsFromAvg.flatten()>computedMean+cutStDev*computedStDev]
+    streamlinesCleaned=streamlines[curNearDistsFromAvg.flatten()<computedMean+cutStDev*computedStDev]
+    
+    return streamlinesCleaned
+
+def streamlineNeckClusterMatrix(streamlines,quickBundlesThresh,avgDistThresh):
+    
+    centroidNodesNum=35
+    # Streamlines will be resampled to 24 points on the fly.
+    feature = ResampleFeature(nb_points=35)
+    #?
+    metric = AveragePointwiseEuclideanMetric(feature=feature)  # a.k.a. MDF
+    #threshold set very high to return 1 bundle
+    qb = QuickBundles(threshold=10., metric=metric)
+    #obtain a single cluser on the input streamlines
+    clusters = qb.cluster(tractogram.streamlines)
+    
+def shiftBundleAssignment(clusters,targetCluster,streamIndexesToMove):
+    #shiftBundleAssignment(clusters,targetCluster,streamIndexesToMove)
+    #
+    # This function is, in essence, a workaround for quickbundles, which has a method
+    # for assigning streamlines to a cluster, but doesn't also take the additional
+    # step of removing those streamlines from existing clusters.
+    # https://github.com/dipy/dipy/blob/ed71831f6a9e048961b00af10f1f381e2da63efe/dipy/segment/clustering.py#L103
+    #
+    # clusters: the clusters object output from qb.cluster
+    #
+    # targetCluster: the index of the cluster that we will be adding stream indexes to
+    #
+    # streamIndexesToMove: the indexes that we will be adding to the targetCluster and removing from all other clusters
+    from dipy.segment.clustering import QuickBundles
+    import numpy as np
+    
+    indexesRecord=np.astype([])
+    
+    #lets begin by removing the indexes from all clusters
+    for iClusters in range(len(clusters)):
+        #if any of the to remove indexes are in the current cluster
+        if np.any(np.isin(clusters[iClusters].indices ,streamIndexesToMove)):
+            #extract the current cluster indexes
+            currIndexes=clusters[iClusters].indices
+            #add to the record
+            indexesRecord=np.hstack((currIndexes,indexesRecord)).astype(int)
+            currToRemoveIndexes=np.where(np.isin(clusters[iClusters].indices ,streamIndexesToMove))[0]
+            fixedIndexes=np.delete(currIndexes,currToRemoveIndexes)
+            clusters[iClusters].indices=fixedIndexes
+            #is this necessary?
+            clusters[iClusters].update()
+            
+    #now perform a check to ensure that the request was sensible
+    #ugly way to program this check
+    #if there are any indexes that you requested to move that ARE NOT in any of the associated clusters
+    if len(np.where(np.logical_not(np.isin(streamIndexesToMove,indexesRecord)))[0])>0:
+        #throw an error, because something probably went wrong with your request
+        #probably not formatted correctly to begin with, and will throw an error while throwing an error.  Dog.
+     raise Exception("shiftBundleAssignment Error: requested indexes" + str(streamIndexesToMove[np.where(np.logical_not(np.isin(streamIndexesToMove,indexesRecord)))[0]]) +  " not found in any cluster.  Malformed request, possible track/tractome-cluster mismatch.")
+     
+    #indexes removed and request viability confirmed, now add requested streams to relevant cluster
+    #luckily we have a built-in method for this
+    #except I cant figure out how to get it to work so, brute force
+    
+    clusters[targetCluster].indices.assign(streamIndexesToMove)
+    
