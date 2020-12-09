@@ -723,6 +723,11 @@ def findTractNeckNode(streamlines):
     from scipy.spatial.distance import cdist
     import numpy as np
     
+    #throw warning for singleton input
+    if len(streamlines)==1:
+        import warnings
+        warnings.warn("WMA.findTractNeckNode WARNING: singleton streamline input detected.")  
+    
     #arbitrarily set the number of nodes to sample the centroid at.  Possible parameter input
     centroidNodesNum=35
     # Streamlines will be resampled to 24 points on the fly.
@@ -831,17 +836,6 @@ def removeStreamlineOutliersAtNeck(streamlines,cutStDev):
     
     return streamlinesCleaned
 
-def streamlineNeckClusterMatrix(streamlines,quickBundlesThresh,avgDistThresh):
-    
-    centroidNodesNum=35
-    # Streamlines will be resampled to 24 points on the fly.
-    feature = ResampleFeature(nb_points=35)
-    #?
-    metric = AveragePointwiseEuclideanMetric(feature=feature)  # a.k.a. MDF
-    #threshold set very high to return 1 bundle
-    qb = QuickBundles(threshold=10., metric=metric)
-    #obtain a single cluser on the input streamlines
-    clusters = qb.cluster(tractogram.streamlines)
     
 def shiftBundleAssignment(clusters,targetCluster,streamIndexesToMove):
     #shiftBundleAssignment(clusters,targetCluster,streamIndexesToMove)
@@ -859,33 +853,157 @@ def shiftBundleAssignment(clusters,targetCluster,streamIndexesToMove):
     from dipy.segment.clustering import QuickBundles
     import numpy as np
     
-    indexesRecord=np.astype([])
+    indexesRecord=[]
     
     #lets begin by removing the indexes from all clusters
     for iClusters in range(len(clusters)):
         #if any of the to remove indexes are in the current cluster
-        if np.any(np.isin(clusters[iClusters].indices ,streamIndexesToMove)):
+        if np.any(np.isin(streamIndexesToMove,clusters.clusters[iClusters].indices)):
             #extract the current cluster indexes
-            currIndexes=clusters[iClusters].indices
+            currIndexes=clusters.clusters[iClusters].indices
+            
             #add to the record
-            indexesRecord=np.hstack((currIndexes,indexesRecord)).astype(int)
-            currToRemoveIndexes=np.where(np.isin(clusters[iClusters].indices ,streamIndexesToMove))[0]
+            indexesRecord.append(currIndexes)
+            currToRemoveIndexes=np.where(np.isin(clusters.clusters[iClusters].indices ,streamIndexesToMove))[0]
             fixedIndexes=np.delete(currIndexes,currToRemoveIndexes)
-            clusters[iClusters].indices=fixedIndexes
+            clusters.clusters[iClusters].indices=fixedIndexes
             #is this necessary?
-            clusters[iClusters].update()
+            clusters.clusters[iClusters].update()
             
     #now perform a check to ensure that the request was sensible
     #ugly way to program this check
     #if there are any indexes that you requested to move that ARE NOT in any of the associated clusters
-    if len(np.where(np.logical_not(np.isin(streamIndexesToMove,indexesRecord)))[0])>0:
+    flattenIndexes = lambda t: [item for sublist in t for item in sublist]
+    if len(np.where(np.logical_not(np.isin(streamIndexesToMove,np.asarray(flattenIndexes(indexesRecord)))))[0])>0:
         #throw an error, because something probably went wrong with your request
         #probably not formatted correctly to begin with, and will throw an error while throwing an error.  Dog.
      raise Exception("shiftBundleAssignment Error: requested indexes" + str(streamIndexesToMove[np.where(np.logical_not(np.isin(streamIndexesToMove,indexesRecord)))[0]]) +  " not found in any cluster.  Malformed request, possible track/tractome-cluster mismatch.")
      
     #indexes removed and request viability confirmed, now add requested streams to relevant cluster
     #luckily we have a built-in method for this
+    #clusters.clusters[targetCluster].asign(streamIndexesToMove)
+    
     #except I cant figure out how to get it to work so, brute force
     
-    clusters[targetCluster].indices.assign(streamIndexesToMove)
+    clusters.clusters[targetCluster].indices=np.union1d(clusters[targetCluster].indices,streamIndexesToMove)
+    clusters.clusters[targetCluster].update()
     
+    #fixed?
+    return clusters
+
+def neckmentation(streamlines):
+    #neckmentation(streamlines)
+    #
+    # a neck-based segmentation using findTractNeckNode and quickbundles
+    #
+    # INPUTS
+    #
+    # -streamlines: an input tractome to be segmented
+    #
+    
+    import numpy as np
+    from scipy.spatial.distance import cdist
+    import itertools
+    
+    #set tolerance for how far apart bundles can be to be merged
+    #initial investigations indicate that mean distance from centroid is ~ 3, so given that this is on both sides,
+    #we should half it to ensure that they are close to one another
+    #we'll start with 2, just to be generous
+    distanceThresh=3
+    
+    
+    #import dipy and perform quickBundles
+    from dipy.segment.clustering import QuickBundles
+    from dipy.segment.metric import ResampleFeature
+    from dipy.segment.metric import AveragePointwiseEuclideanMetric
+    centroidNodesNum=35
+    # Streamlines will be resampled to 24 points on the fly.
+    feature = ResampleFeature(nb_points=centroidNodesNum)
+    #?
+    metric = AveragePointwiseEuclideanMetric(feature=feature)  # a.k.a. MDF
+    #threshold set very high to return 1 bundle
+    qb = QuickBundles(threshold=10., metric=metric)
+    #get the centroid clusters or clusters, dont know which this is
+    clusters = qb.cluster(streamlines)
+    
+    #create a blank vector for the neck node coordinates
+  
+    
+def mergeBundlesViaNeck(streamlines,clusters,distanceThresh):
+    #mergeBundlesViaNeck(clusters,distanceThresh):
+    #
+    #merges bundles based on how close the necks of the bundles are
+    #
+    # -streamlines: an input tractome to be segmented
+    #
+    # -clusters:  a clusters object, an output from qb.cluster
+    #
+    # distanceThresh the threshold between neck centroids that is accepted for merging
+    
+    import numpy as np
+    from scipy.spatial.distance import cdist
+    import itertools
+    
+    
+    from dipy.segment.clustering import QuickBundles
+    from dipy.segment.metric import ResampleFeature
+    from dipy.segment.metric import AveragePointwiseEuclideanMetric
+    
+    neckNodes=np.zeros((len(clusters),3))
+    for iClusters in range(len(clusters)):
+        print(iClusters)
+        currentBundle=streamlines[clusters.clusters[iClusters].indices]
+        if len (currentBundle)>1:
+            currentNeckIndexes=findTractNeckNode(currentBundle)
+            currentNeckNodes=np.zeros((len(currentNeckIndexes),3))
+        
+            for iStreams in range(len(currentBundle)):
+                currentNeckNodes[iStreams,:]=currentBundle[iStreams][currentNeckIndexes[iStreams]]
+        
+            
+            #if it's a singleton streamline, just guess the midpoint?
+        else:
+            currentNeckNodes=np.zeros((1,3))
+            currentNeckNodes[0,:]=currentBundle[0][np.floor(currentBundle[0].shape[0]/2).astype(int),:]
+        neckNodes[iClusters,:]=np.mean(currentNeckNodes,axis=0)
+        currentNeckNodes=[]
+        
+    #now do the distance computation
+    neckNodeDistanceArray=cdist(neckNodes,neckNodes,metric='euclidean')
+    withinThreshNecks=np.asarray(np.where(neckNodeDistanceArray<distanceThresh))        
+    withinThreshNecksNotIdent=withinThreshNecks[:,np.where(~np.equal(withinThreshNecks[0,:],withinThreshNecks[1,:]))[0]]    
+    possibleMerges=list([])    
+    for iMerges in range(withinThreshNecksNotIdent.shape[1]):
+        currentCandidates=withinThreshNecksNotIdent[:,iMerges]
+        clusterOneInstances=np.asarray(np.where(withinThreshNecksNotIdent==currentCandidates[0]))[1,:]
+        clusterTwoInstances=np.asarray(np.where(withinThreshNecksNotIdent==currentCandidates[1]))[1,:]
+        
+        withinThreshIndexesToCheck=np.union1d(clusterOneInstances,clusterTwoInstances)
+        
+        currentCentroidIndexes=np.unique(withinThreshNecksNotIdent[:,withinThreshIndexesToCheck])
+        
+        newCentroidsArray=np.vstack((neckNodes[currentCentroidIndexes,:],np.mean(neckNodes[currentCentroidIndexes,:],axis=0)))
+        
+        curDistArray=cdist(newCentroidsArray,newCentroidsArray,metric='euclidean')
+        
+        #its within the bounds
+        if np.max(curDistArray[:,-1])<np.max(curDistArray[:,-2]):
+            possibleMerges.append(currentCentroidIndexes)
+        else:
+            possibleMerges.append(currentCandidates)
+            
+    possibleMerges.sort(key=len)     
+    possibleMerges.reverse()
+    
+    mergedBundles=[]
+    for iMerges in range(len(possibleMerges)):
+        print(iMerges)
+        currentCandidates=possibleMerges[0]
+        remainToMerge=np.setdiff1d(currentCandidates,mergedBundles)
+        if len(remainToMerge)>1:
+            for iBundles in range(1,len(remainToMerge)):
+                clusters=shiftBundleAssignment(clusters,currentCandidates[0],clusters.clusters[iBundles].indices)  
+        #otherwise
+        #do nothing, there is no bundle to merge
+    return
+        
