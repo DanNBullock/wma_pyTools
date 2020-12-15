@@ -363,55 +363,88 @@ def findMaxMinPlaneBound(inputPlanarROI):
     import numpy as np
     import pandas as pd
     import nibabel as nib
-
+    from dipy.tracking.utils import seeds_from_mask
     
-    inputPlanarROIData=inputPlanarROI.get_data()
+    #specify a kernel for the point cloud
+    densityKernel=np.asarray(inputPlanarROI.header.get_zooms())
     
-    planeCoords=np.asarray(np.where(inputPlanarROIData!=0))
+    planeCoords=seeds_from_mask(inputPlanarROI.get_fdata(), inputPlanarROI.affine, density=densityKernel)
+    
+    #planeCoords=np.asarray(np.where(inputPlanarROIData!=0))
     #python indexing?
-    findSingletonDimension=np.where(np.equal([len(np.unique(planeCoords[0,:])),len(np.unique(planeCoords[1,:])),len(np.unique(planeCoords[2,:]))],1))[0]
+    findSingletonDimension=np.where(np.equal([len(np.unique(planeCoords[:,0])),len(np.unique(planeCoords[:,1])),len(np.unique(planeCoords[:,2]))],1))[0]
   
-    singletonCoord=planeCoords[findSingletonDimension,0]
+    singletonCoord=planeCoords[0,findSingletonDimension]
     
-    centerPoint=nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[0,0,0])
+    centerPointImg=nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[0,0,0])
+    
+    samplePlaneCoordSubj=[0,0,0]
+    samplePlaneCoordSubj[findSingletonDimension[0]]=singletonCoord[0]
+    samplePlaneCoordImg=nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),samplePlaneCoordSubj)
+    
+    relativeImgPosition=samplePlaneCoordImg-centerPointImg
+    
+    #we need to translate the axes in case the affine is weird, and it often is
+    superiorPointTest=centerPointImg-nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[0,0,10])
+    leftPointTest=centerPointImg-nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[-10,0,0])
+    anteriorPointTest=centerPointImg-nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[0,10,0])
+    
+    #use abs because sometimes there are flips and such.
+    xDimIndex=np.where(np.abs(leftPointTest)==np.max(np.abs(leftPointTest)))[0]
+    yDimIndex=np.where(np.abs(anteriorPointTest)==np.max(np.abs(anteriorPointTest)))[0]
+    zDimIndex=np.where(np.abs(superiorPointTest)==np.max(np.abs(superiorPointTest)))[0]
+    
     
     #NOTE: we're establishing all of these even if they aren't sensible
 
-    superiorBound = inputPlanarROI.shape[2]
+    superiorBound = inputPlanarROI.shape[zDimIndex[0]]
     inferiorBound = 0
-    medialBound=   np.floor(centerPoint[0])
-    #now do a check for lateral bound
-    if centerPoint[0] < singletonCoord:
-        lateralBound=inputPlanarROI.shape[0]
-    elif centerPoint[0] > singletonCoord:
-        lateralBound=0
+    medialBound=   np.floor(centerPointImg[xDimIndex[0]])
+    #now do a check for lateral bound for a planar roi?  Only matters in case of plane in x dimension, and if x is a particular side
     
-    anteriorBound= inputPlanarROI.shape[1]
+    #if the singleton dimension is x and the plane is closer to the max end of the array
+    if np.logical_and(findSingletonDimension[0] == 0, relativeImgPosition[xDimIndex[0]]<0):
+        lateralBound=inputPlanarROI.shape[xDimIndex[0]]
+        #if the singleton dimension is x and the plane is closer to the min end of the array, the lateral bound is zero
+    elif np.logical_and(findSingletonDimension[0] == 0, relativeImgPosition[xDimIndex[0]]>0):
+        lateralBound=0
+        #if the plane of interest isnt an x plane, then the medial/lateral bound thing doesn't make sense, but we'll output the max val anyways
+    elif ~findSingletonDimension[0] == 0:
+        lateralBound=inputPlanarROI.shape[xDimIndex[0]]
+        
+    anteriorBound= inputPlanarROI.shape[yDimIndex[0]]
     posteriorBound = 0
-    rostralBound= inputPlanarROI.shape[1]
+    rostralBound= inputPlanarROI.shape[yDimIndex[0]]
     caudalBound= 0
     #matbe find a way to detect this from the header info or affine
     #leftTest, theoretically negative is always left with RAS
-    leftPoint=nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[-10,0,0])
-    if centerPoint[0]<leftPoint[0]:
-        leftBound=inputPlanarROI.shape[0]
+    
+
+    if leftPointTest[xDimIndex[0]]>0:
+        leftBound=inputPlanarROI.shape[xDimIndex[0]]
         rightBound=0
-    elif centerPoint[0]>leftPoint[0]:
+    elif leftPointTest[xDimIndex[0]]<0:
         leftBound=0
-        rightBound=inputPlanarROI.shape[0]
+        rightBound=inputPlanarROI.shape[xDimIndex[0]]
 
     #conditional assignment of validStrings and boundVals
+    #these dimensional inferences are sound
+    
+    #allbounds=['posterior','anterior','caudal','rostral','medial','lateral','left', 'right','inferior','superior']
+    #also all bounds= [posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
     if findSingletonDimension==0:
-        validStrings=['medial','lateral','left', 'right']
-        boundVals=[medialBound,lateralBound,leftBound,rightBound]
+        borderStrings=['posterior','anterior','caudal','rostral', 'inferior','superior']
+        boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound, inferiorBound,superiorBound]
     elif findSingletonDimension==1:
-        validStrings=['posterior','anterior','caudal','rostral']
-        boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound]
+        borderStrings=['medial','lateral','left', 'right','inferior','superior']
+        boundVals=[medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
     elif findSingletonDimension==2:
-         validStrings=['inferior','superior']
-         boundVals=[inferiorBound,superiorBound]
+         borderStrings=['posterior','anterior','caudal','rostral','medial','lateral','left', 'right']
+         boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound]
          
-    labelColumn=['exactDim'+str(findSingletonDimension[0])]+validStrings
+    letterDims=list(['x','y','z'])
+
+    labelColumn=['exactDim_'+letterDims[findSingletonDimension[0]]]+borderStrings
     valueColumn=np.concatenate((singletonCoord,np.asarray(boundVals)))
     #fill the out data structure
     boundsTable=pd.DataFrame(np.array([labelColumn, valueColumn]).T,
