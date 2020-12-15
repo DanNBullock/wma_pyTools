@@ -385,7 +385,7 @@ def findMaxMinPlaneBound(inputPlanarROI):
     elif centerPoint[0] > singletonCoord:
         lateralBound=0
     
-    anteriorBound= inputPlanarROI.she[1]
+    anteriorBound= inputPlanarROI.shape[1]
     posteriorBound = 0
     rostralBound= inputPlanarROI.shape[1]
     caudalBound= 0
