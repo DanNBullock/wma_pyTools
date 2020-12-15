@@ -329,7 +329,7 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
         #allbounds=['posterior','anterior','caudal','rostral','medial','lateral','left', 'right','inferior','superior']
     
     #find the boundary that we will be filling to
-    fillBound=int(boundsTable['boundValue'].loc[boundsTable['boundLabel']==relativePosition].to_numpy()[0])
+    fillBound=int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==relativePosition].to_numpy()[0]))
     sortedBounds=np.sort((fillBound,int(boundsTable['boundValue'].loc[0])))
     #get the dimension indicator
     dimIndicator=int(boundsTable['boundLabel'].loc[0][-1])
