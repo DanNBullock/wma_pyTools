@@ -321,6 +321,7 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     boundsTable=findMaxMinPlaneBound(inputPlanarROI)
 
     if boundsTable['boundLabel'].str.contains(relativePosition).any():
+        print(boundsTable)
         raise Exception("sliceROIwithPlane Error: plane-term mismatch detected.  Input relativePosition term uninterpretable relative to inputPlanarROI.")
     
     #find the boundary that we will be filling to
