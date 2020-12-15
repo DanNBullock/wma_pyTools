@@ -320,9 +320,13 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     #find bounds for current planar ROI    
     boundsTable=findMaxMinPlaneBound(inputPlanarROI)
 
-    if boundsTable['boundLabel'].str.contains(relativePosition).any():
-        print(boundsTable)
-        raise Exception("sliceROIwithPlane Error: plane-term mismatch detected.  Input relativePosition term uninterpretable relative to inputPlanarROI.")
+    #fix exception error for bad calls later
+    #if boundsTable['boundLabel'].str.contains(relativePosition).any():
+    #    print(boundsTable)
+    #    raise Exception("sliceROIwithPlane Error: plane-term mismatch detected.  Input relativePosition term uninterpretable relative to inputPlanarROI.")
+    
+    #a hacky way to find the boundary in the relevant dimension
+        #allbounds=['posterior','anterior','caudal','rostral','medial','lateral','left', 'right','inferior','superior']
     
     #find the boundary that we will be filling to
     fillBound=int(boundsTable['boundValue'].loc[boundsTable['boundLabel']==relativePosition].to_numpy()[0])
@@ -396,9 +400,18 @@ def findMaxMinPlaneBound(inputPlanarROI):
     
     
     #NOTE: we're establishing all of these even if they aren't sensible
+    #conversion of logic for bad affines
+    #superiorBound = inputPlanarROI.shape[zDimIndex[0]]
+    #inferiorBound = 0
+    
+    #casing for flipped axes
+    if superiorPointTest[zDimIndex[0]]<0:
+       superiorBound = inputPlanarROI.shape[zDimIndex[0]]
+       inferiorBound = 0
+    elif superiorPointTest[zDimIndex[0]]>0:
+       superiorBound = 0
+       inferiorBound = inputPlanarROI.shape[zDimIndex[0]]
 
-    superiorBound = inputPlanarROI.shape[zDimIndex[0]]
-    inferiorBound = 0
     medialBound=   np.floor(centerPointImg[xDimIndex[0]])
     #now do a check for lateral bound for a planar roi?  Only matters in case of plane in x dimension, and if x is a particular side
     
@@ -412,14 +425,6 @@ def findMaxMinPlaneBound(inputPlanarROI):
     elif np.logical_not(findSingletonDimension[0] == 0):
         lateralBound=inputPlanarROI.shape[xDimIndex[0]]
         
-    anteriorBound= inputPlanarROI.shape[yDimIndex[0]]
-    posteriorBound = 0
-    rostralBound= inputPlanarROI.shape[yDimIndex[0]]
-    caudalBound= 0
-    #matbe find a way to detect this from the header info or affine
-    #leftTest, theoretically negative is always left with RAS
-    
-
     if leftPointTest[xDimIndex[0]]>0:
         leftBound=inputPlanarROI.shape[xDimIndex[0]]
         rightBound=0
@@ -427,21 +432,28 @@ def findMaxMinPlaneBound(inputPlanarROI):
         leftBound=0
         rightBound=inputPlanarROI.shape[xDimIndex[0]]
 
+    
+       #casing for flipped axes
+    if anteriorPointTest[yDimIndex[0]]<0:
+       anteriorBound= inputPlanarROI.shape[yDimIndex[0]]
+       posteriorBound = 0
+       rostralBound= inputPlanarROI.shape[yDimIndex[0]]
+       caudalBound= 0
+    elif anteriorPointTest[yDimIndex[0]]>0:
+       anteriorBound= 0
+       posteriorBound = inputPlanarROI.shape[yDimIndex[0]]
+       rostralBound= 0
+       caudalBound= inputPlanarROI.shape[yDimIndex[0]]
+
     #conditional assignment of validStrings and boundVals
     #these dimensional inferences are sound
     
     #allbounds=['posterior','anterior','caudal','rostral','medial','lateral','left', 'right','inferior','superior']
     #also all bounds= [posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
-    if findSingletonDimension==0:
-        borderStrings=['posterior','anterior','caudal','rostral', 'inferior','superior']
-        boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound, inferiorBound,superiorBound]
-    elif findSingletonDimension==1:
-        borderStrings=['medial','lateral','left', 'right','inferior','superior']
-        boundVals=[medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
-    elif findSingletonDimension==2:
-         borderStrings=['posterior','anterior','caudal','rostral','medial','lateral','left', 'right']
-         boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound]
-         
+
+    borderStrings=['posterior','anterior','caudal','rostral', 'medial','lateral','left', 'right','inferior','superior']
+    boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
+
     letterDims=list(['x','y','z'])
 
     labelColumn=['exactDim_'+letterDims[findSingletonDimension[0]]]+borderStrings
