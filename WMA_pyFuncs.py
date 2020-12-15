@@ -306,6 +306,7 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     import nibabel as nib
     import numpy as np
     import nilearn as nil
+    from nilearn.masking import intersect_masks
     
     #get the data
     inputROINiftiData=inputROINifti.get_data()
@@ -325,14 +326,12 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     #    print(boundsTable)
     #    raise Exception("sliceROIwithPlane Error: plane-term mismatch detected.  Input relativePosition term uninterpretable relative to inputPlanarROI.")
     
-    #a hacky way to find the boundary in the relevant dimension
-        #allbounds=['posterior','anterior','caudal','rostral','medial','lateral','left', 'right','inferior','superior']
-    
+
     #find the boundary that we will be filling to
     fillBound=int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==relativePosition].to_numpy()[0]))
     sortedBounds=np.sort((fillBound,int(float(boundsTable['boundValue'].loc[0]))))
     #get the dimension indicator
-    dimIndicator=int(float(boundsTable['boundLabel'].loc[0][-1]))
+    dimIndicator=int(float(boundsTable['dimIndex'].loc[0]))
     #create blank output structure    
     sliceKeepData=np.zeros(inputPlanarROIData.shape)  
     
@@ -349,7 +348,7 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     
     #intersect the ROIs to return the remaining portion
     #will cause a problem if Niftis have different affines.
-    remainingROI=nil.masking.intersect_masks([sliceKeepNifti,inputROINifti], threshold=1, connected=False)
+    remainingROI=intersect_masks([sliceKeepNifti,inputROINifti], threshold=1, connected=False)
     #consider throwing an error here if the output Nifti is empty
     
     return remainingROI
@@ -453,14 +452,14 @@ def findMaxMinPlaneBound(inputPlanarROI):
 
     borderStrings=['posterior','anterior','caudal','rostral', 'medial','lateral','left', 'right','inferior','superior']
     boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
-
-    letterDims=list(['x','y','z'])
-
-    labelColumn=['exactDim_'+letterDims[findSingletonDimension[0]]]+borderStrings
-    valueColumn=np.concatenate((singletonCoord,np.asarray(boundVals)))
+    
+    dimIndexColumn=[findSingletonDimension[0],yDimIndex[0],yDimIndex[0],yDimIndex[0],yDimIndex[0],xDimIndex[0],xDimIndex[0],xDimIndex[0],xDimIndex[0],zDimIndex[0],zDimIndex[0]]
+    
+    labelColumn=['exactDim_'+str(findSingletonDimension[0])]+borderStrings
+    valueColumn=np.concatenate((samplePlaneCoordImg[findSingletonDimension],np.asarray(boundVals)))
     #fill the out data structure
-    boundsTable=pd.DataFrame(np.array([labelColumn, valueColumn]).T,
-                              columns=['boundLabel', 'boundValue'])
+    boundsTable=pd.DataFrame(np.array([labelColumn, valueColumn,dimIndexColumn]).T,
+                              columns=['boundLabel', 'boundValue','dimIndex'])
     return boundsTable
     
 def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
