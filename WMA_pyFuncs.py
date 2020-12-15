@@ -409,7 +409,7 @@ def findMaxMinPlaneBound(inputPlanarROI):
     elif np.logical_and(findSingletonDimension[0] == 0, relativeImgPosition[xDimIndex[0]]>0):
         lateralBound=0
         #if the plane of interest isnt an x plane, then the medial/lateral bound thing doesn't make sense, but we'll output the max val anyways
-    elif ~findSingletonDimension[0] == 0:
+    elif np.logical_not(findSingletonDimension[0] == 0):
         lateralBound=inputPlanarROI.shape[xDimIndex[0]]
         
     anteriorBound= inputPlanarROI.shape[yDimIndex[0]]
