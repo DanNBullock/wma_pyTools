@@ -119,7 +119,7 @@ def returnMaskBoundingBoxVoxelIndexes(maskNifti):
     #get the data
     maskData = maskNifti.get_data()
     #check to make sure its a mask
-    if len(np.unique(maskData))!=2:
+    if len(np.unique(maskData))> 2:
       raise Exception("returnMaskBoundingBoxVoxelIndexes Error: Non mask input detected.  " + str(len(np.unique(maskData))) + " unique values detected in input NIfTI structure.")
     
     #find the indexes of the nonzero entries
@@ -909,22 +909,29 @@ def neckmentation(streamlines):
     #initial investigations indicate that mean distance from centroid is ~ 3, so given that this is on both sides,
     #we should half it to ensure that they are close to one another
     #we'll start with 2, just to be generous
-    distanceThresh=3
+    distanceThresh=2
     
     
     #import dipy and perform quickBundles
     from dipy.segment.clustering import QuickBundles
     from dipy.segment.metric import ResampleFeature
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
-    centroidNodesNum=35
+    centroidNodesNum=100
     # Streamlines will be resampled to 24 points on the fly.
     feature = ResampleFeature(nb_points=centroidNodesNum)
     #?
     metric = AveragePointwiseEuclideanMetric(feature=feature)  # a.k.a. MDF
     #threshold set very high to return 1 bundle
-    qb = QuickBundles(threshold=10., metric=metric)
+    qb = QuickBundles(threshold=5., metric=metric)
     #get the centroid clusters or clusters, dont know which this is
     clusters = qb.cluster(streamlines)
+    
+    #do it twice
+    clusters=mergeBundlesViaNeck(streamlines,clusters,distanceThresh)
+    
+    clusters=mergeBundlesViaNeck(streamlines,clusters,distanceThresh)
+    
+    return clusters
     
     #create a blank vector for the neck node coordinates
   
@@ -971,7 +978,19 @@ def mergeBundlesViaNeck(streamlines,clusters,distanceThresh):
     #now do the distance computation
     neckNodeDistanceArray=cdist(neckNodes,neckNodes,metric='euclidean')
     withinThreshNecks=np.asarray(np.where(neckNodeDistanceArray<distanceThresh))        
-    withinThreshNecksNotIdent=withinThreshNecks[:,np.where(~np.equal(withinThreshNecks[0,:],withinThreshNecks[1,:]))[0]]    
+    withinThreshNecksNotIdent=withinThreshNecks[:,np.where(~np.equal(withinThreshNecks[0,:],withinThreshNecks[1,:]))[0]]
+    #perform a check to ensure that we do not waste time on singleton merge attempts
+    #now we need to find the clusters that are empty
+    streamCountVec=np.zeros(len(clusters))    
+    for iClusters in range(len(clusters)):
+        streamCountVec[iClusters]=len(clusters.clusters[iClusters].indices)
+    
+    singletonIndexes=np.where(streamCountVec==1)
+    np.where(np.all(~np.isin(withinThreshNecksNotIdent,singletonIndexes),axis=0))
+    
+    
+    
+    
     possibleMerges=list([])    
     for iMerges in range(withinThreshNecksNotIdent.shape[1]):
         currentCandidates=withinThreshNecksNotIdent[:,iMerges]
@@ -997,13 +1016,35 @@ def mergeBundlesViaNeck(streamlines,clusters,distanceThresh):
     
     mergedBundles=[]
     for iMerges in range(len(possibleMerges)):
-        print(iMerges)
-        currentCandidates=possibleMerges[0]
+        
+        currentCandidates=possibleMerges[iMerges]
         remainToMerge=np.setdiff1d(currentCandidates,mergedBundles)
         if len(remainToMerge)>1:
+            print(iMerges)
+            print(remainToMerge)
             for iBundles in range(1,len(remainToMerge)):
-                clusters=shiftBundleAssignment(clusters,currentCandidates[0],clusters.clusters[iBundles].indices)  
+                clusters=shiftBundleAssignment(clusters,currentCandidates[0],clusters.clusters[remainToMerge[iBundles]].indices)  
+            mergedBundles=np.append(mergedBundles,remainToMerge)
         #otherwise
         #do nothing, there is no bundle to merge
-    return
+    
+    #now we need to find the clusters that are empty
+    streamCountVec=np.zeros(len(clusters))    
+    for iClusters in range(len(clusters)):
+        streamCountVec[iClusters]=len(clusters.clusters[iClusters].indices)
+        
+    #now that we have those indicies we have to go through them IN REVERSE ORDER
+    #in order to remove them, because deleting them changes the index sequence for all subsequent clusters.
+    #there has to be a better implementation of this process, but this is where we are.
+    #clusters.remove_cluster DOESNT WORK, due to "only integer scalar arrays can be converted to a scalar index"
+    toDeleteClusters=np.where(streamCountVec==0)[0]
+
+    flippedToDelete=np.flip(toDeleteClusters)
+    #this is asinine, but I can't figure out another way to do it.
+    for iDeletes in range(len(flippedToDelete)):
+        currentToDelete=flippedToDelete[iDeletes]
+        currentCluster=clusters.clusters[currentToDelete]
+        clusters.remove_cluster(currentCluster)
+    
+    return clusters
         
