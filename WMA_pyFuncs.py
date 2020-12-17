@@ -223,22 +223,36 @@ def createSphere(r, p, reference):
     import nibabel as nib
     import numpy as np
     
+    #convert input coordinate to the relevant image space coordinate
+    imgCoord=np.floor(nib.affines.apply_affine(np.linalg.inv(reference.affine),p))
+    #borrowing orientation test from boundary function
+    centerPointImg=nib.affines.apply_affine(np.linalg.inv(reference.affine),[0,0,0])
+    #compute the offset between the desired sphere centroid and the image volume center
+    offset=np.floor(centerPointImg-imgCoord).astype(int)
+    
+    
     dims = reference.shape
+    #extract a data object that 
     m = [dims[0]/2, dims[1]/2, dims[2]/2]
+    
     x, y, z = np.ogrid[-m[0]:dims[0]-m[0],
                        -m[1]:dims[1]-m[1],
                        -m[2]:dims[2]-m[2]]
     mask_r = x*x + y*y + z*z <= r*r
+    
+    #use the offest to roll the output in the appropriate fashion.  Guarenteed to have unintended results near the volume border.
+    #first dim
+    mask_r=np.roll(mask_r,offset[0],axis=0)
+    #second dim
+    mask_r=np.roll(mask_r,offset[1],axis=1)
+    #third dim
+    mask_r=np.roll(mask_r,offset[2],axis=2)
 
     activation = np.zeros(dims)
     activation[mask_r] = 1
     #not sure of robustness to strange input affines, but seems to work
-    translation_affine = np.array([[1, 0, 0, p[0]-m[0]],
-                                   [0, 1, 0, p[1]-m[1]],
-                                   [0, 0, 1, p[2]-m[2]],
-                                   [0, 0, 0, 1]])
 
-    return nib.Nifti1Image(activation, affine=translation_affine)
+    return nib.Nifti1Image(activation, affine=reference.affine)
 
 def multiROIrequestToMask(atlas,roiNums):
     #multiROIrequestToMask(atlas,roiNums):
