@@ -217,36 +217,25 @@ def createSphere(r, p, reference):
     sphere)
     reference:  The reference nifti whose space the sphere will be in
     
-    Taken directly from nitools:
-    https://github.com/cosanlab/nltools/blob/91822a45778415ee2cdded7134e60bcde2bb7814/nltools/mask.py#L50    
+    
+    modified version of nltools sphere function which outputs the sphere ROI in the
+    coordinate space of the input reference
     """
     import nibabel as nib
     import numpy as np
-    
-    #convert input coordinate to the relevant image space coordinate
-    imgCoord=np.floor(nib.affines.apply_affine(np.linalg.inv(reference.affine),p))
-    #borrowing orientation test from boundary function
-    centerPointImg=nib.affines.apply_affine(np.linalg.inv(reference.affine),[0,0,0])
-    #compute the offset between the desired sphere centroid and the image volume center
-    offset=np.floor(centerPointImg-imgCoord).astype(int)
-    
-    
+
     dims = reference.shape
-    #extract a data object that 
-    m = [dims[0]/2, dims[1]/2, dims[2]/2]
     
-    x, y, z = np.ogrid[-m[0]:dims[0]-m[0],
-                       -m[1]:dims[1]-m[1],
-                       -m[2]:dims[2]-m[2]]
+    imgCoord=np.floor(nib.affines.apply_affine(np.linalg.inv(reference.affine),p))
+
+    dim1Vals= np.abs(np.arange(0, dims[0], reference.header.get_zooms()[0])-imgCoord[0])
+    dim2Vals= np.abs(np.arange(0, dims[1], reference.header.get_zooms()[1])-imgCoord[1])
+    dim3Vals= np.abs(np.arange(0, dims[2], reference.header.get_zooms()[2])-imgCoord[2])
+    #ogrid doesnt work?
+    x, y, z = np.meshgrid(np.floor(dim1Vals).astype(int), np.floor(dim2Vals).astype(int), np.floor(dim3Vals).astype(int))          
+    
+    #maybe this works?
     mask_r = x*x + y*y + z*z <= r*r
-    
-    #use the offest to roll the output in the appropriate fashion.  Guarenteed to have unintended results near the volume border.
-    #first dim
-    mask_r=np.roll(mask_r,offset[0],axis=0)
-    #second dim
-    mask_r=np.roll(mask_r,offset[1],axis=1)
-    #third dim
-    mask_r=np.roll(mask_r,offset[2],axis=2)
 
     activation = np.zeros(dims)
     activation[mask_r] = 1
