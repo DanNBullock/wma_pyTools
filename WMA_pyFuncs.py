@@ -209,6 +209,37 @@ def planeAtMaskBorder(inputMask,relativePosition):
     #return the planar roi you hvae created
     return outPlaneNifti
 
+def createSphere(r, p, reference):
+    """ create a sphere of given radius at some point p in the brain mask
+    Args:
+    r: radius of the sphere
+    p: point (in subject coordinates of the brain mask, i.e. not the image space) of the center of the
+    sphere)
+    reference:  The reference nifti whose space the sphere will be in
+    
+    Taken directly from nitools:
+    https://github.com/cosanlab/nltools/blob/91822a45778415ee2cdded7134e60bcde2bb7814/nltools/mask.py#L50    
+    """
+    import nibabel as nib
+    import numpy as np
+    
+    dims = reference.shape
+    m = [dims[0]/2, dims[1]/2, dims[2]/2]
+    x, y, z = np.ogrid[-m[0]:dims[0]-m[0],
+                       -m[1]:dims[1]-m[1],
+                       -m[2]:dims[2]-m[2]]
+    mask_r = x*x + y*y + z*z <= r*r
+
+    activation = np.zeros(dims)
+    activation[mask_r] = 1
+    #not sure of robustness to strange input affines, but seems to work
+    translation_affine = np.array([[1, 0, 0, p[0]-m[0]],
+                                   [0, 1, 0, p[1]-m[1]],
+                                   [0, 0, 1, p[2]-m[2]],
+                                   [0, 0, 0, 1]])
+
+    return nib.Nifti1Image(activation, affine=translation_affine)
+
 def multiROIrequestToMask(atlas,roiNums):
     #multiROIrequestToMask(atlas,roiNums):
     #creates a nifti structure mask for the input atlas image of the specified labels
@@ -1092,4 +1123,4 @@ def mergeBundlesViaNeck(streamlines,clusters,distanceThresh):
         clusters.remove_cluster(currentCluster)
     
     return clusters
-        
+
