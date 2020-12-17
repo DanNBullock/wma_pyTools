@@ -232,7 +232,7 @@ def createSphere(r, p, reference):
     dim2Vals= np.abs(np.arange(0, dims[1], reference.header.get_zooms()[1])-imgCoord[1])
     dim3Vals= np.abs(np.arange(0, dims[2], reference.header.get_zooms()[2])-imgCoord[2])
     #ogrid doesnt work?
-    x, y, z = np.meshgrid(np.floor(dim1Vals).astype(int), np.floor(dim2Vals).astype(int), np.floor(dim3Vals).astype(int))          
+    x, y, z = np.meshgrid(np.floor(dim1Vals).astype(int), np.floor(dim2Vals).astype(int), np.floor(dim3Vals).astype(int),indexing='ij')          
     
     #maybe this works?
     mask_r = x*x + y*y + z*z <= r*r
