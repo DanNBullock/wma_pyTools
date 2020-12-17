@@ -47,21 +47,26 @@ def makePlanarROI(referenceNifti, mmPlane, dimension):
         dimInt=2
         
     coord=[0,0,0]
+    cordPlus=[0,0,0]
+
     #set value in appropriate dimension
+    #but also find the adjacent coords
+    cordPlus[dimInt]=mmPlane+1
     coord[dimInt]=mmPlane
     
     #apply affine to specific coord
     #floor because of how voxel indexing works
-    convertedSlice=np.floor(nib.affines.apply_affine(referenceNifti.affine,coord)).astype(int)
-
+    convertedSlice=np.floor(nib.affines.apply_affine(np.linalg.inv(referenceNifti.affine),coord)).astype(int)
+    convertedPlusSlice=np.floor(nib.affines.apply_affine(np.linalg.inv(referenceNifti.affine),cordPlus)).astype(int)
+    diffDim=np.where(np.logical_not(convertedSlice==convertedPlusSlice))[0]
 
     #set all slice values to 1 to create planar ROI
-    if dimension=='x':
-        blankData[convertedSlice[dimInt],:,:]=1
-    if dimension=='y':
-        blankData[:,convertedSlice[dimInt],:]=1
-    if dimension=='z':
-        blankData[:,:,convertedSlice[dimInt]]=1
+    if diffDim==0:
+        blankData[convertedSlice[diffDim],:,:]=1
+    if diffDim==1:
+        blankData[:,convertedSlice[diffDim],:]=1
+    if diffDim==2:
+        blankData[:,:,convertedSlice[diffDim]]=1
     
     #create description string for this 
     #cant figure out s80
