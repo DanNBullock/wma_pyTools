@@ -632,7 +632,7 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not a nifti.")
     
     #the conversion to int may cause problems if the input isn't convertable to int.  Then again, the point of this is to raise an error, so...
-    elif np.logical_not(~np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1])): 
+    elif np.logical_not(np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1])): 
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not convertable to 0,1 int mask.  Likely not a mask.")
         
     if np.logical_not(isinstance(includeBool, bool )):
