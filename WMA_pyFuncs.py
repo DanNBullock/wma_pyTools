@@ -625,17 +625,17 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
     
     #perform some input checks
     validOperations=["any","all","either_end","both_end"]
-    if ~np.in1d(operationSpec, validOperations):
+    if np.logical_not(np.in1d(operationSpec, validOperations)):
          raise Exception("applyNiftiCriteriaToTract Error: input operationSpec not understood.")
     
-    if ~type(maskNifti).__name__=='Nifti1Image':
+    if np.logical_not(type(maskNifti).__name__=='Nifti1Image'):
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not a nifti.")
     
     #the conversion to int may cause problems if the input isn't convertable to int.  Then again, the point of this is to raise an error, so...
-    elif ~np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1]): 
+    elif np.logical_not(~np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1])): 
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not convertable to 0,1 int mask.  Likely not a mask.")
         
-    if ~isinstance(includeBool, bool ):
+    if np.logical_not(isinstance(includeBool, bool )):
         raise Exception("applyNiftiCriteriaToTract Error: input includeBool not a bool.  See input description for usage")
         
     
