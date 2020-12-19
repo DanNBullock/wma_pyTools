@@ -749,8 +749,6 @@ def pointCloudToMask(pointCloudArray,referenceNifti):
     refrenceHeader=referenceNifti.header.copy()
     maskData=np.zeros(referenceNifti.shape)
     
-    densityKernel=np.asarray(referenceNifti.header.get_zooms())
-    
     #there may be an offset issue here due to the smaller than 1 offset of the affine
     maskImgCoords=np.unique(np.floor(nib.affines.apply_affine(np.linalg.inv(referenceNifti.affine),pointCloudArray)),axis=0).astype(int)
     
@@ -760,7 +758,8 @@ def pointCloudToMask(pointCloudArray,referenceNifti):
         raise Exception("tractMask Error: cloud mask exceends reference nifti bounding box.  Possible mismatch")
     
     #fill in the mask data.
-    maskData[maskImgCoords]=1
+    #array indexing misbehaves when you use  maskData[maskImgCoords], don't know why
+    maskData[maskImgCoords[:,0],maskImgCoords[:,1],maskImgCoords[:,2]]=1
     
     #create out structure
     cloudMaskNifti=nib.nifti1.Nifti1Image(maskData, referenceAffine, header=refrenceHeader)
