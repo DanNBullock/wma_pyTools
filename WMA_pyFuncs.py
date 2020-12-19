@@ -391,6 +391,28 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     #consider throwing an error here if the output Nifti is empty
     
     return remainingROI
+
+def alignROItoReference(inputROI,reference):
+    """ extracts the coordinates of an ROI and reinstantites them as an ROI in the refernce space of the reference input
+    Helps avoid affine weirdness.
+    Args:
+    inputROI: an input ROI in nifti format
+    reference: the reference nifti that you would like the ROI moved to.
+        
+    Outputs:
+    outROI: output nifti ROI in the reference space of the input reference nifti
+
+    """   
+    import numpy as np
+    import nibabel as nib
+    from dipy.tracking.utils import seeds_from_mask
+    
+    densityKernel=np.asarray(reference.header.get_zooms())
+    
+    roiCoords=seeds_from_mask(inputROI.get_fdata(), inputROI.affine, density=densityKernel)
+    
+    outROI=pointCloudToMask(roiCoords,reference)
+    return outROI
     
 def findMaxMinPlaneBound(inputPlanarROI):
     #indMaxMinPlaneBound(inputPlanarROI):
