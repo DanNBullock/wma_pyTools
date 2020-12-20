@@ -679,7 +679,7 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
     #this nets an even more signifigant speed-up per streamline, and is possible because our output is bool rather than streamline
     maskBounds=nib.affines.apply_affine(maskNifti.affine,returnMaskBoundingBoxVoxelIndexes(maskNifti))
     #due to how this output is structured, vertex 0 and vertex 8 are always opposing
-    maskBoundTolerance=[np.min(maskBounds[[1,7],0])-dtc,np.max(maskBounds[[1,7],0])+dtc,np.min(maskBounds[[1,7],1])-dtc,np.max(maskBounds[[1,7],1])+dtc,np.min(maskBounds[[1,7],2])-dtc,np.max(maskBounds[[1,7],2])+dtc]
+    maskBoundTolerance=[np.min(maskBounds[[0,7],0])-dtc,np.max(maskBounds[[0,7],0])+dtc,np.min(maskBounds[[0,7],1])-dtc,np.max(maskBounds[[0,7],1])+dtc,np.min(maskBounds[[0,7],2])-dtc,np.max(maskBounds[[0,7],2])+dtc]
     
 
     criteriaVec=np.zeros(len(boundedStreamSubset)).astype(int)
@@ -711,8 +711,8 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
             criteriaVec[iStreamline]=0
     
     #if the input instruction is NOT, negate the output
-    if ~includeBool:
-        criteriaVec=~criteriaVec
+    if np.logical_not(includeBool):
+        criteriaVec=np.logical_not(criteriaVec)
     
     #find the indexes of the original streamlines that the survivors correspond to
     boundedStreamsIndexes=np.where(boundedStreamsBool)[0]
@@ -762,7 +762,7 @@ def pointCloudToMask(pointCloudArray,referenceNifti):
     maskData[maskImgCoords[:,0],maskImgCoords[:,1],maskImgCoords[:,2]]=1
     
     #create out structure
-    cloudMaskNifti=nib.nifti1.Nifti1Image(maskData, referenceAffine, header=refrenceHeader)
+    cloudMaskNifti=nib.nifti1.Nifti1Image(maskData, referenceAffine, header=referenceNifti.header)
     
     return cloudMaskNifti
 
@@ -789,7 +789,8 @@ def subsetStreamsByROIboundingBox(streamlines, maskNifti):
     maskBounds=nib.affines.apply_affine(maskNifti.affine,returnMaskBoundingBoxVoxelIndexes(maskNifti))
     #due to how this output is structured, vertex 0 and vertex 8 are always opposing
     
-    maskBoundTolerance=[np.min(maskBounds[[1,7],0])-dtc,np.max(maskBounds[[1,7],0])+dtc,np.min(maskBounds[[1,7],1])-dtc,np.max(maskBounds[[1,7],1])+dtc,np.min(maskBounds[[1,7],2])-dtc,np.max(maskBounds[[1,7],2])+dtc]
+    maskBoundTolerance=[np.min(maskBounds[[0,7],0])-dtc,np.max(maskBounds[[0,7],0])+dtc,np.min(maskBounds[[0,7],1])-dtc,np.max(maskBounds[[0,7],1])+dtc,np.min(maskBounds[[0,7],2])-dtc,np.max(maskBounds[[0,7],2])+dtc]
+    
     
     criteriaVec=np.zeros(len(streamlines))
     #iterating across streamlines seems inefficient...
