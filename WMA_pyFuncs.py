@@ -475,8 +475,12 @@ def findMaxMinPlaneBound(inputPlanarROI):
     medialBound=   np.floor(centerPointImg[xDimIndex[0]])
     #now do a check for lateral bound for a planar roi?  Only matters in case of plane in x dimension, and if x is a particular side
     
+    # if its an x plane sitting on the midline...
+    if np.logical_and(findSingletonDimension[0] == 0,singletonCoord[0]==0):
+        #just default to the logic of a non-x plane -> give the coordinate of the "right side" of the data object
+        lateralBound=inputPlanarROI.shape[xDimIndex[0]]
     #if the singleton dimension is x and the plane is closer to the max end of the array
-    if np.logical_and(findSingletonDimension[0] == 0, relativeImgPosition[xDimIndex[0]]<0):
+    elif np.logical_and(findSingletonDimension[0] == 0, relativeImgPosition[xDimIndex[0]]<0):
         lateralBound=inputPlanarROI.shape[xDimIndex[0]]
         #if the singleton dimension is x and the plane is closer to the min end of the array, the lateral bound is zero
     elif np.logical_and(findSingletonDimension[0] == 0, relativeImgPosition[xDimIndex[0]]>0):
