@@ -429,6 +429,9 @@ def findMaxMinPlaneBound(inputPlanarROI):
   
     singletonCoord=planeCoords[0,findSingletonDimension]
     
+    #now find the dimenision in image space
+    imgSingletonDim=np.where(np.equal([len(np.unique(np.where(inputPlanarROI.get_fdata())[0])),len(np.unique(np.where(inputPlanarROI.get_fdata())[1])),len(np.unique(np.where(inputPlanarROI.get_fdata())[2]))],1))[0]
+    
     centerPointImg=nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[0,0,0])
     
     samplePlaneCoordSubj=[0,0,0]
@@ -507,10 +510,10 @@ def findMaxMinPlaneBound(inputPlanarROI):
     borderStrings=['posterior','anterior','caudal','rostral', 'medial','lateral','left', 'right','inferior','superior']
     boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
     
-    dimIndexColumn=[findSingletonDimension[0],yDimIndex[0],yDimIndex[0],yDimIndex[0],yDimIndex[0],xDimIndex[0],xDimIndex[0],xDimIndex[0],xDimIndex[0],zDimIndex[0],zDimIndex[0]]
+    dimIndexColumn=[imgSingletonDim[0],yDimIndex[0],yDimIndex[0],yDimIndex[0],yDimIndex[0],xDimIndex[0],xDimIndex[0],xDimIndex[0],xDimIndex[0],zDimIndex[0],zDimIndex[0]]
     
-    labelColumn=['exactDim_'+str(findSingletonDimension[0])]+borderStrings
-    valueColumn=np.concatenate((samplePlaneCoordImg[findSingletonDimension],np.asarray(boundVals)))
+    labelColumn=['exactDim_'+str(imgSingletonDim[0])]+borderStrings
+    valueColumn=np.concatenate((samplePlaneCoordImg[imgSingletonDim],np.asarray(boundVals)))
     #fill the out data structure
     boundsTable=pd.DataFrame(np.array([labelColumn, valueColumn,dimIndexColumn]).T,
                               columns=['boundLabel', 'boundValue','dimIndex'])
