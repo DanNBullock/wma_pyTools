@@ -83,6 +83,8 @@ def roiFromAtlas(atlas,roiNum):
     #roiFromAtlas(atlas,roiNum)
     #creates a nifti structure mask for the input atlas image of the specified label
     #
+    #  DEPRICATED BY  multiROIrequestToMask
+    #
     # INPUTS:
     # -atlas:  an atlas nifti
     #
@@ -268,36 +270,21 @@ def multiROIrequestToMask(atlas,roiNums):
     #force input roiNums to array, don't want to deal with lists and dicts
     roiNumsInArray=np.asarray(roiNums)
     
-    #if its a singleton request, just use the standard roiFromAtlas function
-    #done this way because for loop wasn't handling singleton case well
-    if roiNumsInArray.size==1:
-        concatOutNifti=roiFromAtlas(atlas,roiNumsInArray)
+    if  np.logical_not(np.all(np.isin(roiNumsInArray,np.unique(atlas.get_fdata()).astype(int)))):
+        import warnings
+        warnings.warn("WMA.multiROIrequestToMask WARNING: ROI label " + str(list(roiNumsInArray[np.logical_not(np.isin(roiNumsInArray,np.unique(atlas.get_fdata()).astype(int)))])) + " not found in input Nifti structure.")
+                
     
-    #if its a multi request
-    else:
-    #setup blank nifti struc
-        referenceAffine=atlas.affine
-        refrenceHeader=atlas.header.copy()
-        #create blank data structure
-        concatData=np.zeros(np.append(np.asarray(atlas.shape),len(roiNumsInArray)))
+
     
-        #create an initially blank nifti to serve as the basis of a concat
+    labelCoords=np.where(np.isin(atlas.get_fdata(),roiNumsInArray))
     
-        #again, .size use might cause issues
-        for iRequests in range(roiNumsInArray.size):
-            #make a mask for the current request
-            currentMask=roiFromAtlas(atlas,roiNumsInArray[iRequests])
-            #get the data
-            currentMaskData=currentMask.get_data()
-            #set current dimension entries to maskData
-            concatData[:,:,:,iRequests]=currentMaskData
-    
-        #make a blank structure for the output
-        concatDataCondensed=np.zeros(atlas.shape)
-        #check across the 4th dimension for non zero entries, create a mask using this
-        concatDataCondensed[np.any(concatData!=0,3)]=1
-        #insert this data into an output nifti structure
-        concatOutNifti=nib.nifti1.Nifti1Image(concatDataCondensed, referenceAffine, header=refrenceHeader)
+
+    #create blank data structure
+    concatData=np.zeros(atlas.shape)
+    concatData[labelCoords]=True
+
+    concatOutNifti=nib.nifti1.Nifti1Image(concatData, affine=atlas.affine, header=atlas.header)
     
     return concatOutNifti
 
@@ -357,6 +344,8 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
         import warnings
         warnings.warn("WMA.sliceROIwithPlane WARNING: input planar ROI does not intersect with input ROI.")
     
+    intersection=np.where(np.logical_and(inputROINiftiData!=0,inputPlanarROIData!=0))
+    
     #find bounds for current planar ROI    
     boundsTable=findMaxMinPlaneBound(inputPlanarROI)
 
@@ -370,7 +359,7 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     fillBound=int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==relativePosition].to_numpy()[0]))
     sortedBounds=np.sort((fillBound,int(float(boundsTable['boundValue'].loc[0]))))
     #get the dimension indicator
-    dimIndicator=int(float(boundsTable['dimIndex'].loc[0]))
+    dimIndicator=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==relativePosition].to_numpy()[0]))
     #create blank output structure    
     sliceKeepData=np.zeros(inputPlanarROIData.shape)  
     
