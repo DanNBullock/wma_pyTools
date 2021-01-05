@@ -803,7 +803,113 @@ def subsetStreamsByROIboundingBox(streamlines, maskNifti):
    
     return criteriaVec.astype(int)
 
+def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
+    """ apply a relative location criteria to the endpoints of all streamlines in a collection of streamlines
+    Args:
+        streamlines: streamlines to be segmented from
+        planarROI: the planar ROI relative to which the streamlines' endpoints' locations should be assessed
+        requirement:  A relative anatomical positional term
+        whichEndpoints:  whether this criteria should apply to 'both', 'one', or 'neither' endpoint
+    
+    Output:
+        streamBool:  a boolean vector indicating which streamlines meet the specified criteria.
+    
+    
+    modified version of nltools sphere function which outputs the sphere ROI in the
+    coordinate space of the input reference
+    """
+    import numpy as np
+    import nibabel as nib
+    import pandas as pd
 
+    #get the borders of the plane, and thereby also determine the coordinate of the planar ROI
+    boundsTable=findMaxMinPlaneBound(planarROI)
+    
+    #throw an error if there's a mismatch
+    if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0]))):
+        raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
+    
+    #create blank structure for endpoints
+    endpoints=np.zeros((len(streamlines),6))
+    #get the endpoints, taken from
+    #https://github.com/dipy/dipy/blob/f149c756e09f172c3b77a9e6c5b5390cc08af6ea/dipy/tracking/utils.py#L708
+    for iStreamline in range(len(streamlines)):
+        #remember, first 3 = endpoint 1, last 3 = endpoint 2    
+        endpoints[iStreamline,:]= np.concatenate([streamlines[iStreamline][0,:], streamlines[iStreamline][-1,:]])
+    
+    convertedEndpoints1=nib.affines.apply_affine(np.linalg.inv(planarROI.affine),endpoints[:,0:3])
+    convertedEndpoints2=nib.affines.apply_affine(np.linalg.inv(planarROI.affine),endpoints[:,3:7])
+    
+    #sort the bounds
+    sortedBounds=np.sort((int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0])),int(float(boundsTable['boundValue'].loc[0]))))
+    #get the relevant image dimension
+    imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0]))
+    
+    #apply the criteria to both endpoints
+    endpoints1Criteria=np.logical_and(np.greater(convertedEndpoints1[:,imageDim],sortedBounds[0]),np.less(convertedEndpoints1[:,imageDim],sortedBounds[1]))
+    endpoints2Criteria=np.logical_and(np.greater(convertedEndpoints2[:,imageDim],sortedBounds[0]),np.less(convertedEndpoints2[:,imageDim],sortedBounds[1]))
+    
+    def interpretWhichEndpoints(x):
+        #might do some weird stuff for equal values
+        return {
+            'neither': 0,
+            'one': 1,
+            'both':   2,
+        }[x]
+    
+    #get the target number of endpoints matching criteria
+    targetValue=interpretWhichEndpoints(whichEndpoints)
+    
+    #sum the two endpoint criterion vectors
+    sumVec=np.add(endpoints1Criteria,endpoints2Criteria,dtype=int)
+    
+    #see where the target value is met
+    targetMetVec=sumVec==targetValue
+    
+    return targetMetVec
+    
+def applyMidpointCriteria(streamlines,planarROI,requirement):
+    """ apply a relative location criteria to the midpoints of all streamlines in a collection of streamlines
+    Args:
+        streamlines: streamlines to be segmented from
+        planarROI: the planar ROI relative to which the streamlines' midpoints' locations should be assessed
+        requirement:  A relative anatomical positional term
+
+    Output:
+        streamBool:  a boolean vector indicating which streamlines meet the specified criteria.
+    
+    
+    modified version of nltools sphere function which outputs the sphere ROI in the
+    coordinate space of the input reference
+    """
+    import numpy as np
+    import nibabel as nib
+    import pandas as pd
+
+    #get the borders of the plane, and thereby also determine the coordinate of the planar ROI
+    boundsTable=findMaxMinPlaneBound(planarROI)
+    
+    #throw an error if there's a mismatch
+    if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0]))):
+        raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
+    
+
+    #use dipy to get the midpoints    
+    from dipy.segment.metric import MidpointFeature
+    feature = MidpointFeature()
+    midpoints = np.squeeze(np.asarray(list(map(feature.extract, streamlines))))
+    
+    convertedMidpoints=nib.affines.apply_affine(np.linalg.inv(planarROI.affine),midpoints)
+    
+    #sort the bounds
+    sortedBounds=np.sort((int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0])),int(float(boundsTable['boundValue'].loc[0]))))
+    #get the relevant image dimension
+    imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0]))
+    
+    #apply the criteria to both endpoints
+    midpointsCriteria=np.logical_and(np.greater(convertedMidpoints[:,imageDim],sortedBounds[0]),np.less(convertedMidpoints[:,imageDim],sortedBounds[1]))
+    
+    return midpointsCriteria        
 
 def findTractNeckNode(streamlines):
     #findTractNeckNode(streamlines):
