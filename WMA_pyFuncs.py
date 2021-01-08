@@ -827,10 +827,12 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     type(whichEndpoints)
     print(requirement)
     type(requirement)
-    print(boundsTable)
+   
 
     #get the borders of the plane, and thereby also determine the coordinate of the planar ROI
     boundsTable=findMaxMinPlaneBound(planarROI)
+    
+    print(boundsTable)
     
     #throw an error if there's a mismatch
     if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
