@@ -822,21 +822,16 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     import nibabel as nib
     import pandas as pd
     
-    #prints for debugging
-    print(whichEndpoints)
-    type(whichEndpoints)
-    print(requirement)
-    type(requirement)
-   
 
     #get the borders of the plane, and thereby also determine the coordinate of the planar ROI
     boundsTable=findMaxMinPlaneBound(planarROI)
     
-    print(boundsTable)
+
     
     #throw an error if there's a mismatch
-    if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
-        raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
+    #TEMP NOTE: CAN'T GET CONSISTENT BEHAVIOR OUT OF THIS IN/OUT OF THIS FUNCTION, cutting out for now
+    #if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
+    #    raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
     
     #create blank structure for endpoints
     endpoints=np.zeros((len(streamlines),6))
@@ -897,11 +892,11 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
 
     #get the borders of the plane, and thereby also determine the coordinate of the planar ROI
     boundsTable=findMaxMinPlaneBound(planarROI)
-    
+       
     #throw an error if there's a mismatch
+    #TEMP NOTE: CAN'T GET CONSISTENT BEHAVIOR OUT OF THIS IN/OUT OF THIS FUNCTION, cutting out for now
     if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
         raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
-    
 
     #use dipy to get the midpoints    
     from dipy.segment.metric import MidpointFeature
