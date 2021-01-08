@@ -829,9 +829,9 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
 
     
     #throw an error if there's a mismatch
-    #TEMP NOTE: CAN'T GET CONSISTENT BEHAVIOR OUT OF THIS IN/OUT OF THIS FUNCTION, cutting out for now
-    #if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
-    #    raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
+
+    if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
+        raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
     
     #create blank structure for endpoints
     endpoints=np.zeros((len(streamlines),6))
@@ -894,7 +894,7 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     boundsTable=findMaxMinPlaneBound(planarROI)
        
     #throw an error if there's a mismatch
-    #TEMP NOTE: CAN'T GET CONSISTENT BEHAVIOR OUT OF THIS IN/OUT OF THIS FUNCTION, cutting out for now
+    TEMP NOTE: CAN'T GET CONSISTENT BEHAVIOR OUT OF THIS IN/OUT OF THIS FUNCTION, cutting out for now
     if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
         raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
 
