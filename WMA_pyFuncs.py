@@ -821,6 +821,13 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     import numpy as np
     import nibabel as nib
     import pandas as pd
+    
+    #prints for debugging
+    print(whichEndpoints)
+    type(whichEndpoints)
+    print(requirement)
+    type(requirement)
+    print(boundsTable)
 
     #get the borders of the plane, and thereby also determine the coordinate of the planar ROI
     boundsTable=findMaxMinPlaneBound(planarROI)
