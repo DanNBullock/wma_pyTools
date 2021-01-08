@@ -845,9 +845,9 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     convertedEndpoints2=nib.affines.apply_affine(np.linalg.inv(planarROI.affine),endpoints[:,3:7])
     
     #sort the bounds
-    sortedBounds=np.sort((int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0])),int(float(boundsTable['boundValue'].loc[0]))))
+    sortedBounds=np.sort((int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==requirement].to_numpy())),int(float(boundsTable['boundValue'].loc[0]))))
     #get the relevant image dimension
-    imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0]))
+    imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))
     
     #apply the criteria to both endpoints
     endpoints1Criteria=np.logical_and(np.greater(convertedEndpoints1[:,imageDim],sortedBounds[0]),np.less(convertedEndpoints1[:,imageDim],sortedBounds[1]))
@@ -906,9 +906,9 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     convertedMidpoints=nib.affines.apply_affine(np.linalg.inv(planarROI.affine),midpoints)
     
     #sort the bounds
-    sortedBounds=np.sort((int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0])),int(float(boundsTable['boundValue'].loc[0]))))
+    sortedBounds=np.sort((int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==requirement].to_numpy())),int(float(boundsTable['boundValue'].loc[0]))))
     #get the relevant image dimension
-    imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()[0]))
+    imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))
     
     #apply the criteria to both endpoints
     midpointsCriteria=np.logical_and(np.greater(convertedMidpoints[:,imageDim],sortedBounds[0]),np.less(convertedMidpoints[:,imageDim],sortedBounds[1]))
