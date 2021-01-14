@@ -707,6 +707,7 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
             criteriaVec[iStreamline]=0
     
     #if the input instruction is NOT, negate the output
+    #check this, something may be amiss
     if np.logical_not(includeBool):
         criteriaVec=np.logical_not(criteriaVec)
     
@@ -719,7 +720,7 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
     #set the relevant entries to true
     outBoolVec[originalIndexes]=1
     
-    return outBoolVec
+    return int(outBoolVec)
     
     
 def pointCloudToMask(pointCloudArray,referenceNifti):
@@ -813,10 +814,6 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     
     Output:
         streamBool:  a boolean vector indicating which streamlines meet the specified criteria.
-    
-    
-    modified version of nltools sphere function which outputs the sphere ROI in the
-    coordinate space of the input reference
     """
     import numpy as np
     import nibabel as nib
@@ -881,10 +878,6 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
 
     Output:
         streamBool:  a boolean vector indicating which streamlines meet the specified criteria.
-    
-    
-    modified version of nltools sphere function which outputs the sphere ROI in the
-    coordinate space of the input reference
     """
     import numpy as np
     import nibabel as nib
@@ -909,10 +902,41 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     #get the relevant image dimension
     imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))
     
-    #apply the criteria to both endpoints
+    #apply the criteria to the midpoint
     midpointsCriteria=np.logical_and(np.greater(convertedMidpoints[:,imageDim],sortedBounds[0]),np.less(convertedMidpoints[:,imageDim],sortedBounds[1]))
     
-    return midpointsCriteria        
+    return midpointsCriteria     
+
+def maskMatrixByBoolVec(dipyGrouping,boolVec):
+    """ recompute a connectivity matrix for a specified subset of the streamlines
+    Args:
+        dipyGrouping: the grouping output of the dipy utils.connectivity_matrix [WITH symmetric=False]
+        boolVec: a boolean vector indicating which streamlines to consider in this computation
+        
+
+    Output:
+        matrixSubset:  a matrix whose entries have been altered in accordance with the input
+    """
+
+    import numpy as np 
+
+    #get the number of unique labels
+    uniqueLabels=np.unique(np.asarray(list(dipyGrouping.keys())))
+    #get the indexes of the valid streamlines from the input boolVec
+    #concatenate to force to 1d array
+    validStreams=np.concatenate(np.where(boolVec))
+    #inatialize blank matrix object
+    matrixSubset=np.zeros((len(uniqueLabels),len(uniqueLabels)))
+    
+    #iterate over the dictionary keys/ pairings
+    for iPairings in range(len(list(dipyGrouping.keys()))):
+        #get the current dictionary key entry
+        currKey=list(dipyGrouping.keys())[iPairings]
+        #get the length of the intersction of the boolVec streamlines and the current streamlines
+        #and place it in the matrix location
+        matrixSubset[currKey[0],currKey[1]]=len(np.intersect1d(dipyGrouping[currKey],validStreams))
+    
+    return matrixSubset.astype(int)   
 
 def findTractNeckNode(streamlines):
     #findTractNeckNode(streamlines):
