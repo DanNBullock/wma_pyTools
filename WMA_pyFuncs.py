@@ -720,7 +720,7 @@ def applyNiftiCriteriaToTract(streamlines, maskNifti, includeBool, operationSpec
     #set the relevant entries to true
     outBoolVec[originalIndexes]=1
     
-    return int(outBoolVec)
+    return outBoolVec.astype(int)
     
     
 def pointCloudToMask(pointCloudArray,referenceNifti):
