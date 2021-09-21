@@ -1283,3 +1283,166 @@ def mergeBundlesViaNeck(streamlines,clusters,distanceThresh):
     
     return clusters
 
+def smoothStreamlines(tractogram):
+    #smoothStreamlines(tractogram):
+    #
+    #Smooths streamlines using spline method.  
+    #Probably hugely memory inefficient, and will resample all streamlines to 400 nodes
+    #Resource intensive, but look at those smooth streamlines!
+    #
+    # -tractogram: an input stateful tractogram 
+    #
+    # -out_tractogram:  an output stateful tractogram with the streamlines smmothed and
+    #                   resampled to 400 nodes
+    #
+    # distanceThresh the threshold between neck centroids that is accepted for merging
+    import dipy
+    import nibabel as nib
+    #extract the streamlines, but not really because this is just linking
+    inputStreamlines=tractogram.streamlines
+    #get the count before anything is done
+    initialLength=len(inputStreamlines)
+    for iStreams in range(initialLength):
+        #use the spline method to get the smoothed streamline
+        dipySplineOut=dipy.tracking.metrics.spline(inputStreamlines[iStreams])
+        #this is an ugly way to do this
+        
+        inputStreamlines.append(dipySplineOut)
+    outStreamlines=inputStreamlines[initialLength-1:-1]
+    out_tractogram = nib.streamlines.tractogram.Tractogram(outStreamlines)
+    return out_tractogram
+
+def cullViaClusters(clusters,tractogram,streamThresh):
+    #cullViaClusters(clusters,tractogram,streamThresh)
+    #
+    #This function culls streamlines from a tractogram
+    #based on the number of streamlines in their clusters
+    #
+    # INPUTS
+    #
+    # clusters: the output cluster object from quickbundles
+    #
+    # tractogram: a tractogram associated with the input clusters object
+    #
+    #streamThresh:  the minimum number of streamlines in a cluster bundle
+    #               needed to survive the culling process
+    #
+    # OUTPUTS
+    #
+    # tractogram: the cleaned tractogram
+    #
+    # culledTractogram: a tractogram containing those streamlines which have
+    # been culled.
+    #
+    # begin code    
+    import numpy as np
+    import copy
+    #apparently this can cause some issues on linux machines with dtype u21?
+    clustersSurviveThresh=np.greater(np.asarray(list(map(len, clusters))),streamThresh)
+    survivingStreams=[]
+    for iclusters in clusters[clustersSurviveThresh]:
+        survivingStreams=survivingStreams + iclusters.indices
+    culledStreamIndicies=list(set(list(range(1,len(tractogram.streamlines))))-set(survivingStreams))
+    culledTractogram=copy.deepcopy(tractogram)
+    culledTractogram.streamlines=culledTractogram.streamlines[culledStreamIndicies]
+    #cull those streamlines
+    #don't know what to do about those warnings
+    tractogram.streamlines=tractogram.streamlines[survivingStreams]
+    return tractogram, culledTractogram
+
+
+def qbCullStreams(tractogram,qbThresh,streamThresh):
+    #qbCullStreams(tractogram,qbThresh,streamThresh)
+    #
+    #this function uses dipy quickbundles to filter out streamlines which exhibt
+    #unusual/extremely uncommon trajectories using a interstreamline distance
+    #measure
+    #
+    # INPUTS
+    #
+    # tractogram: an input tractogram to be cleaned
+    #
+    # qbThresh: the distance parameter to be used for the quickbundles algorithm
+    #
+    #streamThresh:  the minimum number of streamlines in a cluster bundle
+    #               needed to survive the culling process
+    # OUTPUTS
+    #
+    # tractogram: the cleaned tractogram
+    #
+    # culledTractogram: a tractogram containing those streamlines which have
+    # been culled.
+    # 
+    # Begin code
+    from dipy.segment.clustering import QuickBundles
+    #get the number of input streamlines
+    inputStreamNumber=len(tractogram.streamlines)
+    #good default value for quick clustering
+    #qbThresh=15
+    #perform quickBundles
+    qb = QuickBundles(threshold=qbThresh)
+    clusters = qb.cluster(tractogram.streamlines)
+    #perform cull
+    [outTractogram,culledTractogram]=cullViaClusters(clusters,tractogram,streamThresh)
+    #report cull count
+    numberCulled=inputStreamNumber-len(outTractogram.streamlines)
+    print(str(numberCulled) + ' streamlines culled')
+    return outTractogram, culledTractogram
+
+def streamGeomQuantifications(tractogram):
+    #streamGeomQuantifications(tractogram)
+    #
+    #This function quantifies a number of streamline-based quantities
+    #in the same fashion as wma_tools's  ConnectomeTestQ
+    #
+    # INPUTS
+    #
+    # tractogram: an input stateful tractogram
+    #
+    # OUTPUTS
+    # 
+    # quantificationTable: a pandas table documenting the streamline based
+    #                      quantificaton.  
+    # see https://github.com/DanNBullock/wma_tools#connectometestq
+    # for more details.
+    #
+    # begin code
+    import pandas as pd
+    import numpy as np
+    #establish the dataframe
+    column_names = ["length", "fullDisp", "efficiencyRat", "asymRat", "bioPriorCost"]
+    quantificationTable = pd.DataFrame(columns = column_names)
+    #begin the iteration
+    from dipy.tracking.streamline import length
+    import math
+    for iStreamlines in tractogram.streamlines:
+        #compute lengths
+        streamLength=length(iStreamlines)
+        firstHalfLength=length(iStreamlines[1:int(round(len(iStreamlines)/2)),:])
+        secondHalfLength=length(iStreamlines[int(round(len(iStreamlines)/2))+1:-1,:])
+    
+        #compute displacements
+        displacement=math.dist(iStreamlines[1,:],iStreamlines[-1,:]) 
+        firstHalfDisp=math.dist(iStreamlines[1,:],iStreamlines[int(round(len(iStreamlines)/2)),:])
+        secondHalfDisp=math.dist(iStreamlines[int(round(len(iStreamlines)/2))+1,:],iStreamlines[-1,:])
+    
+        #compute ratios
+        efficiencyRatio=displacement/streamLength
+        asymetryRatio=np.square((firstHalfDisp/firstHalfLength)-(secondHalfDisp/secondHalfLength))
+        bioPriorCost=1/(1-asymetryRatio)
+        
+        #append to dataframe
+        rowVector=[streamLength, displacement, efficiencyRatio, asymetryRatio, bioPriorCost]
+        rowAsSeries = pd.Series(rowVector, index = quantificationTable.columns)
+        quantificationTable.append(rowAsSeries,ignore_index=True)
+    return quantificationTable
+
+def crossSectionGIFsFromTract(tractogram,refAnatT1,saveDir):
+    import nibabel as nib
+    #use dipy to create the density mask
+    from dipy.tracking import utils
+    densityMap=utils.density_map(tractogram.streamlines, refAnatT1.affine, refAnatT1.shape)
+    densityNifti=nib.nifti1.Nifti1Image(densityMap,t1img.affine, t1img.header)
+    
+    for iDims in range(2):
+        
