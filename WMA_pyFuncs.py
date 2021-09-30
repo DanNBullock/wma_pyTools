@@ -230,25 +230,51 @@ def createSphere(r, p, reference):
     """
     import nibabel as nib
     import numpy as np
-
+    
+    fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_fdata().shape), reference.affine, reference.header)
+    #pass full mask to boundary function
+    refDimBounds=returnMaskBoundingBoxVoxelIndexes(fullMask)
+    #convert the coords to subject space in order set max min values for interactive visualization
+    convertedBoundCoords=nib.affines.apply_affine(reference.affine,refDimBounds)
+    
+    #if the sphere centroid is outside of the image, throw a full on error
+    if np.any(    [np.min(convertedBoundCoords[:,dims])>p[dims] or  
+                   np.max(convertedBoundCoords[:,dims])<p[dims] 
+                   for dims in list(range(3)) ]):
+        raise ValueError('Requested sphere centroid outside of reference image')
+    
+    if np.any(    [np.min(convertedBoundCoords[:,dims])-r>p[dims] or  
+                   np.max(convertedBoundCoords[:,dims])+r<p[dims] 
+                   for dims in list(range(3)) ]):
+        import warnings
+        warnings.warn('Requested sphere partially outside of reference image')
+    
+    #get the dimensions of the source image
     dims = reference.shape
     
     imgCoord=np.floor(nib.affines.apply_affine(np.linalg.inv(reference.affine),p))
-
-    dim1Vals= np.abs(np.arange(0, dims[0], reference.header.get_zooms()[0])-imgCoord[0])
-    dim2Vals= np.abs(np.arange(0, dims[1], reference.header.get_zooms()[1])-imgCoord[1])
-    dim3Vals= np.abs(np.arange(0, dims[2], reference.header.get_zooms()[2])-imgCoord[2])
-    #ogrid doesnt work?
-    x, y, z = np.meshgrid(np.floor(dim1Vals).astype(int), np.floor(dim2Vals).astype(int), np.floor(dim3Vals).astype(int),indexing='ij')          
     
-    #maybe this works?
+    #previous version of this misunderstood this process and included header.zooms
+    #radius is interpreted in mm, but image indexing is interpreted in voxels
+    #as such, you have to normalize the later distance mask computation (mask_r)
+    #with that information
+    
+    #for each dimension, compute the orthogonal distance of the relevant centroid
+    #coordinate component from each other point in the mask
+    dimVoxelDistVals=[np.abs(np.arange(i, dims[i], reference.header.get_zooms()[i])-imgCoord[i])
+                      for i in list(range(len(dims)))]
+    #ogrid doesnt work?  meshgrid seems to work fine
+    #not sure why previous version was forcing to type int
+    x, y, z = np.meshgrid(dimVoxelDistVals[0], dimVoxelDistVals[1], dimVoxelDistVals[2],indexing='ij')          
+    
+    #clever element-wise computation and summation of 3-dimensional Pythagorean
+    #components, followed by masking via radius value
     mask_r = x*x + y*y + z*z <= r*r
 
-    activation = np.zeros(dims)
-    activation[mask_r] = 1
+    outSphereROI = np.zeros(dims)
+    outSphereROI[mask_r] = 1
     #not sure of robustness to strange input affines, but seems to work
-
-    return nib.Nifti1Image(activation, affine=reference.affine)
+    return nib.Nifti1Image(outSphereROI, affine=reference.affine)
 
 def multiROIrequestToMask(atlas,roiNums):
     #multiROIrequestToMask(atlas,roiNums):
@@ -1442,7 +1468,8 @@ def crossSectionGIFsFromTract(tractogram,refAnatT1,saveDir):
     #use dipy to create the density mask
     from dipy.tracking import utils
     densityMap=utils.density_map(tractogram.streamlines, refAnatT1.affine, refAnatT1.shape)
-    densityNifti=nib.nifti1.Nifti1Image(densityMap,t1img.affine, t1img.header)
+    densityNifti=nib.nifti1.Nifti1Image(densityMap,refAnatT1.affine, refAnatT1.header)
     
     for iDims in range(2):
+        print('you arent done with this function ')
         
