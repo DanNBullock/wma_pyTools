@@ -231,6 +231,8 @@ def createSphere(r, p, reference):
     import nibabel as nib
     import numpy as np
     
+    print('Creating '+ str(r) +' mm radius spherical roi at '+str(p))
+    
     fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_fdata().shape), reference.affine, reference.header)
     #pass full mask to boundary function
     refDimBounds=returnMaskBoundingBoxVoxelIndexes(fullMask)
