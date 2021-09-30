@@ -261,7 +261,7 @@ def createSphere(r, p, reference):
     
     #for each dimension, compute the orthogonal distance of the relevant centroid
     #coordinate component from each other point in the mask
-    dimVoxelDistVals=[np.abs(np.arange(i, dims[i], reference.header.get_zooms()[i])-imgCoord[i])
+    dimVoxelDistVals=[np.abs(np.arange(0, dims[i])*reference.header.get_zooms()[i]-imgCoord[i])
                       for i in list(range(len(dims)))]
     #ogrid doesnt work?  meshgrid seems to work fine
     #not sure why previous version was forcing to type int
