@@ -35,10 +35,8 @@ def makePlanarROI(reference, mmPlane, dimension):
     import dipy.tracking.utils as ut
     
     fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_fdata().shape), reference.affine, reference.header)
-    #pass full mask to boundary function
-    refDimBounds=returnMaskBoundingBoxVoxelIndexes(fullMask)
-    #convert the coords to subject space in order set max min values for interactive visualization
-    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(refDimBounds,fullMask.affine)
+    #pass full mask to subject space boundary function
+    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
     
     #create a dict to interpret input
     dimDict={'x':0,'y':1,'z':2}
@@ -46,10 +44,8 @@ def makePlanarROI(reference, mmPlane, dimension):
     
     #if the requested planar coordinate is outside of the image, throw a full on error
     if convertedBoundCoords[0,selectedDim]>mmPlane or convertedBoundCoords[1,selectedDim]<mmPlane: 
-        raise ValueError('Requested sphere centroid outside of reference image')
+        raise ValueError('Requested planar coordinate outside of reference image')
     
-    #get the dimensions of the source image
-    dims = reference.shape
     #not always 0,0,0
     subjectCenterCoord=np.mean(convertedBoundCoords,axis=0)
     #copy it over to be the plane center coord and replace with requested value
@@ -81,13 +77,14 @@ def makePlanarROI(reference, mmPlane, dimension):
     #create a blank array for the output
     outData=np.zeros(reference.shape).astype(bool)
     #set the relevant indexes to true
-    outData[inds[:,0],inds[:,1],inds[:,2]]=True
+    #-1 because of zero indexing
+    outData[inds[:,0]-1,inds[:,1]-1,inds[:,2]-1]=True
     #format output
     returnedNifti=nib.nifti1.Nifti1Image(outData, reference.affine, header=reference.header)
     return returnedNifti
 
 def roiFromAtlas(atlas,roiNum):
-    #roiFromAtlas(atlas,roiNum)
+    """roiFromAtlas(atlas,roiNum)
     #creates a nifti structure mask for the input atlas image of the specified label
     #
     #  DEPRICATED BY  multiROIrequestToMask
@@ -99,11 +96,12 @@ def roiFromAtlas(atlas,roiNum):
     #
     # OUTPUTS:
     # -outImg:  a mask with int(1) in those voxels where the associated label was found.  If the label wasn't found, an empty nifti structure is output.
+    """
 
     import numpy as np
     import nibabel as nib
     outHeader = atlas.header.copy()
-    atlasData = atlas.get_data()
+    atlasData = atlas.get_fdata()
     outData = np.zeros((atlasData.shape)).astype(int)
     #check to make sure it is in the atlas
     #not entirely sure how boolean array behavior works here
@@ -116,43 +114,45 @@ def roiFromAtlas(atlas,roiNum):
     outImg = nib.nifti1.Nifti1Image(outData, atlas.affine, outHeader)
     return outImg
 
-def returnMaskBoundingBoxVoxelIndexes(maskNifti):
-    #returnMaskBoundingBoxVoxelIndexes(atlas,roiNum):
-    #returns the 8 verticies corresponding to the vertices of the mask's bounding box IN IMAGE SPACE
-    #(i.e. indicating the voxel indexes that correspond to these points)
-    #
-    # INPUTS:
-    # -maskNifti:  a nifti with ONLY 1 and 0 (int) as the content, a boolean mask, in essence
-    #
-    # OUTPUTS:
-    # -boundingCoordArray:  an 8 by 3 array indicating the VoxelIndexes of the bounding box
+# def returnMaskBoundingBoxVoxelIndexes(maskNifti):
+#     #returnMaskBoundingBoxVoxelIndexes(atlas,roiNum):
+#     #returns the 8 verticies corresponding to the vertices of the mask's bounding box IN IMAGE SPACE
+#     #(i.e. indicating the voxel indexes that correspond to these points)
+#     #
+#     # INPUTS:
+#     # -maskNifti:  a nifti with ONLY 1 and 0 (int) as the content, a boolean mask, in essence
+#     #
+#     # OUTPUTS:
+#     # -boundingCoordArray:  an 8 by 3 array indicating the VoxelIndexes of the bounding box
+#     10/4/2021 NOTE: DEPRICATED BY dipy.segment.mask.bounding_box
+# https://github.com/dipy/dipy/blob/bd0bf68148430990f0cfa37278cd81bb745d639f/dipy/segment/mask.py#L74
     
-    import nibabel as nib
-    import numpy as np
+#     import nibabel as nib
+#     import numpy as np
     
-    #get the data
-    maskData = maskNifti.get_fdata()
-    #check to make sure its a mask
-    if len(np.unique(maskData))> 2:
-      raise Exception("returnMaskBoundingBoxVoxelIndexes Error: Non mask input detected.  " + str(len(np.unique(maskData))) + " unique values detected in input NIfTI structure.")
+#     #get the data
+#     maskData = maskNifti.get_fdata()
+#     #check to make sure its a mask
+#     if len(np.unique(maskData))> 2:
+#       raise Exception("returnMaskBoundingBoxVoxelIndexes Error: Non mask input detected.  " + str(len(np.unique(maskData))) + " unique values detected in input NIfTI structure.")
     
-    #find the indexes of the nonzero entries
-    nonZeroIndexes=np.nonzero(maskData)
-    #find the min and max for each dimension
-    maxDim1=np.max(nonZeroIndexes[0])
-    minDim1=np.min(nonZeroIndexes[0])
-    maxDim2=np.max(nonZeroIndexes[1])
-    minDim2=np.min(nonZeroIndexes[1])  
-    maxDim3=np.max(nonZeroIndexes[2])
-    minDim3=np.min(nonZeroIndexes[2])
+#     #find the indexes of the nonzero entries
+#     nonZeroIndexes=np.nonzero(maskData)
+#     #find the min and max for each dimension
+#     maxDim1=np.max(nonZeroIndexes[0])
+#     minDim1=np.min(nonZeroIndexes[0])
+#     maxDim2=np.max(nonZeroIndexes[1])
+#     minDim2=np.min(nonZeroIndexes[1])  
+#     maxDim3=np.max(nonZeroIndexes[2])
+#     minDim3=np.min(nonZeroIndexes[2])
     
-    #user itertools and cartesian product
-    import itertools
-    outCoordnates=np.asarray(list(itertools.product([maxDim1,minDim1], [maxDim2,minDim2], [maxDim3,minDim3])))
-    return outCoordnates
+#     #user itertools and cartesian product
+#     import itertools
+#     outCoordnates=np.asarray(list(itertools.product([maxDim1,minDim1], [maxDim2,minDim2], [maxDim3,minDim3])))
+#     return outCoordnates
 
 def planeAtMaskBorder(inputMask,relativePosition):
-    #planeAtMaskBorder(inputNifti,roiNum,relativePosition):
+    """#planeAtMaskBorder(inputNifti,roiNum,relativePosition):
     #creates a planar roi at the specified border of the specified ROI.
     #
     # INPUTS:
@@ -163,8 +163,7 @@ def planeAtMaskBorder(inputMask,relativePosition):
     #
     # OUTPUTS:
     # outPlaneNifti: planar ROI as Nifti at specified border
-    
-    import nibabel as nib
+    """
     import numpy as np
     
     #establish valid positional terms
@@ -174,53 +173,38 @@ def planeAtMaskBorder(inputMask,relativePosition):
     if ~np.isin(relativePosition.lower(),validPositionTerms):
          raise Exception("planeAtROIborder Error: input relative position " + relativePosition + " not valid.")
     
-    #get the input NIfTI data
-    #inputData = inputNifti.get_data()
-    #check to ensure that inputNifti is a label structure of some type (mask or atlas)
-    #using np. mod modulo
-    #moduloCheckOut=np.mod(inputData,1)
-    #NOTE, APPEARS T1 ONLY HAS INT AS WELL, SO NO REAL GOOD WAY TO TELL. 
+    #convert the boundary coords of the mask to subject space in order to interpret positional terms
+    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(inputMask)
     
-    maskBoundCoords=returnMaskBoundingBoxVoxelIndexes(inputMask)
+    #kind of assumes at least moderately ACPC aligned data, at least insofar
+    #as relative anatomical position terms are concerned
     
-    #convert the coords to subject space in order to interpret positional terms
-    convertedBoundCoords=nib.affines.apply_affine(inputMask.affine,maskBoundCoords)
-    
-    #switch cases for input term    
-    def interpretPoisitionTerm(x):
-        #might do some weird stuff for equal values
-        return {
-            'superior': np.max(convertedBoundCoords[:,2]),
-            'inferior': np.min(convertedBoundCoords[:,2]),
-            'medial':   np.min(convertedBoundCoords[np.min(np.abs(convertedBoundCoords[:,0]))==np.abs(convertedBoundCoords[:,0]),0]),
-            'lateral': np.max(convertedBoundCoords[np.max(np.abs(convertedBoundCoords[:,0]))==np.abs(convertedBoundCoords[:,0]),0]),
-            'anterior': np.max(convertedBoundCoords[:,1]),
-            'posterior': np.min(convertedBoundCoords[:,1]),
-            'rostral': np.max(convertedBoundCoords[:,1]),
-            'caudal': np.min(convertedBoundCoords[:,1]),
-            'left': np.min(convertedBoundCoords[:,0]),
-            'right': np.max(convertedBoundCoords[:,0]),
-        }[x]
-    
-    #switch cases to infer dimension of interest    
-    def interpretDimension(x):
-        #might do some weird stuff for equal values
-        return {
-            'superior': 'z',
-            'inferior': 'z',
-            'medial':   'x',
-            'lateral': 'x',
-            'anterior': 'y',
-            'posterior': 'y',
-            'rostral': 'y',
-            'caudal': 'y',
-            'left': 'x',
-            'right': 'x',
-        }[x]
+    positionTermsDict={'superior': np.max(convertedBoundCoords[:,2]),
+                      'inferior': np.min(convertedBoundCoords[:,2]),
+                      'medial':   np.min(convertedBoundCoords[np.min(np.abs(convertedBoundCoords[:,0]))==np.abs(convertedBoundCoords[:,0]),0]),
+                      'lateral': np.max(convertedBoundCoords[np.max(np.abs(convertedBoundCoords[:,0]))==np.abs(convertedBoundCoords[:,0]),0]),
+                      'anterior': np.max(convertedBoundCoords[:,1]),
+                      'posterior': np.min(convertedBoundCoords[:,1]),
+                      'rostral': np.max(convertedBoundCoords[:,1]),
+                      'caudal': np.min(convertedBoundCoords[:,1]),
+                      'left': np.min(convertedBoundCoords[:,0]),
+                      'right': np.max(convertedBoundCoords[:,0])}    
 
-    outPlaneNifti=makePlanarROI(inputMask,interpretPoisitionTerm(relativePosition) , interpretDimension(relativePosition))
+    #similar to the positonal term Dict but for interpreting pertinant dimension
+    dimensionDict={'superior': 'z',
+                   'inferior': 'z',
+                   'medial':   'x',
+                   'lateral': 'x',
+                   'anterior': 'y',
+                   'posterior': 'y',
+                   'rostral': 'y',
+                   'caudal': 'y',
+                   'left': 'x',
+                   'right': 'x'}
+
+    outPlaneNifti=makePlanarROI(inputMask,positionTermsDict[relativePosition] , dimensionDict[relativePosition])
     
-    #return the planar roi you hvae created
+    #return the planar roi you have created
     return outPlaneNifti
 
 def createSphere(r, p, reference):
@@ -241,20 +225,18 @@ def createSphere(r, p, reference):
     print('Creating '+ str(r) +' mm radius spherical roi at '+str(p))
     
     fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_fdata().shape), reference.affine, reference.header)
-    #pass full mask to boundary function
-    refDimBounds=returnMaskBoundingBoxVoxelIndexes(fullMask)
-    #convert the coords to subject space in order set max min values for interactive visualization
-    convertedBoundCoords=nib.affines.apply_affine(reference.affine,refDimBounds)
+    #obtain boundary coords in subject space in order set max min values for interactive visualization
+    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
     
     #if the sphere centroid is outside of the image, throw a full on error
     if np.any(    [np.min(convertedBoundCoords[:,dims])>p[dims] or  
                    np.max(convertedBoundCoords[:,dims])<p[dims] 
-                   for dims in list(range(3)) ]):
+                   for dims in list(range(len(reference.shape))) ]):
         raise ValueError('Requested sphere centroid outside of reference image')
     
     if np.any(    [np.min(convertedBoundCoords[:,dims])-r>p[dims] or  
                    np.max(convertedBoundCoords[:,dims])+r<p[dims] 
-                   for dims in list(range(3)) ]):
+                   for dims in list(range(len(reference.shape))) ]):
         import warnings
         warnings.warn('Requested sphere partially outside of reference image')
     
@@ -291,7 +273,7 @@ def createSphere(r, p, reference):
     return nib.Nifti1Image(outSphereROI, affine=reference.affine)
 
 def multiROIrequestToMask(atlas,roiNums):
-    #multiROIrequestToMask(atlas,roiNums):
+    """multiROIrequestToMask(atlas,roiNums):
     #creates a nifti structure mask for the input atlas image of the specified labels
     #
     # INPUTS:
@@ -303,7 +285,7 @@ def multiROIrequestToMask(atlas,roiNums):
     # -outImg:  a mask with int(1) in those voxels where the associated labels were found.  If the label wasn't found, an empty nifti structure is output.
     
     ##NOTE REPLACE WITH nil.masking.intersect_masks when you get a chance
-    
+    """
     import numpy as np
     import nibabel as nib
     
@@ -313,23 +295,22 @@ def multiROIrequestToMask(atlas,roiNums):
     if  np.logical_not(np.all(np.isin(roiNumsInArray,np.unique(atlas.get_fdata()).astype(int)))):
         import warnings
         warnings.warn("WMA.multiROIrequestToMask WARNING: ROI label " + str(list(roiNumsInArray[np.logical_not(np.isin(roiNumsInArray,np.unique(atlas.get_fdata()).astype(int)))])) + " not found in input Nifti structure.")
-                
-    
-
-    
+        
+    #obtain coordiantes of all relevant label values
     labelCoords=np.where(np.isin(atlas.get_fdata(),roiNumsInArray))
-    
 
     #create blank data structure
     concatData=np.zeros(atlas.shape)
+    #set all appropriate values to true
     concatData[labelCoords]=True
 
+    #set all appropriate values to true
     concatOutNifti=nib.nifti1.Nifti1Image(concatData, affine=atlas.affine, header=atlas.header)
     
     return concatOutNifti
 
 def planarROIFromAtlasLabelBorder(inputAtlas,roiNums, relativePosition):
-    #planarROIFromAtlasLabelBorder(referenceNifti, mmPlane, dimension):
+    """#planarROIFromAtlasLabelBorder(referenceNifti, mmPlane, dimension):
     #generates a planar ROI at the specified label border from the input atlas
     #
     # INPUTS:
@@ -345,10 +326,11 @@ def planarROIFromAtlasLabelBorder(inputAtlas,roiNums, relativePosition):
     # -planarROI: the roi structure of the planar ROI
     #
     #  Daniel Bullock 2020 Bloomington
+    """
+    
     #this plane will be oblique to the subject's *actual anatomy* if they aren't
     #oriented orthogonally. As such, do this only after acpc-alignment
-    
-    import nibabel as nib
+
     #merge the inputs if necessary
     mergedRequest=multiROIrequestToMask(inputAtlas,roiNums)
     
@@ -371,52 +353,103 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     #test for intersection between the ROIS
     import nibabel as nib
     import numpy as np
-    import nilearn as nil
-    from nilearn.masking import intersect_masks
     
     #get the data
-    inputROINiftiData=inputROINifti.get_data()
-    inputPlanarROIData=inputPlanarROI.get_data()
+    inputROINiftiData=inputROINifti.get_fdata()
+    inputPlanarROIData=inputPlanarROI.get_fdata()
     
     #boolean to check if intersection
     intersectBool=np.any(np.logical_and(inputROINiftiData!=0,inputPlanarROIData!=0))
     if ~intersectBool:
         import warnings
         warnings.warn("WMA.sliceROIwithPlane WARNING: input planar ROI does not intersect with input ROI.")
-    
-    intersection=np.where(np.logical_and(inputROINiftiData!=0,inputPlanarROIData!=0))
-    
-    #find bounds for current planar ROI    
-    boundsTable=findMaxMinPlaneBound(inputPlanarROI)
 
-    #fix exception error for bad calls later
-    #if boundsTable['boundLabel'].str.contains(relativePosition).any():
-    #    print(boundsTable)
-    #    raise Exception("sliceROIwithPlane Error: plane-term mismatch detected.  Input relativePosition term uninterpretable relative to inputPlanarROI.")
     
+    #implement test to determine if input planar roi is indeed planar
+    #get coordinates of mask voxels in image space
+    planeVoxCoords=np.where(inputPlanarROI.get_fdata())
+    #find the unique values of img space coordinates for each dimension
+    uniqueCoordCounts=[len(np.unique(iCoords)) for iCoords in planeVoxCoords]
+    #one of them should be singular in the case of a planar roi, throw an error if not
+    if ~np.any(np.isin(uniqueCoordCounts,1)):
+        raise ValueError('input cut ROI not planar (i.e. single voxel thick for True values)')
+    
+    fullMask = nib.nifti1.Nifti1Image(np.ones(inputROINifti.get_fdata().shape), inputROINifti.affine, inputROINifti.header)
+    #pass full mask to subject space boundary function
+    fullVolumeBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
+    #get boundary mask coords for mask
+    maskVolumeBoundCoords=subjectSpaceMaskBoundaryCoords(inputPlanarROI)
+    #find the subject space plane that the dim is in
+    subjSpacePlaneDimIndex=np.where(~np.all(np.equal(fullVolumeBoundCoords,maskVolumeBoundCoords),axis=0))[0][0]
+    
+    #set up the dictionary for boundaries
+    positionTermsDict={'superior': np.max(fullVolumeBoundCoords[:,2]),
+                      'inferior': np.min(fullVolumeBoundCoords[:,2]),
+                      'medial':   np.min(fullVolumeBoundCoords[np.min(np.abs(fullVolumeBoundCoords[:,0]))==np.abs(fullVolumeBoundCoords[:,0]),0]),
+                      'lateral': np.max(fullVolumeBoundCoords[np.max(np.abs(fullVolumeBoundCoords[:,0]))==np.abs(fullVolumeBoundCoords[:,0]),0]),
+                      'anterior': np.max(fullVolumeBoundCoords[:,1]),
+                      'posterior': np.min(fullVolumeBoundCoords[:,1]),
+                      'rostral': np.max(fullVolumeBoundCoords[:,1]),
+                      'caudal': np.min(fullVolumeBoundCoords[:,1]),
+                      'left': np.min(fullVolumeBoundCoords[:,0]),
+                      'right': np.max(fullVolumeBoundCoords[:,0])}
+    
+    #set up the dictionary for dimensions
+    dimensionDict={'superior': 2,
+                   'inferior': 2,
+                   'medial':   0,
+                   'lateral': 0,
+                   'anterior': 1,
+                   'posterior': 1,
+                   'rostral': 1,
+                   'caudal': 1,
+                   'left': 0,
+                   'right': 0}    
 
-    #find the boundary that we will be filling to
-    fillBound=int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==relativePosition].to_numpy()[0]))
-    sortedBounds=np.sort((fillBound,int(float(boundsTable['boundValue'].loc[0]))))
-    #get the dimension indicator
-    dimIndicator=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==relativePosition].to_numpy()[0]))
-    #create blank output structure    
-    sliceKeepData=np.zeros(inputPlanarROIData.shape)  
+
+    planeCoords=[]
+    #i guess the only way
+    for iDims in list(range(len(inputROINifti.shape))):
+        #set step size at half the voxel length in this dimension
+        stepSize=fullMask.header.get_zooms()[iDims]*.5
+        if iDims==dimensionDict[relativePosition]:
+            #kind of wishy,washy, but because we halved the step size in the previous step
+            #by taking the average of the coord bounds (in subject space) we should actually be fine
+            #we'll use this as one of our two bounds
+            thisDimBounds=np.sort([np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]),positionTermsDict[relativePosition]])
+           
+        else:
+            thisDimBounds=np.sort([fullVolumeBoundCoords[0,iDims],fullVolumeBoundCoords[1,iDims]])
+           
+        #create a vector with the coords for this dimension
+        dimCoords=np.arange(thisDimBounds[0],thisDimBounds[1],stepSize)
+        #append it to the planeCoords list object
+        planeCoords.append(list(dimCoords))
+            
+    x, y, z = np.meshgrid(planeCoords[0], planeCoords[1], planeCoords[2],indexing='ij')
+    #squeeze the output (maybe not necessary)          
+    planeCloud= np.squeeze([x, y, z])
+    #convert to coordinate vector
+    testSplit=np.vstack(planeCloud).reshape(3,-1).T
+    #use dipy functions to treat point cloud like one big streamline, and move it back to image space
+    import dipy.tracking.utils as ut
+    lin_T, offset =ut._mapping_to_voxel(inputROINifti.affine)
+    inds = ut._to_voxel_coordinates(testSplit, lin_T, offset)
     
-    #there's probably a better way to do this,
-    if dimIndicator==0:
-        sliceKeepData[sortedBounds[0]:sortedBounds[1],:,:]=1
-    elif dimIndicator==1:
-        sliceKeepData[:,sortedBounds[0]:sortedBounds[1],:]=1
-    elif dimIndicator==2:
-        sliceKeepData[:,:,sortedBounds[0]:sortedBounds[1]]=1
+    #create a blank array for the keep area mask
+    keepArea=np.zeros(inputPlanarROI.shape).astype(bool)
+    #set the relevant indexes to true
+    #-1 because of zero indexing
+    #could be an issue here if mismatch between input nifti and planar roi
+    keepArea[inds[:,0]-1,inds[:,1]-1,inds[:,2]-1]=True 
     
     #create a nifti structure for this object
-    sliceKeepNifti=nib.nifti1.Nifti1Image(sliceKeepData, inputPlanarROI.affine, header=inputPlanarROI.header)
+    sliceKeepNifti=nib.nifti1.Nifti1Image(keepArea, inputPlanarROI.affine, header=inputPlanarROI.header)
     
     #intersect the ROIs to return the remaining portion
     #will cause a problem if Niftis have different affines.
-    remainingROI=intersect_masks([sliceKeepNifti,inputROINifti], threshold=1, connected=False)
+    from nilearn import masking 
+    remainingROI=masking.intersect_masks([sliceKeepNifti,inputROINifti], threshold=1, connected=False)
     #consider throwing an error here if the output Nifti is empty
     
     return remainingROI
@@ -440,133 +473,24 @@ def alignROItoReference(inputROI,reference):
     
     roiCoords=seeds_from_mask(inputROI.get_fdata(), inputROI.affine, density=densityKernel)
     
-    outROI=pointCloudToMask(roiCoords,reference)
+    #use dipy functions to treat point cloud like one big streamline, and move it back to image space
+    import dipy.tracking.utils as ut
+    lin_T, offset =ut._mapping_to_voxel(reference.affine)
+    inds = ut._to_voxel_coordinates(roiCoords, lin_T, offset)
+    #create a blank array for the keep area mask
+    outData=np.zeros(reference.shape).astype(bool)
+    #set the relevant indexes to true
+    #-1 because of zero indexing
+    outData[inds[:,0]-1,inds[:,1]-1,inds[:,2]-1]=True 
+    
+    #create a nifti structure for this object
+    outROI=nib.nifti1.Nifti1Image(outData, reference.affine, header=reference.header)
+
     return outROI
-    
-def findMaxMinPlaneBound(inputPlanarROI):
-    #indMaxMinPlaneBound(inputPlanarROI):
-    #finds the min and max (sensible) boundaries for the input planar ROI
-    #
-    # INPUTS
-    #
-    # -inputPlanarROI: a planar ROI nifti
-    #
-    # OUTPUTS
-    # -boundsTable: a pandas table containing the boundary labels and boundary values for this plane
-    import numpy as np
-    import pandas as pd
-    import nibabel as nib
-    from dipy.tracking.utils import seeds_from_mask
-    
-    #specify a kernel for the point cloud
-    
-    planeCoords=seeds_from_mask(inputPlanarROI.get_fdata(), inputPlanarROI.affine, density=2)
-    
-    #planeCoords=np.asarray(np.where(inputPlanarROIData!=0))
-    #python indexing?
-    findSingletonDimension=np.where(np.equal([len(np.unique(planeCoords[:,0])),len(np.unique(planeCoords[:,1])),len(np.unique(planeCoords[:,2]))],1))[0]
-  
-    singletonCoord=planeCoords[0,findSingletonDimension]
-    
-    #now find the dimenision in image space
-    imgSingletonDim=np.where(np.equal([len(np.unique(np.where(inputPlanarROI.get_fdata())[0])),len(np.unique(np.where(inputPlanarROI.get_fdata())[1])),len(np.unique(np.where(inputPlanarROI.get_fdata())[2]))],1))[0]
-    
-    centerPointImg=nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[0,0,0])
-    
-    samplePlaneCoordSubj=[0,0,0]
-    samplePlaneCoordSubj[findSingletonDimension[0]]=singletonCoord[0]
-    samplePlaneCoordImg=nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),samplePlaneCoordSubj)
-    
-    relativeImgPosition=samplePlaneCoordImg-centerPointImg
-    
-    #we need to translate the axes in case the affine is weird, and it often is
-    superiorPointTest=centerPointImg-nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[0,0,10])
-    leftPointTest=centerPointImg-nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[-10,0,0])
-    anteriorPointTest=centerPointImg-nib.affines.apply_affine(np.linalg.inv(inputPlanarROI.affine),[0,10,0])
-    
-    #use abs because sometimes there are flips and such.
-    xDimIndex=np.where(np.abs(leftPointTest)==np.max(np.abs(leftPointTest)))[0]
-    yDimIndex=np.where(np.abs(anteriorPointTest)==np.max(np.abs(anteriorPointTest)))[0]
-    zDimIndex=np.where(np.abs(superiorPointTest)==np.max(np.abs(superiorPointTest)))[0]
-    
-    
-    #NOTE: we're establishing all of these even if they aren't sensible
-    #conversion of logic for bad affines
-    #superiorBound = inputPlanarROI.shape[zDimIndex[0]]
-    #inferiorBound = 0
-    
-    #casing for flipped axes
-    if superiorPointTest[zDimIndex[0]]<0:
-       superiorBound = inputPlanarROI.shape[zDimIndex[0]]
-       inferiorBound = 0
-    elif superiorPointTest[zDimIndex[0]]>0:
-       superiorBound = 0
-       inferiorBound = inputPlanarROI.shape[zDimIndex[0]]
-
-    medialBound=   np.floor(centerPointImg[xDimIndex[0]])
-    #now do a check for lateral bound for a planar roi?  Only matters in case of plane in x dimension, and if x is a particular side
-    
-    # if its an x plane sitting on the midline...
-    if np.logical_and(findSingletonDimension[0] == 0,singletonCoord[0]==0):
-        #just default to the logic of a non-x plane -> give the coordinate of the "right side" of the data object
-        lateralBound=inputPlanarROI.shape[xDimIndex[0]]
-    #if the singleton dimension is x and the plane is closer to the max end of the array
-    elif np.logical_and(findSingletonDimension[0] == 0, relativeImgPosition[xDimIndex[0]]<0):
-        lateralBound=inputPlanarROI.shape[xDimIndex[0]]
-        #if the singleton dimension is x and the plane is closer to the min end of the array, the lateral bound is zero
-    elif np.logical_and(findSingletonDimension[0] == 0, relativeImgPosition[xDimIndex[0]]>0):
-        lateralBound=0
-        #if the plane of interest isnt an x plane, then the medial/lateral bound thing doesn't make sense, but we'll output the max val anyways
-    elif np.logical_not(findSingletonDimension[0] == 0):
-        lateralBound=inputPlanarROI.shape[xDimIndex[0]]
-        
-    if leftPointTest[xDimIndex[0]]>0:
-        leftBound=inputPlanarROI.shape[xDimIndex[0]]
-        rightBound=0
-    elif leftPointTest[xDimIndex[0]]<0:
-        leftBound=0
-        rightBound=inputPlanarROI.shape[xDimIndex[0]]
-
-    
-       #casing for flipped axes
-    if anteriorPointTest[yDimIndex[0]]<0:
-       anteriorBound= inputPlanarROI.shape[yDimIndex[0]]
-       posteriorBound = 0
-       rostralBound= inputPlanarROI.shape[yDimIndex[0]]
-       caudalBound= 0
-    elif anteriorPointTest[yDimIndex[0]]>0:
-       anteriorBound= 0
-       posteriorBound = inputPlanarROI.shape[yDimIndex[0]]
-       rostralBound= 0
-       caudalBound= inputPlanarROI.shape[yDimIndex[0]]
-
-    #conditional assignment of validStrings and boundVals
-    #these dimensional inferences are sound
-    
-    #allbounds=['posterior','anterior','caudal','rostral','medial','lateral','left', 'right','inferior','superior']
-    #also all bounds= [posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
-
-    borderStrings=['posterior','anterior','caudal','rostral', 'medial','lateral','left', 'right','inferior','superior']
-    boundVals=[posteriorBound,anteriorBound,caudalBound,rostralBound,medialBound,lateralBound,leftBound,rightBound, inferiorBound,superiorBound]
-    
-    dimIndexColumn=[imgSingletonDim[0],yDimIndex[0],yDimIndex[0],yDimIndex[0],yDimIndex[0],xDimIndex[0],xDimIndex[0],xDimIndex[0],xDimIndex[0],zDimIndex[0],zDimIndex[0]]
-    
-    labelColumn=['exactDim_'+str(imgSingletonDim[0])]+borderStrings
-    valueColumn=np.concatenate((samplePlaneCoordImg[imgSingletonDim],np.asarray(boundVals)))
-    #fill the out data structure
-    boundsTable=pd.DataFrame(np.array([labelColumn, valueColumn,dimIndexColumn]).T,
-                              columns=['boundLabel', 'boundValue','dimIndex'])
-    return boundsTable
     
 def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     """segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     #Iteratively applies ROI-based criteria
-    #
-    #adapted from https://github.com/dipy/dipy/blob/master/dipy/tracking/streamline.py#L200
-    #because we want (1) distinct "mode" inputs, (2) nifti inputs instead of coordinate cloud ROI inputs (3)a boolean output rather than a generator
-    #basically a variant of
-    #https://github.com/DanNBullock/wma/blob/33a02c0373d6742ddf07fd8ac3c8481662577743/utilities/wma_SegmentFascicleFromConnectome.m
-    #
     #INPUTS
     #
     # -streamlines: appropriately formatted list of candidate streamlines, e.g. a candidate tractome
@@ -593,9 +517,10 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     """
     import numpy as np
     
-    #create an array to store the boolean result of each round of segmentation
-    
-    
+    if ~ len(np.unique([len(roisvec), len(includeVec), len(operationsVec)]))==1:
+        raise ValueError('mismatch between lengths of roi, inclusion, and operation vectors')
+
+    #create an array to store the boolean result of each round of segmentation    
     outBoolArray=np.zeros(streamlines,len(roisvec))
     
     for iOperations in range(len(roisvec)):
@@ -722,48 +647,49 @@ def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operatio
     return outBoolVec
     
     
-def pointCloudToMask(pointCloudArray,referenceNifti):
-    #pointCloudToMask(streamlines, referenceNifti)
-    #creates a mask of a point cloud in the space and resolution of the input referenceNifti
-    #basically the reverse of seeds_from_mask
-    # 
-    # INPUTS
-    # -pointCloudArray: N X 3 array of points, corresponding to a point cloud
-    #
-    # -referenceNifti: reference nifti to obtain affine and data structure size
-    #
-    # OUTPUTS
-    #
-    #  cloudMaskNifti: mask of cloud, in nifti format
-    #
-    # NOTE: will throw error if tract mask doesn't fit in nifti bounds
+# def pointCloudToMask(pointCloudArray,referenceNifti):
+#     #pointCloudToMask(streamlines, referenceNifti)
+#     #creates a mask of a point cloud in the space and resolution of the input referenceNifti
+#     #basically the reverse of seeds_from_mask
+#     # 
+#     # INPUTS
+#     # -pointCloudArray: N X 3 array of points, corresponding to a point cloud
+#     #
+#     # -referenceNifti: reference nifti to obtain affine and data structure size
+#     #
+#     # OUTPUTS
+#     #
+#     #  cloudMaskNifti: mask of cloud, in nifti format
+#     #
+#     # NOTE: will throw error if tract mask doesn't fit in nifti bounds
+#     10/4/2021 note: depircated by dipy ut._mapping_to_voxel + ut._to_voxel_coordinates
     
-    import nibabel as nib
-    import numpy as np
+#     import nibabel as nib
+#     import numpy as np
     
-    referenceAffine=referenceNifti.affine
-    refrenceHeader=referenceNifti.header.copy()
-    maskData=np.zeros(referenceNifti.shape)
+#     referenceAffine=referenceNifti.affine
+#     refrenceHeader=referenceNifti.header.copy()
+#     maskData=np.zeros(referenceNifti.shape)
     
-    #there may be an offset issue here due to the smaller than 1 offset of the affine
-    maskImgCoords=np.unique(np.floor(nib.affines.apply_affine(np.linalg.inv(referenceNifti.affine),pointCloudArray)),axis=0).astype(int)
+#     #there may be an offset issue here due to the smaller than 1 offset of the affine
+#     maskImgCoords=np.unique(np.floor(nib.affines.apply_affine(np.linalg.inv(referenceNifti.affine),pointCloudArray)),axis=0).astype(int)
     
-    #throw exception if mask bounds exceed niftiBounds
-    maskBounds=np.asarray([np.min(maskImgCoords[:,0]),np.max(maskImgCoords[:,0]),np.min(maskImgCoords[:,1]),np.max(maskImgCoords[:,1]),np.min(maskImgCoords[:,2]),np.max(maskImgCoords[:,2])])
-    if np.logical_or(np.any(maskBounds[0:6:2]<0),np.any([maskBounds[1]>referenceNifti.shape[0],maskBounds[3]>referenceNifti.shape[1],maskBounds[5]>referenceNifti.shape[2]])):
-        raise Exception("tractMask Error: cloud mask exceends reference nifti bounding box.  Possible mismatch")
+#     #throw exception if mask bounds exceed niftiBounds
+#     maskBounds=np.asarray([np.min(maskImgCoords[:,0]),np.max(maskImgCoords[:,0]),np.min(maskImgCoords[:,1]),np.max(maskImgCoords[:,1]),np.min(maskImgCoords[:,2]),np.max(maskImgCoords[:,2])])
+#     if np.logical_or(np.any(maskBounds[0:6:2]<0),np.any([maskBounds[1]>referenceNifti.shape[0],maskBounds[3]>referenceNifti.shape[1],maskBounds[5]>referenceNifti.shape[2]])):
+#         raise Exception("tractMask Error: cloud mask exceends reference nifti bounding box.  Possible mismatch")
     
-    #fill in the mask data.
-    #array indexing misbehaves when you use  maskData[maskImgCoords], don't know why
-    maskData[maskImgCoords[:,0],maskImgCoords[:,1],maskImgCoords[:,2]]=1
+#     #fill in the mask data.
+#     #array indexing misbehaves when you use  maskData[maskImgCoords], don't know why
+#     maskData[maskImgCoords[:,0],maskImgCoords[:,1],maskImgCoords[:,2]]=1
     
-    #create out structure
-    cloudMaskNifti=nib.nifti1.Nifti1Image(maskData, referenceAffine, header=referenceNifti.header)
+#     #create out structure
+#     cloudMaskNifti=nib.nifti1.Nifti1Image(maskData, referenceAffine, header=referenceNifti.header)
     
-    return cloudMaskNifti
+#     return cloudMaskNifti
 
 def subsetStreamsByROIboundingBox(streamlines, maskNifti):
-    #subsetStreamsByROIboundingBox(streamlines, maskNifti):
+    """subsetStreamsByROIboundingBox(streamlines, maskNifti):
     #subsets the input set of streamlines to only those that have nodes within the box
     #
     # INPUTS
@@ -776,15 +702,15 @@ def subsetStreamsByROIboundingBox(streamlines, maskNifti):
     #
     # -criteriaVec:  a boolean vector indicating which streamlines contain nodes within the bounding box.
     #
+    """
     #compute distance tolerance
     from dipy.core.geometry import dist_to_corner
     
     #use distance to corner to set tolerance
     dtc = dist_to_corner(maskNifti.affine)
-    #get the voxel boundaries of the mask nifti
-    voxelBounds=returnMaskBoundingBoxVoxelIndexes(maskNifti)
+    
     #convert them to subject space
-    subjectSpaceBounds=subjectSpaceMaskBoundaryCoords(voxelBounds,maskNifti.affine)
+    subjectSpaceBounds=subjectSpaceMaskBoundaryCoords(maskNifti)
     #expand to accomidate tolerance
     subjectSpaceBounds[0,:]=subjectSpaceBounds[0,:]-dtc
     subjectSpaceBounds[1,:]=subjectSpaceBounds[1,:]-dtc
@@ -815,18 +741,27 @@ def streamlineWithinBounds(streamline,bounds):
     #return true if any single node is between all three sets of bounds
     return np.any(np.all(nodeCriteria,axis=0))
     
-def subjectSpaceMaskBoundaryCoords(inputVoxelBounds,affine):
+def subjectSpaceMaskBoundaryCoords(maskNifti):
     """ convert the boundary voxel indexes into subject space coordinates using the provided affine
     Args:
-        inputVoxelBounds: An appropriately shaped array containing the index coordinates of the vertexes (corners) of an n dimensional rectangle 
+        inputVoxelBounds: a mask nifti
         affine: an affine matrix with which to transform the voxel bounds / image space coordinates
 
     Output:
-        subjectSpaceBounds:  a 2 x n dimensional array indicating the minimum and maximum bounds for each dimension
+        subjectSpaceBounds:  a 2 x 3 dimensional array indicating the minimum and maximum bounds for each dimension
     """
+    
+    import dipy.segment.mask as mask
+    import numpy as np
+    refDimBounds=np.asarray(mask.bounding_box(maskNifti.get_fdata()))
+    
+    #use itertools and cartesian product to generate vertex img space coordinates
+    import itertools
+    outCoordnates=np.asarray(list(itertools.product(refDimBounds[:,0], refDimBounds[:,1], refDimBounds[:,2])))
+     
     #perform affine
     import nibabel as nib
-    convertedBoundCoords=nib.affines.apply_affine(affine,inputVoxelBounds)
+    convertedBoundCoords=nib.affines.apply_affine(maskNifti.affine,outCoordnates)
     
     #create holder for output
     import numpy as np
@@ -854,17 +789,49 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     """
     import numpy as np
     import nibabel as nib
-    import pandas as pd
     
+    fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_fdata().shape), planarROI.affine, planarROI.header)
+    #obtain boundary coords in subject space in order set max min values for interactive visualization
+    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
 
-    #get the borders of the plane, and thereby also determine the coordinate of the planar ROI
-    boundsTable=findMaxMinPlaneBound(planarROI)
+    #implement test to determine if input planar roi is indeed planar
+    #get coordinates of mask voxels in image space
     
-
+    from dipy.tracking.utils import apply_affine
+    planeSubjCoords=apply_affine(planarROI.affine, np.array(np.where(planarROI.get_fdata())).T)
+    #find the unique values of img space coordinates for each dimension
+    uniqueCoordCounts=[len(np.unique(planeSubjCoords[:,iCoords])) for iCoords in list(range(planeSubjCoords.shape[1]))]
+    #one of them should be singular in the case of a planar roi, throw an error if not
+    if ~np.any(np.isin(uniqueCoordCounts,1)):
+        raise ValueError('input ROI not planar (i.e. single voxel thick for True values)')
     
-    #throw an error if there's a mismatch
+    planeCoord=planeSubjCoords[0,np.where(np.equal(uniqueCoordCounts,1))[0][0]]
 
-    if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
+    #set up the dictionary for boundaries
+    positionTermsDict={'superior': np.max(convertedBoundCoords[:,2]),
+                      'inferior': np.min(convertedBoundCoords[:,2]),
+                      'medial':   np.min(convertedBoundCoords[np.min(np.abs(convertedBoundCoords[:,0]))==np.abs(convertedBoundCoords[:,0]),0]),
+                      'lateral': np.max(convertedBoundCoords[np.max(np.abs(convertedBoundCoords[:,0]))==np.abs(convertedBoundCoords[:,0]),0]),
+                      'anterior': np.max(convertedBoundCoords[:,1]),
+                      'posterior': np.min(convertedBoundCoords[:,1]),
+                      'rostral': np.max(convertedBoundCoords[:,1]),
+                      'caudal': np.min(convertedBoundCoords[:,1]),
+                      'left': np.min(convertedBoundCoords[:,0]),
+                      'right': np.max(convertedBoundCoords[:,0])}
+    
+    dimensionDict={'superior': 2,
+                   'inferior': 2,
+                   'medial':   0,
+                   'lateral': 0,
+                   'anterior': 1,
+                   'posterior': 1,
+                   'rostral': 1,
+                   'caudal': 1,
+                   'left': 0,
+                   'right': 0}        
+    
+    #throw an error if there's a mismatch 
+    if  np.logical_not(np.where(np.equal(uniqueCoordCounts,1))[0][0]==dimensionDict[requirement]):
         raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
     
     #create blank structure for endpoints
@@ -875,34 +842,28 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
         #remember, first 3 = endpoint 1, last 3 = endpoint 2    
         endpoints[iStreamline,:]= np.concatenate([streamlines[iStreamline][0,:], streamlines[iStreamline][-1,:]])
     
-    convertedEndpoints1=nib.affines.apply_affine(np.linalg.inv(planarROI.affine),endpoints[:,0:3])
-    convertedEndpoints2=nib.affines.apply_affine(np.linalg.inv(planarROI.affine),endpoints[:,3:7])
+    Endpoints1=endpoints[:,0:3]
+    Endpoints2=endpoints[:,3:7]
     
     #sort the bounds
-    sortedBounds=np.sort((int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==requirement].to_numpy())),int(float(boundsTable['boundValue'].loc[0]))))
+    sortedBounds=np.sort(planeCoord,positionTermsDict[requirement])
     #get the relevant image dimension
-    imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))
+    spaceDim=np.where(np.equal(uniqueCoordCounts,1))[0][0]
     
     #apply the criteria to both endpoints
-    endpoints1Criteria=np.logical_and(np.greater(convertedEndpoints1[:,imageDim],sortedBounds[0]),np.less(convertedEndpoints1[:,imageDim],sortedBounds[1]))
-    endpoints2Criteria=np.logical_and(np.greater(convertedEndpoints2[:,imageDim],sortedBounds[0]),np.less(convertedEndpoints2[:,imageDim],sortedBounds[1]))
+    endpoints1Criteria=np.logical_and(np.greater(Endpoints1[:,spaceDim],sortedBounds[0]),np.less(Endpoints1[:,spaceDim],sortedBounds[1]))
+    endpoints2Criteria=np.logical_and(np.greater(Endpoints2[:,spaceDim],sortedBounds[0]),np.less(Endpoints2[:,spaceDim],sortedBounds[1]))
     
-    def interpretWhichEndpoints(x):
-        #might do some weird stuff for equal values
-        return {
-            'neither': 0,
-            'one': 1,
-            'both':   2,
-        }[x]
+    whichEndpointsDict={'neither': 0,
+                        'one': 1,
+                        'both':   2}
     
-    #get the target number of endpoints matching criteria
-    targetValue=interpretWhichEndpoints(whichEndpoints)
     
     #sum the two endpoint criterion vectors
     sumVec=np.add(endpoints1Criteria,endpoints2Criteria,dtype=int)
     
     #see where the target value is met
-    targetMetVec=sumVec==targetValue
+    targetMetVec=sumVec==whichEndpointsDict[whichEndpoints]
     
     return targetMetVec
     
@@ -918,13 +879,49 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     """
     import numpy as np
     import nibabel as nib
-    import pandas as pd
+    
+    fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_fdata().shape), planarROI.affine, planarROI.header)
+    #obtain boundary coords in subject space in order set max min values for interactive visualization
+    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
 
-    #get the borders of the plane, and thereby also determine the coordinate of the planar ROI
-    boundsTable=findMaxMinPlaneBound(planarROI)
-       
-    #throw an error if there's a mismatch
-    if  np.logical_not(int(boundsTable['dimIndex'].loc[0])==int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))):
+    #implement test to determine if input planar roi is indeed planar
+    #get coordinates of mask voxels in image space
+    
+    from dipy.tracking.utils import apply_affine
+    planeSubjCoords=apply_affine(planarROI.affine, np.array(np.where(planarROI.get_fdata())).T)
+    #find the unique values of img space coordinates for each dimension
+    uniqueCoordCounts=[len(np.unique(planeSubjCoords[:,iCoords])) for iCoords in list(range(planeSubjCoords.shape[1]))]
+    #one of them should be singular in the case of a planar roi, throw an error if not
+    if ~np.any(np.isin(uniqueCoordCounts,1)):
+        raise ValueError('input ROI not planar (i.e. single voxel thick for True values)')
+    
+    planeCoord=planeSubjCoords[0,np.where(np.equal(uniqueCoordCounts,1))[0][0]]
+
+    #set up the dictionary for boundaries
+    positionTermsDict={'superior': np.max(convertedBoundCoords[:,2]),
+                      'inferior': np.min(convertedBoundCoords[:,2]),
+                      'medial':   np.min(convertedBoundCoords[np.min(np.abs(convertedBoundCoords[:,0]))==np.abs(convertedBoundCoords[:,0]),0]),
+                      'lateral': np.max(convertedBoundCoords[np.max(np.abs(convertedBoundCoords[:,0]))==np.abs(convertedBoundCoords[:,0]),0]),
+                      'anterior': np.max(convertedBoundCoords[:,1]),
+                      'posterior': np.min(convertedBoundCoords[:,1]),
+                      'rostral': np.max(convertedBoundCoords[:,1]),
+                      'caudal': np.min(convertedBoundCoords[:,1]),
+                      'left': np.min(convertedBoundCoords[:,0]),
+                      'right': np.max(convertedBoundCoords[:,0])}
+    
+    dimensionDict={'superior': 2,
+                   'inferior': 2,
+                   'medial':   0,
+                   'lateral': 0,
+                   'anterior': 1,
+                   'posterior': 1,
+                   'rostral': 1,
+                   'caudal': 1,
+                   'left': 0,
+                   'right': 0}        
+    
+    #throw an error if there's a mismatch 
+    if  np.logical_not(np.where(np.equal(uniqueCoordCounts,1))[0][0]==dimensionDict[requirement]):
         raise Exception("applyEndpointCriteria Error: input relative position " + requirement + " not valid for input plane.")
 
     #use dipy to get the midpoints    
@@ -932,16 +929,15 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     feature = MidpointFeature()
     midpoints = np.squeeze(np.asarray(list(map(feature.extract, streamlines))))
     
-    convertedMidpoints=nib.affines.apply_affine(np.linalg.inv(planarROI.affine),midpoints)
     
     #sort the bounds
-    sortedBounds=np.sort((int(float(boundsTable['boundValue'].loc[boundsTable['boundLabel']==requirement].to_numpy())),int(float(boundsTable['boundValue'].loc[0]))))
+    sortedBounds=np.sort(planeCoord,positionTermsDict[requirement])
     #get the relevant image dimension
-    imageDim=int(float(boundsTable['dimIndex'].loc[boundsTable['boundLabel']==requirement].to_numpy()))
+    spaceDim=np.where(np.equal(uniqueCoordCounts,1))[0][0]
     
-    #apply the criteria to the midpoint
-    midpointsCriteria=np.logical_and(np.greater(convertedMidpoints[:,imageDim],sortedBounds[0]),np.less(convertedMidpoints[:,imageDim],sortedBounds[1]))
-    
+    #apply the criteria to both endpoints
+    midpointsCriteria=np.logical_and(np.greater(midpoints[:,spaceDim],sortedBounds[0]),np.less(midpoints[:,spaceDim],sortedBounds[1]))
+
     return midpointsCriteria     
 
 def maskMatrixByBoolVec(dipyGrouping,boolVec):
@@ -1478,9 +1474,59 @@ def crossSectionGIFsFromTract(tractogram,refAnatT1,saveDir):
     import nibabel as nib
     #use dipy to create the density mask
     from dipy.tracking import utils
-    densityMap=utils.density_map(tractogram.streamlines, refAnatT1.affine, refAnatT1.shape)
-    densityNifti=nib.nifti1.Nifti1Image(densityMap,refAnatT1.affine, refAnatT1.header)
+    import numpy as np
     
-    for iDims in range(2):
-        print('you arent done with this function ')
+    from nilearn.image import crop_img 
+    croppedReference=crop_img(refAnatT1)
+    
+    densityMap=utils.density_map(tractogram.streamlines, croppedReference.affine, croppedReference.shape)
+    densityNifti=nib.nifti1.Nifti1Image(densityMap,croppedReference.affine, croppedReference.header)
+    
+    #refuses to plot single slice, single image
+    #from nilearn.plotting import plot_stat_map
+    #outImg=plot_stat_map(stat_map_img=densityNifti,bg_img=refAnatT1, cut_coords= 1,display_mode='x',cmap='viridis')
+   
+    
+    #obtain boundary coords in subject space in order to
+    #use plane generation function
+    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(croppedReference)
+    
+    dimsList=['x','y','z']
+    #brute force with matplotlib
+    import matplotlib.pyplot as plt
+    for iDims in list(range(len(croppedReference.shape))):
+        #this assumes that get_zooms returns zooms in subject space and not image space orientation
+        # which may not be a good assumption if the orientation is weird
+        subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1.header.get_zooms()[iDims])
+        #get the desired broadcast shape and delete current dim value
+        broadcastShape=list(croppedReference.shape)
+        del broadcastShape[iDims]
         
+        #iterate across slices
+        for iSlices in list(range(len(subjectSpaceSlices))):
+            #set the slice list entry to the appropriate singular value
+            currentSlice=makePlanarROI(croppedReference, subjectSpaceSlices[iSlices], dimsList[iDims])
+
+            #set up the figure
+            fig,ax = plt.subplots()
+            ax.axis('off')
+            #kind of overwhelming to do this in one line
+            refData=np.rot90(np.reshape(croppedReference.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+            plt.imshow(refData, cmap='gray', interpolation='nearest')
+            #kind of overwhelming to do this in one line
+            densityData=np.rot90(np.reshape(densityNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+            plt.imshow(np.ma.masked_where(densityData<1,densityData), cmap='viridis', alpha=.5, interpolation='nearest')
+            figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)
+            plt.savefig(figName,bbox_inches='tight')
+            plt.clf()
+    
+    import os        
+    from PIL import Image
+    import glob
+    for iDims in list(range(len(croppedReference.shape))):
+        dimStem='dim_' + str(iDims)
+        img, *imgs = [Image.open(f) for f in sorted(glob.glob(dimStem+'*.png'))]
+        img.save(os.path.join(saveDir,dimStem+'.gif'), format='GIF', append_images=imgs,
+                 save_all=True, duration=len(imgs)*2, loop=0)
+        os.remove(sorted(glob.glob(dimStem+'*.png')))
+    
