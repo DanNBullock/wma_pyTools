@@ -114,43 +114,6 @@ def roiFromAtlas(atlas,roiNum):
     outImg = nib.nifti1.Nifti1Image(outData, atlas.affine, outHeader)
     return outImg
 
-# def returnMaskBoundingBoxVoxelIndexes(maskNifti):
-#     #returnMaskBoundingBoxVoxelIndexes(atlas,roiNum):
-#     #returns the 8 verticies corresponding to the vertices of the mask's bounding box IN IMAGE SPACE
-#     #(i.e. indicating the voxel indexes that correspond to these points)
-#     #
-#     # INPUTS:
-#     # -maskNifti:  a nifti with ONLY 1 and 0 (int) as the content, a boolean mask, in essence
-#     #
-#     # OUTPUTS:
-#     # -boundingCoordArray:  an 8 by 3 array indicating the VoxelIndexes of the bounding box
-#     10/4/2021 NOTE: DEPRICATED BY dipy.segment.mask.bounding_box
-# https://github.com/dipy/dipy/blob/bd0bf68148430990f0cfa37278cd81bb745d639f/dipy/segment/mask.py#L74
-    
-#     import nibabel as nib
-#     import numpy as np
-    
-#     #get the data
-#     maskData = maskNifti.get_fdata()
-#     #check to make sure its a mask
-#     if len(np.unique(maskData))> 2:
-#       raise Exception("returnMaskBoundingBoxVoxelIndexes Error: Non mask input detected.  " + str(len(np.unique(maskData))) + " unique values detected in input NIfTI structure.")
-    
-#     #find the indexes of the nonzero entries
-#     nonZeroIndexes=np.nonzero(maskData)
-#     #find the min and max for each dimension
-#     maxDim1=np.max(nonZeroIndexes[0])
-#     minDim1=np.min(nonZeroIndexes[0])
-#     maxDim2=np.max(nonZeroIndexes[1])
-#     minDim2=np.min(nonZeroIndexes[1])  
-#     maxDim3=np.max(nonZeroIndexes[2])
-#     minDim3=np.min(nonZeroIndexes[2])
-    
-#     #user itertools and cartesian product
-#     import itertools
-#     outCoordnates=np.asarray(list(itertools.product([maxDim1,minDim1], [maxDim2,minDim2], [maxDim3,minDim3])))
-#     return outCoordnates
-
 def planeAtMaskBorder(inputMask,relativePosition):
     """#planeAtMaskBorder(inputNifti,roiNum,relativePosition):
     #creates a planar roi at the specified border of the specified ROI.
@@ -267,10 +230,10 @@ def createSphere(r, p, reference):
     voxelDims=reference.header.get_zooms()
     mask_r = x*x*voxelDims[0] + y*y*voxelDims[1] + z*z*voxelDims[2] <= r*r
 
-    outSphereROI = np.zeros(dims)
-    outSphereROI[mask_r] = 1
+    outSphereROI = np.zeros(dims, dtype=bool)
+    outSphereROI[mask_r] = True
     #not sure of robustness to strange input affines, but seems to work
-    return nib.Nifti1Image(outSphereROI, affine=reference.affine)
+    return nib.Nifti1Image(outSphereROI, affine=reference.affine, header=reference.header)
 
 def multiROIrequestToMask(atlas,roiNums):
     """multiROIrequestToMask(atlas,roiNums):
@@ -521,10 +484,11 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
         raise ValueError('mismatch between lengths of roi, inclusion, and operation vectors')
 
     #create an array to store the boolean result of each round of segmentation    
-    outBoolArray=np.zeros(streamlines,len(roisvec))
+    outBoolArray=np.zeros([len(streamlines),len(roisvec)],dtype=bool)
     
-    for iOperations in range(len(roisvec)):
+    for iOperations in list(range(len(roisvec))):
         
+        #perform this segmentation operation
         curBoolVec=applyNiftiCriteriaToTract_DIPY(streamlines, roisvec[iOperations], includeVec[iOperations], operationsVec[iOperations])
         
         #if this is the first segmentation application
@@ -533,13 +497,15 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
             outBoolArray[:,iOperations]=curBoolVec
         #otherwise
         else:
+            #obtain the indexes for the previous round of survivors
             lastRoundSurvivingIndexes=np.where(outBoolArray[:,iOperations-1])[0]
-            thisRoundSurvivingIndexes=lastRoundSurvivingIndexes[np.where(outBoolArray[:,iOperations])[0]]
+            #of those, determine which survived this round
+            thisRoundSurvivingIndexes=lastRoundSurvivingIndexes[np.where(curBoolVec)[0]]
         
-            #set relevant array entries to true
-            outBoolArray[thisRoundSurvivingIndexes,iOperations]=1
+            #set the entries that survived the previous round AND this round to true
+            outBoolArray[thisRoundSurvivingIndexes,iOperations]=True
         
-        #in either case, subsegment the streamlines to speed up the next iteration
+        #in either case, subsegment the streamlines to the remaining streamlines in order to speed up the next iteration
         streamlines=streamlines[np.where(curBoolVec)[0]]
         
     #when all iterations are complete collapse across the colums and return only those streams that met all criteria
@@ -629,7 +595,7 @@ def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operatio
     #second track mask application doesn't seem to do anything    
     
     #use dipy's near roi function to generate bool
-    criteriaStreamsBool=near_roi(boundedStreamSubset, tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata(), mode=operationSpec)
+    criteriaStreamsBool=near_roi(boundedStreamSubset, tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata().astype(bool), mode=operationSpec)
     
     #if the input instruction is NOT, negate the output
     if np.logical_not(includeBool):
@@ -645,48 +611,6 @@ def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operatio
     outBoolVec[originalIndexes]=True
     
     return outBoolVec
-    
-    
-# def pointCloudToMask(pointCloudArray,referenceNifti):
-#     #pointCloudToMask(streamlines, referenceNifti)
-#     #creates a mask of a point cloud in the space and resolution of the input referenceNifti
-#     #basically the reverse of seeds_from_mask
-#     # 
-#     # INPUTS
-#     # -pointCloudArray: N X 3 array of points, corresponding to a point cloud
-#     #
-#     # -referenceNifti: reference nifti to obtain affine and data structure size
-#     #
-#     # OUTPUTS
-#     #
-#     #  cloudMaskNifti: mask of cloud, in nifti format
-#     #
-#     # NOTE: will throw error if tract mask doesn't fit in nifti bounds
-#     10/4/2021 note: depircated by dipy ut._mapping_to_voxel + ut._to_voxel_coordinates
-    
-#     import nibabel as nib
-#     import numpy as np
-    
-#     referenceAffine=referenceNifti.affine
-#     refrenceHeader=referenceNifti.header.copy()
-#     maskData=np.zeros(referenceNifti.shape)
-    
-#     #there may be an offset issue here due to the smaller than 1 offset of the affine
-#     maskImgCoords=np.unique(np.floor(nib.affines.apply_affine(np.linalg.inv(referenceNifti.affine),pointCloudArray)),axis=0).astype(int)
-    
-#     #throw exception if mask bounds exceed niftiBounds
-#     maskBounds=np.asarray([np.min(maskImgCoords[:,0]),np.max(maskImgCoords[:,0]),np.min(maskImgCoords[:,1]),np.max(maskImgCoords[:,1]),np.min(maskImgCoords[:,2]),np.max(maskImgCoords[:,2])])
-#     if np.logical_or(np.any(maskBounds[0:6:2]<0),np.any([maskBounds[1]>referenceNifti.shape[0],maskBounds[3]>referenceNifti.shape[1],maskBounds[5]>referenceNifti.shape[2]])):
-#         raise Exception("tractMask Error: cloud mask exceends reference nifti bounding box.  Possible mismatch")
-    
-#     #fill in the mask data.
-#     #array indexing misbehaves when you use  maskData[maskImgCoords], don't know why
-#     maskData[maskImgCoords[:,0],maskImgCoords[:,1],maskImgCoords[:,2]]=1
-    
-#     #create out structure
-#     cloudMaskNifti=nib.nifti1.Nifti1Image(maskData, referenceAffine, header=referenceNifti.header)
-    
-#     return cloudMaskNifti
 
 def subsetStreamsByROIboundingBox(streamlines, maskNifti):
     """subsetStreamsByROIboundingBox(streamlines, maskNifti):
@@ -1477,6 +1401,8 @@ def crossSectionGIFsFromTract(tractogram,refAnatT1,saveDir):
     import numpy as np
     
     from nilearn.image import crop_img 
+    #nilearn.image.resample_img ? to resample output
+    
     croppedReference=crop_img(refAnatT1)
     
     densityMap=utils.density_map(tractogram.streamlines, croppedReference.affine, croppedReference.shape)
