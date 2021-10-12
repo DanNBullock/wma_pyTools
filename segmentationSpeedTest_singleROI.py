@@ -6,9 +6,8 @@ and WMA_pyFuncs.segmentTractMultiROI_NaiveDIPY
 which utilizes a number of shortcuts to acheive a ~.5-1 order of magnitude
 speedup
 
-This particular test looks at the comparison in the particular case of 2 ROIS
-that are essentially treated as conjunct OR.  That is, streamlines pass
-through either of 2 rois.
+This particular test looks at the comparison in the particular case of a single
+ROI
 
 Created on Thu Oct  7 15:09:31 2021
 
@@ -33,6 +32,8 @@ testTractogram = nib.streamlines.load(pathToTestTractogram)
 pathToTestT1 ='/media/dan/storage/data/exploreTractography/T1_in_b0_unifized_GM.nii.gz'
 testT1 = nib.load(pathToTestT1)
 
+
+
 # get a mask of the whole brain tract
 tractMask=ut.density_map(testTractogram.streamlines, testT1.affine, testT1.shape)
 #extract these as coordinates
@@ -40,14 +41,14 @@ imgSpaceTractVoxels = np.array(np.where(tractMask)).T
 subjectSpaceTractCoords = nib.affines.apply_affine(testT1.affine, imgSpaceTractVoxels)
 
 # create a dataframe for the output
-outputDataframe=pd.DataFrame(columns=['dipyTime','modifiedTime','dipyCount','modifiedCount','testRadius'])
+outputDataframe=pd.DataFrame(columns=['dipyTime','modifiedTime','dipyCount','modifiedCount','testRadius','operation'])
 
 #arbitrarily set the number of rois per test.
 #Increasing this beyond 2 isn't that helpful because its highly unlikely that 
 #any given streamline passes though 3 randomly placed spheres
-roiNumToTest=2
+roiNumToTest=1
 
-for iTests in list(range(1,75)):
+for iTests in list(range(1,20)):
     #initalize list structures at the start of each test
     roisData = []
     roisNifti =[]
@@ -62,7 +63,7 @@ for iTests in list(range(1,75)):
         # NOTE: This could be on the edge or deep in the tractogram
         testCentroid = subjectSpaceTractCoords[np.random.randint(0,len(subjectSpaceTractCoords))]
         # obtain that data array as bool
-        sphereNifti=createSphere(testRadius, testCentroid, testT1)
+        sphereNifti=WMA_pyFuncs.createSphere(testRadius, testCentroid, testT1)
         # add that and a True to the list vector for each
         roisData.append(sphereNifti.get_fdata().astype(bool))
         roisNifti.append(sphereNifti)
@@ -73,9 +74,11 @@ for iTests in list(range(1,75)):
     # start timing
     t1_start=time.process_time()
     # specify segmentation
-    dipySegmented=select_by_rois(testTractogram.streamlines, testT1.affine, roisData, include, mode='any')
-    # actually perform segmentation and get count (cant do indexes here for whatever reason)
-    dipyCount=len(list(dipySegmented))
+    dipySegmented=ut.near_roi(testTractogram.streamlines, testT1.affine, roisData[0], mode='any')
+    if include[0]:
+        dipyCount=np.sum(dipySegmented)
+    else:
+        dipyCount=np.sum(np.logical_not(dipySegmented))
     # stop time
     t1_stop=time.process_time()
     # get the elapsed time
@@ -84,9 +87,7 @@ for iTests in list(range(1,75)):
     #restart time
     t1_start=time.process_time()
     #perform segmentation again, but with the modified version
-    #for a valid comparison between these methods we have to split into two operations
-    #since select_by_rois
-    modifiedSegmented1=WMA_pyFuncs.segmentTractMultiROI(testTractogram.streamlines, roisNifti, include, operations)
+    modifiedSegmented=WMA_pyFuncs.segmentTractMultiROI(testTractogram.streamlines, roisNifti, include, operations)
     # stop time
     t1_stop=time.process_time()
     # get the elapsed time
@@ -100,5 +101,6 @@ for iTests in list(range(1,75)):
     outputDataframe.at[iTests,'dipyCount']=dipyCount
     outputDataframe.at[iTests,'modifiedCount']=modifiedCount
     outputDataframe.at[iTests,'testRadius']=testRadius
-
-outputDataframe.to_csv('2ConjOr.csv')
+    outputDataframe.at[iTests,'operation']=include
+    
+outputDataframe.to_csv('singleROI.csv')

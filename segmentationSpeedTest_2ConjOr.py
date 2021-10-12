@@ -40,14 +40,14 @@ imgSpaceTractVoxels = np.array(np.where(tractMask)).T
 subjectSpaceTractCoords = nib.affines.apply_affine(testT1.affine, imgSpaceTractVoxels)
 
 # create a dataframe for the output
-outputDataframe=pd.DataFrame(columns=['dipyTime','modifiedTime','dipyCount','modifiedCount','testRadius'])
+outputDataframe=pd.DataFrame(columns=['dipyTime','modifiedTime','dipyCount','modifiedCount','testRadius','operation'])
 
 #arbitrarily set the number of rois per test.
 #Increasing this beyond 2 isn't that helpful because its highly unlikely that 
 #any given streamline passes though 3 randomly placed spheres
 roiNumToTest=2
 
-for iTests in list(range(1,75)):
+for iTests in list(range(1,20)):
     #initalize list structures at the start of each test
     roisData = []
     roisNifti =[]
@@ -62,7 +62,7 @@ for iTests in list(range(1,75)):
         # NOTE: This could be on the edge or deep in the tractogram
         testCentroid = subjectSpaceTractCoords[np.random.randint(0,len(subjectSpaceTractCoords))]
         # obtain that data array as bool
-        sphereNifti=createSphere(testRadius, testCentroid, testT1)
+        sphereNifti=WMA_pyFuncs.createSphere(testRadius, testCentroid, testT1)
         # add that and a True to the list vector for each
         roisData.append(sphereNifti.get_fdata().astype(bool))
         roisNifti.append(sphereNifti)
@@ -85,14 +85,22 @@ for iTests in list(range(1,75)):
     t1_start=time.process_time()
     #perform segmentation again, but with the modified version
     #for a valid comparison between these methods we have to split into two operations
-    #since select_by_rois
-    modifiedSegmented1=WMA_pyFuncs.segmentTractMultiROI(testTractogram.streamlines, roisNifti, include, operations)
+    #since select_by_rois implicitly treats multiple operations in a fairly
+    #specific modal fashion (https://github.com/dipy/dipy/blob/8898fc962d5aaf7f7cdbf82b027054070fcef49d/dipy/tracking/streamline.py#L240-L243)
+    modifiedSegmented1=WMA_pyFuncs.segmentTractMultiROI(testTractogram.streamlines, [roisNifti[0]], [include[0]], [operations[0]])
+    modifiedSegmented2=WMA_pyFuncs.segmentTractMultiROI(testTractogram.streamlines, [roisNifti[1]], [include[1]], [operations[1]])
+    #now we have to manually match the implicit logic of select_by_rois
+    if np.all(include):
+        netmodifiedSegmented=np.logical_or(modifiedSegmented1,modifiedSegmented2)
+    #in all other cases its just a logical and
+    else:
+        netmodifiedSegmented=np.logical_and(modifiedSegmented1,modifiedSegmented2)
     # stop time
     t1_stop=time.process_time()
     # get the elapsed time
     modifiedTime=t1_stop-t1_start
     #get the count
-    modifiedCount=np.sum(modifiedSegmented)
+    modifiedCount=np.sum(netmodifiedSegmented)
     
     #set the dataframe entries
     outputDataframe.at[iTests,'dipyTime']=dipyTime
@@ -100,5 +108,6 @@ for iTests in list(range(1,75)):
     outputDataframe.at[iTests,'dipyCount']=dipyCount
     outputDataframe.at[iTests,'modifiedCount']=modifiedCount
     outputDataframe.at[iTests,'testRadius']=testRadius
+    outputDataframe.at[iTests,'operation']=include
 
 outputDataframe.to_csv('2ConjOr.csv')

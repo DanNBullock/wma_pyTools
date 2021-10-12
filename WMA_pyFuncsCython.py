@@ -1658,23 +1658,7 @@ def complexStreamlinesIntersect(streamlines, maskNifti):
         inds = ut._to_voxel_coordinates(streamlines._data, lin_T, offset)
         streamlineCoords=np.floor((inds*.5))
 
-def fastCoordInBounds(coord,bounds):
-    #seems slower by an order of magnitude
-    outVal=False
-    if coord[0]>bounds[0,0]:
-        if coord[0]<bounds[0,1]:
-            if coord[1]>bounds[1,0]:
-                if coord[1]<bounds[1,1]:
-                    if coord[2]>bounds[2,0]:
-                        if coord[2]<bounds[2,1]:
-                            outVal=True
-    
-    return outVal
 
-def fastCoordInBounds(coord, bounds):
-    yield bounds[0, 0] < coord[0] < bounds[0, 1]
-    yield bounds[1, 0] < coord[1] < bounds[1, 1]
-    yield bounds[2, 0] < coord[2] < bounds[2, 1]
 
 def streamlineNodesWithinBounds_test(streamline,bounds):
     """ determine whether **any** node of the input streamline is within the specified bounds
@@ -1740,8 +1724,12 @@ def subsetStreamsNodesByROIboundingBox_test(streamlines, maskNifti):
     subjectSpaceBounds[1,:]=subjectSpaceBounds[1,:]+dtc
     
     #map and lambda function to extract the nodes within the bounds
-    criteriaVec=list(map(lambda streamline: streamlineNodesWithinBounds_test(streamline,subjectSpaceBounds), streamlines))
-    outIndexes=np.where(list(map(lambda x: x.size>0, criteriaVec)))[0]
+    #criteriaVec=list(map(lambda streamline: streamlineNodesWithinBounds_test(streamline,subjectSpaceBounds), streamlines))
+    #outIndexes=np.where(list(map(lambda x: x.size>0, criteriaVec)))[0]
+    criteriaVec=[]
+    for iStreams in streamlines
+    
+    
     outStreams=Streamlines(criteriaVec)
     
     print('Tractogram subseting complete, '+str(len(outIndexes)) + ' of ' + str(len(streamlines)) + ' within mask boundaries')
