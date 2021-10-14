@@ -780,6 +780,10 @@ def subsetStreamsNodesByROIboundingBox(streamlines, maskNifti):
     from dipy.core.geometry import dist_to_corner
     from dipy.tracking.streamline import Streamlines
     import numpy as np
+    import time
+    
+    #begin timing
+    t1_start=time.process_time()
     
     #use distance to corner to set tolerance
     dtc = dist_to_corner(maskNifti.affine)
@@ -795,7 +799,12 @@ def subsetStreamsNodesByROIboundingBox(streamlines, maskNifti):
     outIndexes=np.where(list(map(lambda x: x.size>0, criteriaVec)))[0]
     outStreams=Streamlines(criteriaVec)
     
-    print('Tractogram subseting complete, '+str(len(outIndexes)) + ' of ' + str(len(streamlines)) + ' within mask boundaries')
+    #stop timing
+    t1_stop=time.process_time()
+    # get the elapsed time
+    modifiedTime=t1_stop-t1_start
+    
+    print('Tractogram subseting complete in ' +str(modifiedTime) +', '+str(len(outIndexes)) + ' of ' + str(len(streamlines)) + ' within mask boundaries')
     return outIndexes, outStreams
 
 def streamlineWithinBounds(streamline,bounds):
@@ -1629,24 +1638,70 @@ def crossSectionGIFsFromTract(tractogram,refAnatT1,saveDir):
 
 def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
     import dipy.tracking.utils as ut
-    import dipy.tracking.streamline
+    import dipy.tracking.streamline as streamline
     import numpy as np
     import nibabel as nib
-    # get a mask of the whole brain tract
-    tractMask=ut.density_map(streamlines, referenceNifti.affine, referenceNifti.shape)
-    #extract these as coordinates
-    imgSpaceTractVoxels = np.array(np.where(tractMask)).T
-    subjectSpaceTractCoords = nib.affines.apply_affine(referenceNifti.affine, imgSpaceTractVoxels)
+    from scipy.spatial.distance import cdist
+    from dipy.tracking.vox2track import streamline_mapping
+    import itertools
+    
+    # get a streamline index dict of the whole brain tract
+    streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
+    #extract the dictionary keys as coordinates
+    imgSpaceTractVoxels = list(streamlineMapping.keys())
+    subjectSpaceTractCoords = nib.affines.apply_affine(referenceNifti.affine, np.asarray(imgSpaceTractVoxels))  
     
     returnValues=np.zeros(len(subjectSpaceTractCoords))
     #probably a more elegant way to do this
-    for iCoords in subjectSpaceTractCoords:
+    for iCoords in range(len(subjectSpaceTractCoords)):
         #make a sphere
-        currentSphere=createSphere(distanceParameter, iCoords, referenceNifti)
-        #segment with the sphere
-        streamsIndex=applyNiftiCriteriaToTract_DIPY_Test(streamlines, currentSphere, True, 'any')
-        #orientedStreams=streamline.orient_by_streamline()
+        currentSphere=createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
+        #get the sphere coords in image space
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
+        
+        #find the roi coords which correspond to voxels within the streamline mask
+        validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
+        
+        #return flattened list of indexes
+        streamIndexes=list(itertools.chain(*[streamlineMapping[iCoords] for iCoords in validCoords]))
+        
+        #extract those streamlines as a subset
+        streamsSubset=streamlines[streamIndexes]
+        
+        #not actually sure how this will work with a messy bundle
+        #reorient streamlines so that endpoints 1 and endpoints 2 mean something
+        orientedStreams=streamline.orient_by_streamline(streamsSubset, streamsSubset[0])
+        
+        #create blank structure for endpoints
+        endpoints=np.zeros((len(orientedStreams),6))
+        #get the endpoints, taken from
+        #https://github.com/dipy/dipy/blob/f149c756e09f172c3b77a9e6c5b5390cc08af6ea/dipy/tracking/utils.py#L708
+        for iStreamline in range(len(orientedStreams)):
+            #remember, first 3 = endpoint 1, last 3 = endpoint 2    
+            endpoints[iStreamline,:]= np.concatenate([orientedStreams[iStreamline][0,:], orientedStreams[iStreamline][-1,:]])
+        
+        Endpoints1=endpoints[:,0:3]
+        Endpoints2=endpoints[:,3:7]
+        
+        avgEndPoint1=np.mean(Endpoints1,axis=0)
+        curNearDistsFromAvg1=cdist(Endpoints1, np.reshape(avgEndPoint1, (1,3)), 'euclidean')
+        endPoint1DistAvg=np.mean(curNearDistsFromAvg1)
+        
+        avgEndPoint2=np.mean(Endpoints2,axis=0)
+        curNearDistsFromAvg2=cdist(Endpoints2, np.reshape(avgEndPoint2, (1,3)), 'euclidean')
+        endPoint2DistAvg=np.mean(curNearDistsFromAvg2)
+        
+        returnValues[iCoords]=np.mean([endPoint2DistAvg,endPoint1DistAvg])
+
+    
+    outDataArray=np.zeros(referenceNifti.shape,dtype='float')
+    for iCoords in range(len(subjectSpaceTractCoords)):
+        outDataArray[imgSpaceTractVoxels[iCoords]] = returnValues[iCoords]
+        
+    return nib.nifti1.Nifti1Image(outDataArray, referenceNifti.affine, referenceNifti.header)
+    
+
 def complexStreamlinesIntersect(streamlines, maskNifti):
         import dipy.tracking.utils as ut
         import copy
@@ -1657,58 +1712,6 @@ def complexStreamlinesIntersect(streamlines, maskNifti):
         lin_T, offset =ut._mapping_to_voxel(doubleResAffine)
         inds = ut._to_voxel_coordinates(streamlines._data, lin_T, offset)
         streamlineCoords=np.floor((inds*.5))
-
-def fastCoordInBounds(coord,bounds):
-    #seems slower by an order of magnitude
-    outVal=False
-    if coord[0]>bounds[0,0]:
-        if coord[0]<bounds[0,1]:
-            if coord[1]>bounds[1,0]:
-                if coord[1]<bounds[1,1]:
-                    if coord[2]>bounds[2,0]:
-                        if coord[2]<bounds[2,1]:
-                            outVal=True
-    
-    return outVal
-
-def fastCoordInBounds(coord, bounds):
-    yield bounds[0, 0] < coord[0] < bounds[0, 1]
-    yield bounds[1, 0] < coord[1] < bounds[1, 1]
-    yield bounds[2, 0] < coord[2] < bounds[2, 1]
-
-def streamlineNodesWithinBounds_test(streamline,bounds):
-    """ determine whether **any** node of the input streamline is within the specified bounds
-    Args:
-        streamline: an n by d shaped array where n=the number of nodes and d = the dimensionality of the streamline
-        bounds: a 2 x d array specifying the coordinate boundaries (in the pertinant space of the streamline) for assesment
-
-    Output:
-        withinBoundsNodes:  an array of the nodes 
-    
-    """
-
-    #see which nodes are between the bounds
-    nodeCriteria=[all(fastCoordInBounds(node,bounds)) for node in streamline]
-    
-    #return return the viable nodes, could and often will be empty
-    return streamline[nodeCriteria]
-
-def streamlineNodesWithinBounds_test(streamline,bounds):
-    """ determine whether **any** node of the input streamline is within the specified bounds
-    Args:
-        streamline: an n by d shaped array where n=the number of nodes and d = the dimensionality of the streamline
-        bounds: a 2 x d array specifying the coordinate boundaries (in the pertinant space of the streamline) for assesment
-
-    Output:
-        withinBoundsNodes:  an array of the nodes 
-    
-    """
-
-    #see which nodes are between the bounds
-    nodeCriteria=list(map(lambda nodes: fastCoordInBounds(nodes,bounds), streamline[:,None]))
-    
-    #return return the viable nodes, could and often will be empty
-    return streamline[nodeCriteria]
 
 def subsetStreamsNodesByROIboundingBox_test(streamlines, maskNifti):
     """subsetStreamsByROIboundingBox(streamlines, maskNifti):
@@ -1730,6 +1733,11 @@ def subsetStreamsNodesByROIboundingBox_test(streamlines, maskNifti):
     from dipy.tracking.streamline import Streamlines
     import numpy as np
     
+    import time
+    
+    #begin timing
+    t1_start=time.process_time()
+    
     #use distance to corner to set tolerance
     dtc = dist_to_corner(maskNifti.affine)
     
@@ -1739,10 +1747,153 @@ def subsetStreamsNodesByROIboundingBox_test(streamlines, maskNifti):
     subjectSpaceBounds[0,:]=subjectSpaceBounds[0,:]-dtc
     subjectSpaceBounds[1,:]=subjectSpaceBounds[1,:]+dtc
     
-    #map and lambda function to extract the nodes within the bounds
-    criteriaVec=list(map(lambda streamline: streamlineNodesWithinBounds_test(streamline,subjectSpaceBounds), streamlines))
-    outIndexes=np.where(list(map(lambda x: x.size>0, criteriaVec)))[0]
-    outStreams=Streamlines(criteriaVec)
+    nodeArray=[]
+    for iStreamlines in streamlines:
+        nodeArray.append(iStreamlines[np.all(np.asarray([np.logical_and(iStreamlines[:,iDems]>subjectSpaceBounds[0,iDems],iStreamlines[:,iDems]<subjectSpaceBounds[1,iDems]) for iDems in list(range(subjectSpaceBounds.shape[1])) ]),axis=0)])
+ 
     
-    print('Tractogram subseting complete, '+str(len(outIndexes)) + ' of ' + str(len(streamlines)) + ' within mask boundaries')
-    return outIndexes, outStreams
+    #map and lambda function to extract the nodes within the bounds
+    outIndexes=np.where(list(map(lambda x: x.size>0, nodeArray)))[0]
+    outStreams=Streamlines(nodeArray)
+    
+    #stop timing
+    t1_stop=time.process_time()
+    # get the elapsed time
+    modifiedTime=t1_stop-t1_start
+    
+    print('Tractogram subseting complete in ' +str(modifiedTime) +', '+str(len(outIndexes)) + ' of ' + str(len(streamlines)) + ' within mask boundaries')
+    return outIndexes, outStreams   
+    
+
+def applyNiftiCriteriaToTract_DIPY_Cython(streamlines, maskNifti, includeBool, operationSpec):
+    """segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
+    #Iteratively applies ROI-based criteria, uses a range of dipy functions
+    #and custom made functions to expedite the typically slow segmentation process
+    #
+    #adapted from https://github.com/dipy/dipy/blob/master/dipy/tracking/streamline.py#L200
+    #basically a variant of
+    #https://github.com/DanNBullock/wma/blob/33a02c0373d6742ddf07fd8ac3c8481662577743/utilities/wma_SegmentFascicleFromConnectome.m
+    #
+    #INPUTS
+    #
+    # -streamlines: appropriately formatted list of candidate streamlines, e.g. a candidate tractome
+    #
+    # -maskNifti: a nifti Mask containing only 1s and 0s
+    #
+    # -includeBool: a boolean indicator of whether you want the associated ROI to act as an INCLUSION or EXCLUSION ROI (True=inclusion)
+    #
+    # -operationSpec: operation specification, one following instructions on which streamline nodes to asses (and how)
+    #    "any" : any point is within tol from ROI. Default.
+    #    "all" : all points are within tol from ROI.
+    #    "either_end" : either of the end-points is within tol from ROI
+    #    "both_end" : both end points are within tol from ROI.
+    #
+    # OUTPUTS
+    #
+    # - outBoolVec: boolean vec indicating streamlines that survived operation
+    """
+    #still learning how to import from modules
+    from dipy.tracking.utils import near_roi
+    import numpy as np
+    import dipy.tracking.utils as ut
+    import nibabel as nib
+    from nilearn import masking 
+    import scipy
+    from dipy.tracking.vox2track import _streamlines_in_mask
+    
+    #perform some input checks
+    validOperations=["any","all","either_end","both_end"]
+    if np.logical_not(np.in1d(operationSpec, validOperations)):
+         raise Exception("applyNiftiCriteriaToTract Error: input operationSpec not understood.")
+    
+    if np.logical_not(type(maskNifti).__name__=='Nifti1Image'):
+        raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not a nifti.")
+    
+    #the conversion to int may cause problems if the input isn't convertable to int.  Then again, the point of this is to raise an error, so...
+    elif np.logical_not(np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1])): 
+        raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not convertable to 0,1 int mask.  Likely not a mask.")
+        
+    if np.logical_not(isinstance(includeBool, bool )):
+        raise Exception("applyNiftiCriteriaToTract Error: input includeBool not a bool.  See input description for usage")
+        
+    lin_T, offset =ut._mapping_to_voxel(maskNifti.affine)
+    criteriaStreamsBool=_streamlines_in_mask( list(streamlines), maskNifti.get_fdata().astype(np.uint8), lin_T, offset)
+    
+    if includeBool==True:
+        #initalize an out bool vec
+        outBoolVec=np.zeros(len(streamlines), dtype=bool)
+        #set the relevant entries to true
+        outBoolVec[criteriaStreamsBool.astype(bool)]=True
+    elif includeBool==False:          
+        #initalize an out bool vec
+        outBoolVec=np.ones(len(streamlines), dtype=bool)
+        #set the relevant entries to true
+        outBoolVec[criteriaStreamsBool.astype(bool)]=False
+    
+    return outBoolVec
+   
+def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir):
+    import nibabel as nib
+    #use dipy to create the density mask
+    from dipy.tracking import utils
+    import numpy as np
+    
+    from nilearn.image import crop_img 
+    #nilearn.image.resample_img ? to resample output
+    
+    #not actually reliable
+    #croppedReference=crop_img(refAnatT1)
+    
+    #densityNifti=crop_img(overlayNifti)
+    
+    croppedReference=refAnatT1
+    
+    densityNifti=overlayNifti                 
+    
+    #refuses to plot single slice, single image
+    #from nilearn.plotting import plot_stat_map
+    #outImg=plot_stat_map(stat_map_img=densityNifti,bg_img=refAnatT1, cut_coords= 1,display_mode='x',cmap='viridis')
+   
+    
+    #obtain boundary coords in subject space in order to
+    #use plane generation function
+    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(croppedReference)
+    
+    dimsList=['x','y','z']
+    #brute force with matplotlib
+    import matplotlib.pyplot as plt
+    for iDims in list(range(len(croppedReference.shape))):
+        #this assumes that get_zooms returns zooms in subject space and not image space orientation
+        # which may not be a good assumption if the orientation is weird
+        subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1.header.get_zooms()[iDims])
+        #get the desired broadcast shape and delete current dim value
+        broadcastShape=list(croppedReference.shape)
+        del broadcastShape[iDims]
+        
+        #iterate across slices
+        for iSlices in list(range(len(subjectSpaceSlices))):
+            #set the slice list entry to the appropriate singular value
+            currentSlice=makePlanarROI(croppedReference, subjectSpaceSlices[iSlices], dimsList[iDims])
+
+            #set up the figure
+            fig,ax = plt.subplots()
+            ax.axis('off')
+            #kind of overwhelming to do this in one line
+            refData=np.rot90(np.reshape(croppedReference.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+            plt.imshow(refData, cmap='gray', interpolation='nearest')
+            #kind of overwhelming to do this in one line
+            densityData=np.rot90(np.reshape(densityNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+            plt.imshow(np.ma.masked_where(densityData<1,densityData), cmap='viridis', alpha=.5, interpolation='nearest')
+            figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)
+            plt.savefig(figName,bbox_inches='tight')
+            plt.clf()
+    
+    import os        
+    from PIL import Image
+    import glob
+    for iDims in list(range(len(croppedReference.shape))):
+        dimStem='dim_' + str(iDims)
+        img, *imgs = [Image.open(f) for f in sorted(glob.glob(dimStem+'*.png'))]
+        img.save(os.path.join(saveDir,dimStem+'.gif'), format='GIF', append_images=imgs,
+                 save_all=True, duration=len(imgs)*2, loop=0)
+        os.remove(sorted(glob.glob(dimStem+'*.png')))
