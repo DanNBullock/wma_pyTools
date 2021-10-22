@@ -1837,18 +1837,17 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir):
     #use dipy to create the density mask
     from dipy.tracking import utils
     import numpy as np
+    from glob import glob
+    import os
+    from nilearn.image import reorder_img  
     
-    from nilearn.image import crop_img 
-    #nilearn.image.resample_img ? to resample output
+    #resample crop
+    [refAnatT1,overlayNifti]=dualCropNifti(refAnatT1,overlayNifti)
     
-    #not actually reliable
-    #croppedReference=crop_img(refAnatT1)
-    
-    #densityNifti=crop_img(overlayNifti)
-    
-    croppedReference=refAnatT1
-    
-    densityNifti=overlayNifti                 
+    #RAS reoreintation
+    refAnatT1=reorder_img(refAnatT1)
+    overlayNifti=reorder_img(overlayNifti)
+                 
     
     #refuses to plot single slice, single image
     #from nilearn.plotting import plot_stat_map
@@ -1857,43 +1856,182 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir):
     
     #obtain boundary coords in subject space in order to
     #use plane generation function
-    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(croppedReference)
+    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(refAnatT1)
     
     dimsList=['x','y','z']
     #brute force with matplotlib
     import matplotlib.pyplot as plt
-    for iDims in list(range(len(croppedReference.shape))):
+    for iDims in list(range(len(refAnatT1.shape))):
         #this assumes that get_zooms returns zooms in subject space and not image space orientation
         # which may not be a good assumption if the orientation is weird
         subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1.header.get_zooms()[iDims])
         #get the desired broadcast shape and delete current dim value
-        broadcastShape=list(croppedReference.shape)
+        broadcastShape=list(refAnatT1.shape)
         del broadcastShape[iDims]
         
         #iterate across slices
         for iSlices in list(range(len(subjectSpaceSlices))):
             #set the slice list entry to the appropriate singular value
-            currentSlice=makePlanarROI(croppedReference, subjectSpaceSlices[iSlices], dimsList[iDims])
+            currentSlice=makePlanarROI(refAnatT1, subjectSpaceSlices[iSlices], dimsList[iDims])
 
             #set up the figure
             fig,ax = plt.subplots()
             ax.axis('off')
             #kind of overwhelming to do this in one line
-            refData=np.rot90(np.reshape(croppedReference.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+            refData=np.reshape(refAnatT1.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape)
             plt.imshow(refData, cmap='gray', interpolation='nearest')
             #kind of overwhelming to do this in one line
-            densityData=np.rot90(np.reshape(densityNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
-            plt.imshow(np.ma.masked_where(densityData<1,densityData), cmap='viridis', alpha=.5, interpolation='nearest')
+            overlayData=np.reshape(overlayNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape)
+            plt.imshow(np.ma.masked_where(overlayData<1,overlayData), cmap='jet', alpha=.75, interpolation='nearest')
             figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)
             plt.savefig(figName,bbox_inches='tight')
             plt.clf()
     
     import os        
     from PIL import Image
-    import glob
-    for iDims in list(range(len(croppedReference.shape))):
+    from glob import glob
+    for iDims in list(range(len(refAnatT1.shape))):
         dimStem='dim_' + str(iDims)
-        img, *imgs = [Image.open(f) for f in sorted(glob.glob(dimStem+'*.png'))]
+        img, *imgs = [Image.open(f) for f in sorted(glob(dimStem+'*.png'))]
         img.save(os.path.join(saveDir,dimStem+'.gif'), format='GIF', append_images=imgs,
                  save_all=True, duration=len(imgs)*2, loop=0)
-        os.remove(sorted(glob.glob(dimStem+'*.png')))
+        plt.close('all')
+        
+        
+        [os.remove(ipaths) for ipaths in sorted(glob(dimStem+'*.png'))]
+
+def densityGifsOfTract(tractStreamlines,referenceAnatomy,saveDir,tractName):
+    import os
+    import nibabel as nib
+    from glob import glob
+    import numpy as np
+    import dipy   
+
+    import dipy.tracking.utils as ut
+    
+    tractMask=ut.density_map(tractStreamlines, referenceAnatomy.affine, referenceAnatomy.shape)
+    densityNifti = nib.nifti1.Nifti1Image(tractMask, referenceAnatomy.affine, referenceAnatomy.header)
+    
+    #now make the niftiGifs
+    crossSectionGIFsFromNifti(densityNifti,referenceAnatomy,saveDir)   
+
+    filesToRename=[os.path.join(saveDir,'dim_'+ str(iDim) +'.gif') for iDim in range(3)]
+    
+    for iFiles in filesToRename:
+        [path, file]=os.path.split(iFiles)
+        os.rename(iFiles,os.path.join(path,tractName+'_'+file))
+        
+def dualCropNifti(nifti1,nifti2):
+    """dualCropNifti(nifti1,nifti2):
+    This function crops two niftis to the same size, using the largest of the
+    two post cropped niftis to establish the consensus dimensions of the output
+    nifti data blocks.
+    
+    Note:  this won't do much if the background values of your images haven't
+    been masked / set to zero.
+  
+    INPUTS
+    nifti1 / nifti2:  The niftis that you would like cropped to the same size
+    
+    OUTPUTS
+    nifti1 / nifti2:  The cropped niftis
+
+    """
+    import nilearn
+    from nilearn.image import crop_img, resample_to_img 
+    import numpy as np
+    import nibabel as nib
+    
+    inShape1=nifti1.shape
+    inShape2=nifti2.shape
+
+    #get 
+    cropped1=crop_img(nifti1)
+    cropped2=crop_img(nifti2)
+    
+    # find max values in each dimension and create a dummy
+    maxDimShape=np.max(np.asarray([cropped1.shape,cropped2.shape]),axis=0)
+    dummyArray=np.zeros(maxDimShape)
+    #arbitrarily selecting the first nifit should be fine, they should be aligned
+    dummyNifti= nib.nifti1.Nifti1Image(dummyArray, nifti1.affine, nifti1.header)
+    
+    outNifti1=resample_to_img(cropped1,dummyNifti)
+    outNifti2=resample_to_img(cropped2,dummyNifti)
+    
+    return outNifti1, outNifti2
+
+
+def wmc2tracts(inputTractogram,classification,outdir):
+    """wmc2tracts(trk_file,classification,outdir):
+     convert a wmc .mat + tract input into separate files for tracts 
+    based on @giulia-berto's
+ https://github.com/FBK-NILab/app-classifyber-segmentation/blob/1.3/wmc2trk.py
+ 
+    INPUTS
+    
+    inputTractogram: an input tractogram
+    
+    classification: a .mat WMC input that corresponds to the input tractogram
+    WMC described here: https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b
+    
+    outdir: the output directory in which to save the output files
+ 
+    """
+    import nibabel as nib
+    from scipy.io import loadmat
+    import dipy
+    import numpy as np
+    from dipy.io.stateful_tractogram import Space, StatefulTractogram
+    from dipy.io.streamline import load_tractogram, save_tractogram
+    import dipy.tracking.utils as ut
+    import os
+    
+    if isinstance(inputTractogram,str):
+        inputTractogram=inputTractogram=nib.streamlines.load(inputTractogram)
+        print('input tractogram loaded')
+    
+    if isinstance(classification,str):
+        #load the .mat object
+        classification=loadmat(classification)
+        #it comes back as an eldridch horror, so parse it appropriately
+        #get the index vector
+        indices=classification['classification'][0][0]['index'][0]
+        #get the names vector
+        tractIdentities=[str(iIdenties) for iIdenties in classification['classification'][0][0][0][0]]
+    
+    for tractID in range(len(tractIdentities)):
+        #remove unncessary characters, adds unnecessary '[]'
+        t_name = tractIdentities[tractID][2:-2]
+        tract_name = t_name.replace(' ', '_')
+        idx_tract = np.array(np.where(indices==tractID+1))[0]
+        tract = inputTractogram.streamlines[idx_tract]
+        
+        #dipy is stubborn and wants a reference nifti for some reason
+        #fineI'llDoItMyself.jpg
+        tractBounds=np.asarray([np.min(tract._data,axis=0),np.max(tract._data,axis=0)])
+        roundedTractBounds=np.asarray([np.floor(tractBounds[0,:]),np.ceil(tractBounds[1,:])])
+        constructedAffine=np.eye(4)
+        constructedAffine[0:3,3]=tractBounds[0,:]
+ 
+        lin_T, offset =ut._mapping_to_voxel(constructedAffine)
+        inds = ut._to_voxel_coordinates(tract._data, lin_T, offset)
+        
+        testBounds=np.asarray([np.min(inds,axis=0),np.max(inds,axis=0)])
+        
+        #now create a dummy nifit, because that's what dipy demands
+        dataShape=(roundedTractBounds[1,:]-roundedTractBounds[0,:]).astype(int)
+        #adding a +1 pad because it yells otherwise?
+        dummyData=np.zeros(dataShape+1)
+        dummyNifti= nib.nifti1.Nifti1Image(dummyData, constructedAffine)
+        
+        
+        voxStreams=dipy.tracking.streamline.transform_streamlines(tract,np.linalg.inv(constructedAffine))
+        statefulTractogramOut=StatefulTractogram(voxStreams, dummyNifti, Space.VOX)
+        
+        #save it in the same format as the input
+        if isinstance(inputTractogram, nib.streamlines.tck.TckFile):
+            out_filename=os.path.join(outdir,tract_name + '.tck')
+        elif  isinstance(inputTractogram, nib.streamlines.trk.TrkFile):
+            out_filename=os.path.join(outdir,tract_name + '.trk')
+        
+        save_tractogram(statefulTractogramOut,out_filename)
