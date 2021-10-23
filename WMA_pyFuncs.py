@@ -1883,21 +1883,33 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir):
             #kind of overwhelming to do this in one line
             overlayData=np.reshape(overlayNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape)
             plt.imshow(np.ma.masked_where(overlayData<1,overlayData), cmap='jet', alpha=.75, interpolation='nearest')
-            figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)
+            # we use *2 in order to afford room for the subsequent blended images
+            figName='dim_' + str(iDims) +'_'+  str(iSlices*2).zfill(3)
             plt.savefig(figName,bbox_inches='tight')
             plt.clf()
-    
+            
     import os        
     from PIL import Image
     from glob import glob
+    #create blened images to smooth transitions between slices
+    for iDims in list(range(len(refAnatT1.shape))):
+        dimStem='dim_' + str(iDims)
+        imageList=sorted(glob(dimStem+'*.png'))
+        for iImages in list(range(len(imageList)-1)):
+            thisImage=Image.open(imageList[iImages])
+            nextImage=Image.open(imageList[iImages+1])
+            blendedImage = Image.blend(newimg1, newimg2, alpha=0.5)
+            # 1 + 2 * iImages fills in the name space we left earlier
+            figName='dim_' + str(iDims) +'_'+  str(1+iImages*2).zfill(3)
+            blendedImage.save(figName,'png')
+  
     for iDims in list(range(len(refAnatT1.shape))):
         dimStem='dim_' + str(iDims)
         img, *imgs = [Image.open(f) for f in sorted(glob(dimStem+'*.png'))]
         img.save(os.path.join(saveDir,dimStem+'.gif'), format='GIF', append_images=imgs,
-                 save_all=True, duration=len(imgs)*2, loop=0)
+                 save_all=True, duration=len(imgs)*1, loop=0)
         plt.close('all')
-        
-        
+
         [os.remove(ipaths) for ipaths in sorted(glob(dimStem+'*.png'))]
 
 def densityGifsOfTract(tractStreamlines,referenceAnatomy,saveDir,tractName):
