@@ -1637,6 +1637,36 @@ def crossSectionGIFsFromTract(tractogram,refAnatT1,saveDir):
         os.remove(sorted(glob.glob(dimStem+'*.png')))
 
 def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
+    """endpointDispersionMapping(streamlines,referenceNifti,distanceParameter)
+    For each voxel in the streamline-derived white matter mask, computes the
+    average distance of streamlines' (within some specified radial distance
+    of the voxel) endpoints from the average coordinate of the endpoints.  
+    Simply averages the metric for each of the two endpoint clusters.
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        Steamlines which are to be subjected to this analyis, dervied from
+        tractogram.streamlines
+    referenceNifti : TYPE
+        A reference nifti.  Possibly not necessary; see wmc2tracts for example
+        dummy mechanism.
+    distanceParameter : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    dispersionMeasurement [NiFTI image]
+        A nifti object with the data block containing the measurements derived
+        for each voxel in the corresponding locations
+
+    """
+    # To be determined:
+    # should we be useing the mean centroid (i.e. raw averaged enpoint coordinate)
+    # or the actual endpoint closest to this coordinate?
+    
+    
+    
     import dipy.tracking.utils as ut
     import dipy.tracking.streamline as streamline
     import numpy as np
@@ -1644,6 +1674,7 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
     from scipy.spatial.distance import cdist
     from dipy.tracking.vox2track import streamline_mapping
     import itertools
+    from dipy.segment.clustering import QuickBundles
     
     # get a streamline index dict of the whole brain tract
     streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
@@ -1671,7 +1702,12 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
         
         #not actually sure how this will work with a messy bundle
         #reorient streamlines so that endpoints 1 and endpoints 2 mean something
-        orientedStreams=streamline.orient_by_streamline(streamsSubset, streamsSubset[0])
+        qb = QuickBundles(threshold=100)
+        cluster = qb.cluster(streamsSubset)
+        
+        #there should be only one with the distance setting this high
+        orientedStreams=streamline.orient_by_streamline(streamsSubset, cluster.centroids[0])
+        
         
         #create blank structure for endpoints
         endpoints=np.zeros((len(orientedStreams),6))
@@ -1700,6 +1736,188 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
         outDataArray[imgSpaceTractVoxels[iCoords]] = returnValues[iCoords]
         
     return nib.nifti1.Nifti1Image(outDataArray, referenceNifti.affine, referenceNifti.header)
+
+def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParameter,bootstrapNum):
+    """endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParameter,bootstrapNum)    
+       For each voxel in the streamline-derived white matter mask, computes the
+       average distance of streamlines' (within some specified radial distance
+       of the voxel) endpoints from the average coordinate of the endpoints.  
+       Simply averages the metric for each of the two endpoint clusters.  
+       
+       Distinct from non bootstrap version:  performs some number of iterated
+       bootstrap measurments from a subset of the whole input streamline group
+       in order to ascertain variability of resultant metrics.  Performs
+       bootstrap operations on a 1/2 subset of the total input streamlines
+
+       Parameters
+       ----------
+       streamlines : TYPE
+           Steamlines which are to be subjected to this analyis, dervied from
+           tractogram.streamlines
+       referenceNifti : TYPE
+           A reference nifti.  Possibly not necessary; see wmc2tracts for example
+           dummy mechanism.
+       distanceParameter : TYPE
+           DESCRIPTION.
+
+       Returns
+       -------
+       [returns 4 distinct niftis]
+       
+       meanOfMeans [NiFTI image]
+           A nifti object with the data block containing the per voxel averages
+           of the averages derived from the boot strap operations
+           
+       varianceOfMeans [NiFTI image]
+           A nifti object with the data block containing the per voxel variances
+           of the averages derived from the boot strap operations
+       
+       meanOfVariances [NiFTI image]
+           A nifti object with the data block containing the per voxel averages
+           of the variances derived from the boot strap operations
+       
+       varianceOfVariances [NiFTI image]
+           A nifti object with the data block containing the per voxel variances
+           of the variances derived from the boot strap operations
+
+       """
+    import dipy.tracking.utils as ut
+    import dipy.tracking.streamline as streamline
+    import numpy as np
+    import nibabel as nib
+    from scipy.spatial.distance import cdist
+    from dipy.tracking.vox2track import streamline_mapping
+    import itertools
+    from dipy.segment.clustering import QuickBundles
+    
+    # get a streamline index dict of the whole brain tract
+    streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
+    #extract the dictionary keys as coordinates
+    imgSpaceTractVoxels = list(streamlineMapping.keys())
+    subjectSpaceTractCoords = nib.affines.apply_affine(referenceNifti.affine, np.asarray(imgSpaceTractVoxels))  
+    
+    bootstrapStreamNum=int(len(streamlines)/2)
+    meanOfMeans=np.zeros(len(subjectSpaceTractCoords))
+    varianceOfMeans=np.zeros(len(subjectSpaceTractCoords))
+    meanOfVariances=np.zeros(len(subjectSpaceTractCoords))
+    varianceOfVariances=np.zeros(len(subjectSpaceTractCoords))
+    #probably a more elegant way to do this
+    for iCoords in range(len(subjectSpaceTractCoords)):
+        #make a sphere
+        currentSphere=createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
+        
+        #get the sphere coords in image space
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
+        
+        #find the roi coords which correspond to voxels within the streamline mask
+        validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
+        
+        #return flattened list of indexes
+        streamIndexes=list(itertools.chain(*[streamlineMapping[iCoords] for iCoords in validCoords]))
+        
+        #extract those streamlines as a subset
+        streamsSubset=streamlines[streamIndexes]
+        
+        #not actually sure how this will work with a messy bundle
+        #reorient streamlines so that endpoints 1 and endpoints 2 mean something
+        #using quickbundles to get a centroid, because the actual method
+        #is buried in obscurity
+        qb = QuickBundles(threshold=100)
+        cluster = qb.cluster(streamsSubset)
+        
+        #there should be only one with the distance setting this high
+        orientedStreams=streamline.orient_by_streamline(streamsSubset, cluster.centroids[0])
+        
+        #create blank structure for endpoints
+        endpoints=np.zeros((len(orientedStreams),6))
+        #get the endpoints, taken from
+        #https://github.com/dipy/dipy/blob/f149c756e09f172c3b77a9e6c5b5390cc08af6ea/dipy/tracking/utils.py#L708
+        for iStreamline in range(len(orientedStreams)):
+            #remember, first 3 = endpoint 1, last 3 = endpoint 2    
+            endpoints[iStreamline,:]= np.concatenate([orientedStreams[iStreamline][0,:], orientedStreams[iStreamline][-1,:]])
+        
+        #select the appropriate endpoints
+        Endpoints1=endpoints[:,0:3]
+        Endpoints2=endpoints[:,3:7]
+        
+        #create holders for both the dispersion means and the dispersion variances
+        dispersionMeans=[]
+        dispersionVariances=[]
+        for iBoostrap in range (bootstrapNum):
+            
+            #select a subset of half the whole streamline group, then 
+            #find the intersection fo that set and the current voxel's streamlines
+            currentBootstrapStreamsAll=np.random.randint(0,len(streamlines),bootstrapStreamNum)
+            currentBootstrapStreamsSubSelect=np.in1d(streamIndexes,currentBootstrapStreamsAll)
+            
+            #compute the subset mean distance and variance for endpoint cluster 1
+            avgEndPoint1=np.mean(Endpoints1[currentBootstrapStreamsSubSelect],axis=0)
+            curNearDistsFromAvg1=cdist(Endpoints1[currentBootstrapStreamsSubSelect], np.reshape(avgEndPoint1, (1,3)), 'euclidean')
+            endPoint1DistAvg=np.mean(curNearDistsFromAvg1)
+            endPoint1DistVar=np.var(curNearDistsFromAvg1)
+            
+            #compute the subset mean distance and variance for endpoint cluster 2
+            avgEndPoint2=np.mean(Endpoints2[currentBootstrapStreamsSubSelect],axis=0)
+            curNearDistsFromAvg2=cdist(Endpoints2[currentBootstrapStreamsSubSelect], np.reshape(avgEndPoint2, (1,3)), 'euclidean')
+            endPoint2DistAvg=np.mean(curNearDistsFromAvg2)
+            endPoint2DistVar=np.var(curNearDistsFromAvg2)
+        
+            #for this bootstrap iteration, compute the average distance and the variance
+            dispersionMeans.append(np.mean([endPoint2DistAvg,endPoint1DistAvg]))
+            dispersionVariances.append(np.mean([endPoint1DistVar,endPoint2DistVar]))
+        
+        #now place them in the appropriate location in their respective
+        #storage vectors
+        meanOfMeans[iCoords]=np.mean(dispersionMeans)
+        varianceOfMeans[iCoords]=np.var(dispersionMeans)
+        meanOfVariances[iCoords]=np.mean(dispersionVariances)
+        varianceOfVariances[iCoords]=np.var(dispersionVariances)
+    
+    #Now that the metrics have been compute for all coordinates, create
+    #3d arrays to store the output for the nifti object data
+    outMeanOfMeansArray=np.zeros(referenceNifti.shape,dtype='float')
+    outVarianceOfMeansArray=np.zeros(referenceNifti.shape,dtype='float')
+    outMeanOfVariancesArray=np.zeros(referenceNifti.shape,dtype='float')
+    outVarianceOfVariancesArray=np.zeros(referenceNifti.shape,dtype='float')
+    
+    #iterate across each voxel coordinate
+    for iCoords in range(len(subjectSpaceTractCoords)):
+        #fill in the corresponding voxel's value for each metric
+        outMeanOfMeansArray[imgSpaceTractVoxels[iCoords]] = meanOfMeans[iCoords]
+        outVarianceOfMeansArray[imgSpaceTractVoxels[iCoords]] = varianceOfMeans[iCoords]
+        outMeanOfVariancesArray[imgSpaceTractVoxels[iCoords]] = meanOfVariances[iCoords]
+        outVarianceOfVariancesArray[imgSpaceTractVoxels[iCoords]] = varianceOfVariances[iCoords]
+    
+    #create nifti objects for each metric
+    meanOfMeansNifti=nib.nifti1.Nifti1Image(outMeanOfMeansArray, referenceNifti.affine, referenceNifti.header)
+    varianceOfMeansNifti=nib.nifti1.Nifti1Image(outVarianceOfMeansArray, referenceNifti.affine, referenceNifti.header)
+    meanOfVariancesNifti=nib.nifti1.Nifti1Image(outMeanOfVariancesArray, referenceNifti.affine, referenceNifti.header)
+    varianceOfVariancesNifti=nib.nifti1.Nifti1Image(outVarianceOfVariancesArray, referenceNifti.affine, referenceNifti.header)
+    
+    return meanOfMeansNifti, varianceOfMeansNifti, meanOfVariancesNifti, varianceOfVariancesNifti
+
+def minEndpointDistClustering(streamlines):
+    """ minEndpointDistClustering(streamlines)
+    Computes the endpoint group identity mapping for each endpoint of each
+    streamline in the input streamline group which minimizes the average distance
+    from the average endpoint, while also paying deference to streamline continuity.
+    Functionally serves as a sanity check on dipy.streamline.orient_by_streamline
+    
+    
+    Based on
+    https://github.com/DanNBullock/wma_tools/blob/master/Stream_Tools/endpointClusterProto.m
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    
     
 
 def complexStreamlinesIntersect(streamlines, maskNifti):
