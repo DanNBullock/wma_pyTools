@@ -1682,6 +1682,8 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
     imgSpaceTractVoxels = list(streamlineMapping.keys())
     subjectSpaceTractCoords = nib.affines.apply_affine(referenceNifti.affine, np.asarray(imgSpaceTractVoxels))  
     
+    print('computing statistics for ' + str(len(streamlines)) + ' occupying ' + str(len(imgSpaceTractVoxels)) + ' voxels.')
+    
     returnValues=np.zeros(len(subjectSpaceTractCoords))
     #probably a more elegant way to do this
     for iCoords in range(len(subjectSpaceTractCoords)):
@@ -1796,6 +1798,8 @@ def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParam
     imgSpaceTractVoxels = list(streamlineMapping.keys())
     subjectSpaceTractCoords = nib.affines.apply_affine(referenceNifti.affine, np.asarray(imgSpaceTractVoxels))  
     
+    print('computing statistics for ' + str(len(streamlines)) + ' occupying ' + str(len(imgSpaceTractVoxels)) + ' voxels.')
+    
     bootstrapStreamNum=int(len(streamlines)/2)
     meanOfMeans=np.zeros(len(subjectSpaceTractCoords))
     varianceOfMeans=np.zeros(len(subjectSpaceTractCoords))
@@ -1896,29 +1900,231 @@ def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParam
     
     return meanOfMeansNifti, varianceOfMeansNifti, meanOfVariancesNifti, varianceOfVariancesNifti
 
-def minEndpointDistClustering(streamlines):
-    """ minEndpointDistClustering(streamlines)
-    Computes the endpoint group identity mapping for each endpoint of each
-    streamline in the input streamline group which minimizes the average distance
-    from the average endpoint, while also paying deference to streamline continuity.
-    Functionally serves as a sanity check on dipy.streamline.orient_by_streamline
-    
-    
-    Based on
-    https://github.com/DanNBullock/wma_tools/blob/master/Stream_Tools/endpointClusterProto.m
+def endpointDispersionAsymmetryMapping_Bootstrap(streamlines,referenceNifti,distanceParameter,bootstrapNum):
+    """endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParameter,bootstrapNum)    
+       For each voxel in the streamline-derived white matter mask, computes the
+       average distance of streamlines' (within some specified radial distance
+       of the voxel) endpoints from the average coordinate of the endpoints.  
+       Simply averages the metric for each of the two endpoint clusters.  
+       
+       Distinct from non bootstrap version:  performs some number of iterated
+       bootstrap measurments from a subset of the whole input streamline group
+       in order to ascertain variability of resultant metrics.  Performs
+       bootstrap operations on a 1/2 subset of the total input streamlines
+       
+       Asymmetry version:  in addition to computing the mean of the relevant
+       values for each voxel-subset of streamlines, also computes the ratio
+       of the endpoint clusters.
+       This is computed thusly:
+           
+           (A-B) / (A+B) 
+           
+           Where A = endpointCluster1Value and B = endpointClusterBValue
+       
+       In this way, the span of possible (non inf, non nan) values is 1 to -1,
+       where 1 is the case in which A is substantially larger than B (e.g. B~=0),
+       -1 is the case in which B is substantially larger than A (e.g. A~=0),
+       and 0 is the case in which A and B are roughly equivalent. 
 
-    Parameters
-    ----------
-    streamlines : TYPE
-        DESCRIPTION.
+       Parameters
+       ----------
+       streamlines : TYPE
+           Steamlines which are to be subjected to this analyis, dervied from
+           tractogram.streamlines
+       referenceNifti : TYPE
+           A reference nifti.  Possibly not necessary; see wmc2tracts for example
+           dummy mechanism.
+       distanceParameter : TYPE
+           DESCRIPTION.
 
-    Returns
-    -------
-    None.
+       Returns
+       -------
+       [returns 8 distinct niftis]
+       
+       meanOfMeans [NiFTI image]
+           A nifti object with the data block containing the per voxel averages
+           of the averages derived from the boot strap operations
+           
+       varianceOfMeans [NiFTI image]
+           A nifti object with the data block containing the per voxel variances
+           of the averages derived from the boot strap operations
+       
+       meanOfVariances [NiFTI image]
+           A nifti object with the data block containing the per voxel averages
+           of the variances derived from the boot strap operations
+       
+       varianceOfVariances [NiFTI image]
+           A nifti object with the data block containing the per voxel variances
+           of the variances derived from the boot strap operations
+           
+       meanOfMeansAsym [NiFTI image]
+           A nifti object with the data block containing the asymmetry measurment of
+           per voxel averages of the averages derived from the boot strap operations
+           
+       varianceOfMeansAsym [NiFTI image]
+           A nifti object with the data block containing the asymmetry measurment of
+           the per voxel variances of the averages derived from the boot strap operations
+       
+       meanOfVariancesAsym [NiFTI image]
+           A nifti object with the data block containing the asymmetry measurment of
+           the per voxel averages of the variances derived from the boot strap operations
+       
+       varianceOfVariancesAsym [NiFTI image]
+           A nifti object with the data block containing the asymmetry measurment of
+           the per voxel variances of the variances derived from the boot strap operations
 
-    """
+       """
+    import dipy.tracking.utils as ut
+    import dipy.tracking.streamline as streamline
+    import numpy as np
+    import nibabel as nib
+    from scipy.spatial.distance import cdist
+    from dipy.tracking.vox2track import streamline_mapping
+    import itertools
+    from dipy.segment.clustering import QuickBundles
     
+    # get a streamline index dict of the whole brain tract
+    streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
+    #extract the dictionary keys as coordinates
+    imgSpaceTractVoxels = list(streamlineMapping.keys())
+    subjectSpaceTractCoords = nib.affines.apply_affine(referenceNifti.affine, np.asarray(imgSpaceTractVoxels))
     
+    print('computing statistics for ' + str(len(streamlines)) + ' occupying ' + str(len(imgSpaceTractVoxels)) + ' voxels.')
+    
+    bootstrapStreamNum=int(len(streamlines)/2)
+    meanOfMeans=np.zeros(len(subjectSpaceTractCoords))
+    varianceOfMeans=np.zeros(len(subjectSpaceTractCoords))
+    meanOfVariances=np.zeros(len(subjectSpaceTractCoords))
+    varianceOfVariances=np.zeros(len(subjectSpaceTractCoords))
+    
+    #asym
+    meanOfMeansAsym=np.zeros(len(subjectSpaceTractCoords))
+    varianceOfMeansAsym=np.zeros(len(subjectSpaceTractCoords))
+    meanOfVariancesAsym=np.zeros(len(subjectSpaceTractCoords))
+    varianceOfVariancesAsym=np.zeros(len(subjectSpaceTractCoords))
+    #probably a more elegant way to do this
+    for iCoords in range(len(subjectSpaceTractCoords)):
+        #make a sphere
+        currentSphere=createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
+        
+        #get the sphere coords in image space
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
+        
+        #find the roi coords which correspond to voxels within the streamline mask
+        validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
+        
+        #return flattened list of indexes
+        streamIndexes=list(itertools.chain(*[streamlineMapping[iCoords] for iCoords in validCoords]))
+        
+        #extract those streamlines as a subset
+        streamsSubset=streamlines[streamIndexes]
+        
+        #not actually sure how this will work with a messy bundle
+        #reorient streamlines so that endpoints 1 and endpoints 2 mean something
+        #using quickbundles to get a centroid, because the actual method
+        #is buried in obscurity
+        qb = QuickBundles(threshold=100)
+        cluster = qb.cluster(streamsSubset)
+        
+        #there should be only one with the distance setting this high
+        orientedStreams=streamline.orient_by_streamline(streamsSubset, cluster.centroids[0])
+        
+        #create blank structure for endpoints
+        endpoints=np.zeros((len(orientedStreams),6))
+        #get the endpoints, taken from
+        #https://github.com/dipy/dipy/blob/f149c756e09f172c3b77a9e6c5b5390cc08af6ea/dipy/tracking/utils.py#L708
+        for iStreamline in range(len(orientedStreams)):
+            #remember, first 3 = endpoint 1, last 3 = endpoint 2    
+            endpoints[iStreamline,:]= np.concatenate([orientedStreams[iStreamline][0,:], orientedStreams[iStreamline][-1,:]])
+        
+        #select the appropriate endpoints
+        Endpoints1=endpoints[:,0:3]
+        Endpoints2=endpoints[:,3:7]
+        
+        #create holders for both the dispersion means and the dispersion variances
+        dispersionMeans=[]
+        dispersionVariances=[]
+        #asym
+        dispersionMeansAsym=[]
+        dispersionVariancesAsym=[]
+        for iBoostrap in range (bootstrapNum):
+            
+            #select a subset of half the whole streamline group, then 
+            #find the intersection fo that set and the current voxel's streamlines
+            currentBootstrapStreamsAll=np.random.randint(0,len(streamlines),bootstrapStreamNum)
+            currentBootstrapStreamsSubSelect=np.in1d(streamIndexes,currentBootstrapStreamsAll)
+            
+            #compute the subset mean distance and variance for endpoint cluster 1
+            avgEndPoint1=np.mean(Endpoints1[currentBootstrapStreamsSubSelect],axis=0)
+            curNearDistsFromAvg1=cdist(Endpoints1[currentBootstrapStreamsSubSelect], np.reshape(avgEndPoint1, (1,3)), 'euclidean')
+            endPoint1DistAvg=np.mean(curNearDistsFromAvg1)
+            endPoint1DistVar=np.var(curNearDistsFromAvg1)
+            
+            #compute the subset mean distance and variance for endpoint cluster 2
+            avgEndPoint2=np.mean(Endpoints2[currentBootstrapStreamsSubSelect],axis=0)
+            curNearDistsFromAvg2=cdist(Endpoints2[currentBootstrapStreamsSubSelect], np.reshape(avgEndPoint2, (1,3)), 'euclidean')
+            endPoint2DistAvg=np.mean(curNearDistsFromAvg2)
+            endPoint2DistVar=np.var(curNearDistsFromAvg2)
+        
+            #for this bootstrap iteration, compute the average distance and the variance
+            dispersionMeans.append(np.mean([endPoint2DistAvg,endPoint1DistAvg]))
+            dispersionVariances.append(np.mean([endPoint1DistVar,endPoint2DistVar]))
+            #asym
+            dispersionMeansAsym.append((endPoint1DistAvg-endPoint2DistAvg)/(endPoint1DistAvg+endPoint2DistAvg))
+            dispersionVariancesAsym.append((endPoint1DistVar-endPoint2DistVar)/(endPoint1DistVar+endPoint2DistVar))
+        
+        #now place them in the appropriate location in their respective
+        #storage vectors
+        meanOfMeans[iCoords]=np.mean(dispersionMeans)
+        varianceOfMeans[iCoords]=np.var(dispersionMeans)
+        meanOfVariances[iCoords]=np.mean(dispersionVariances)
+        varianceOfVariances[iCoords]=np.var(dispersionVariances)
+        
+        #asym
+        meanOfMeansAsym[iCoords]=np.mean(dispersionMeansAsym)
+        varianceOfMeansAsym[iCoords]=np.var(dispersionMeansAsym)
+        meanOfVariancesAsym[iCoords]=np.mean(dispersionVariancesAsym)
+        varianceOfVariancesAsym[iCoords]=np.var(dispersionVariancesAsym)
+    
+    #Now that the metrics have been compute for all coordinates, create
+    #3d arrays to store the output for the nifti object data
+    outMeanOfMeansArray=np.zeros(referenceNifti.shape,dtype='float')
+    outVarianceOfMeansArray=np.zeros(referenceNifti.shape,dtype='float')
+    outMeanOfVariancesArray=np.zeros(referenceNifti.shape,dtype='float')
+    outVarianceOfVariancesArray=np.zeros(referenceNifti.shape,dtype='float')
+    
+    #asym
+    outMeanOfMeansAsymArray=np.zeros(referenceNifti.shape,dtype='float')
+    outVarianceOfMeansAsymArray=np.zeros(referenceNifti.shape,dtype='float')
+    outMeanOfVariancesAsymArray=np.zeros(referenceNifti.shape,dtype='float')
+    outVarianceOfVariancesAsymArray=np.zeros(referenceNifti.shape,dtype='float')
+    
+    #iterate across each voxel coordinate
+    for iCoords in range(len(subjectSpaceTractCoords)):
+        #fill in the corresponding voxel's value for each metric
+        outMeanOfMeansArray[imgSpaceTractVoxels[iCoords]] = meanOfMeans[iCoords]
+        outVarianceOfMeansArray[imgSpaceTractVoxels[iCoords]] = varianceOfMeans[iCoords]
+        outMeanOfVariancesArray[imgSpaceTractVoxels[iCoords]] = meanOfVariances[iCoords]
+        outVarianceOfVariancesArray[imgSpaceTractVoxels[iCoords]] = varianceOfVariances[iCoords]
+        
+        #asym
+        outMeanOfMeansAsymArray[imgSpaceTractVoxels[iCoords]] = meanOfMeansAsym[iCoords]
+        outVarianceOfMeansAsymArray[imgSpaceTractVoxels[iCoords]] = varianceOfMeansAsym[iCoords]
+        outMeanOfVariancesAsymArray[imgSpaceTractVoxels[iCoords]] = meanOfVariancesAsym[iCoords]
+        outVarianceOfVariancesAsymArray[imgSpaceTractVoxels[iCoords]] = varianceOfVariancesAsym[iCoords]
+    
+    #create nifti objects for each metric
+    meanOfMeansNifti=nib.nifti1.Nifti1Image(outMeanOfMeansArray, referenceNifti.affine, referenceNifti.header)
+    varianceOfMeansNifti=nib.nifti1.Nifti1Image(outVarianceOfMeansArray, referenceNifti.affine, referenceNifti.header)
+    meanOfVariancesNifti=nib.nifti1.Nifti1Image(outMeanOfVariancesArray, referenceNifti.affine, referenceNifti.header)
+    varianceOfVariancesNifti=nib.nifti1.Nifti1Image(outVarianceOfVariancesArray, referenceNifti.affine, referenceNifti.header)
+    
+    meanOfMeansAsymNifti=nib.nifti1.Nifti1Image(outMeanOfMeansArray, referenceNifti.affine, referenceNifti.header)
+    varianceOfMeansAsymNifti=nib.nifti1.Nifti1Image(outVarianceOfMeansArray, referenceNifti.affine, referenceNifti.header)
+    meanOfVariancesAsymNifti=nib.nifti1.Nifti1Image(outMeanOfVariancesArray, referenceNifti.affine, referenceNifti.header)
+    varianceOfVariancesAsymNifti=nib.nifti1.Nifti1Image(outVarianceOfVariancesArray, referenceNifti.affine, referenceNifti.header)
+    
+    return meanOfMeansNifti, varianceOfMeansNifti, meanOfVariancesNifti, varianceOfVariancesNifti, meanOfMeansAsymNifti, varianceOfMeansAsymNifti, meanOfVariancesAsymNifti, varianceOfVariancesAsymNifti
 
 def complexStreamlinesIntersect(streamlines, maskNifti):
         import dipy.tracking.utils as ut
@@ -2050,7 +2256,7 @@ def applyNiftiCriteriaToTract_DIPY_Cython(streamlines, maskNifti, includeBool, o
     
     return outBoolVec
    
-def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir):
+def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False):
     import nibabel as nib
     #use dipy to create the density mask
     from dipy.tracking import utils
@@ -2058,8 +2264,11 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir):
     from glob import glob
     import os
     from nilearn.image import reorder_img  
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    from matplotlib import figure
     
-    #resample crop
+    
+    #resample crop (doesn't seem to work)
     [refAnatT1,overlayNifti]=dualCropNifti(refAnatT1,overlayNifti)
     
     #RAS reoreintation
@@ -2096,36 +2305,42 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir):
             fig,ax = plt.subplots()
             ax.axis('off')
             #kind of overwhelming to do this in one line
-            refData=np.reshape(refAnatT1.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape)
+            refData=np.rot90(np.reshape(refAnatT1.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),1)
             plt.imshow(refData, cmap='gray', interpolation='nearest')
             #kind of overwhelming to do this in one line
-            overlayData=np.reshape(overlayNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape)
-            plt.imshow(np.ma.masked_where(overlayData<1,overlayData), cmap='jet', alpha=.75, interpolation='nearest')
+            overlayData=np.rot90(np.reshape(overlayNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),1)
+            plt.imshow(np.ma.masked_where(overlayData<=0,overlayData), cmap='jet', alpha=.75, interpolation='nearest',vmin=1,vmax=np.nanmax(overlayNifti.get_fdata()))
+            curFig=plt.gcf()
+            cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
+            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_fdata())], orientation='vertical')
+            curFig.gca().yaxis.set_ticks_position('left')
+            curFig.gca().tick_params( colors='white')
             # we use *2 in order to afford room for the subsequent blended images
-            figName='dim_' + str(iDims) +'_'+  str(iSlices*2).zfill(3)
-            plt.savefig(figName,bbox_inches='tight')
+            figName='dim_' + str(iDims) +'_'+  str(iSlices*2).zfill(3)+'.png'
+            plt.savefig(figName,bbox_inches='tight',pad_inches=0.0)
             plt.clf()
             
     import os        
     from PIL import Image
     from glob import glob
     #create blened images to smooth transitions between slices
-    for iDims in list(range(len(refAnatT1.shape))):
-        dimStem='dim_' + str(iDims)
-        imageList=sorted(glob(dimStem+'*.png'))
-        for iImages in list(range(len(imageList)-1)):
-            thisImage=Image.open(imageList[iImages])
-            nextImage=Image.open(imageList[iImages+1])
-            blendedImage = Image.blend(newimg1, newimg2, alpha=0.5)
-            # 1 + 2 * iImages fills in the name space we left earlier
-            figName='dim_' + str(iDims) +'_'+  str(1+iImages*2).zfill(3)
-            blendedImage.save(figName,'png')
+    if blendOption:
+        for iDims in list(range(len(refAnatT1.shape))):
+            dimStem='dim_' + str(iDims)
+            imageList=sorted(glob(dimStem+'*.png'))
+            for iImages in list(range(len(imageList)-1)):
+                thisImage=Image.open(imageList[iImages])
+                nextImage=Image.open(imageList[iImages+1])
+                blendedImage = Image.blend(thisImage, nextImage, alpha=0.5)
+                # 1 + 2 * iImages fills in the name space we left earlier
+                figName='dim_' + str(iDims) +'_'+  str(1+iImages*2).zfill(3)+'.png'
+                blendedImage.save(figName,'png')
   
     for iDims in list(range(len(refAnatT1.shape))):
         dimStem='dim_' + str(iDims)
         img, *imgs = [Image.open(f) for f in sorted(glob(dimStem+'*.png'))]
         img.save(os.path.join(saveDir,dimStem+'.gif'), format='GIF', append_images=imgs,
-                 save_all=True, duration=len(imgs)*1, loop=0)
+                 save_all=True, duration=1, loop=0)
         plt.close('all')
 
         [os.remove(ipaths) for ipaths in sorted(glob(dimStem+'*.png'))]
@@ -2176,6 +2391,10 @@ def dualCropNifti(nifti1,nifti2):
     inShape2=nifti2.shape
 
     #get 
+    #nilearn doesn't handle NAN gracefully, so we have to be inelegant
+    nifti1=nib.nifti1.Nifti1Image(np.nan_to_num(nifti1.get_fdata()), nifti1.affine, nifti1.header)
+    nifti2=nib.nifti1.Nifti1Image(np.nan_to_num(nifti2.get_fdata()), nifti2.affine, nifti2.header)
+    
     cropped1=crop_img(nifti1)
     cropped2=crop_img(nifti2)
     
@@ -2265,3 +2484,245 @@ def wmc2tracts(inputTractogram,classification,outdir):
             out_filename=os.path.join(outdir,tract_name + '.trk')
         
         save_tractogram(statefulTractogramOut,out_filename)
+
+def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName=None,saveDir=None):
+    """radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName=None,saveDir=None)
+    A function used to generate radial fingerprint plots for input tracts, as 
+    found in Folloni 2021
+
+    Parameters
+    ----------
+    tractStreamlines : streamlines type
+        Streamlines corresponding to the tract of interest
+    atlas : Nifti, int based
+        A nifti atlas that will be used to determine the endpoint connectivity
+    atlasLookupTable : pandas dataframe or file loadable to pandas dataframe
+        A dataframe of the atlas lookup table which includes the labels featured
+        in the atlas and their identities.  These identities will be used
+        to label the periphery of the radial plot.
+    tractName : string, optional
+        The name of the tract to be used as a label in the output figure. No 
+        input will result in there being no corresponding label. The default is None.
+    saveDir : TYPE, optional
+        The directory in which to save the resultant radial plot. No input
+        will result in no save. The default is None.
+
+    Returns
+    -------
+    The figure generated
+
+    """ 
+    import pandas as pd
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import nibabel as nib
+    import dipy
+    import numpy as np
+    from dipy.segment.clustering import QuickBundles
+    from dipy.tracking.utils import reduce_labels
+    from dipy.tracking import utils
+    import dipy.tracking.streamline as streamline
+    from dipy.segment.metric import ResampleFeature
+    from dipy.segment.metric import AveragePointwiseEuclideanMetric
+    from dipy.segment.metric import MinimumAverageDirectFlipMetric
+    import itertools
+    
+    #use dipy function to reduce labels to contiguous values
+    relabeledAtlasData=reduce_labels(atlas.get_fdata())[0]
+    #create new nifti object
+    renumberedAtlasNifti=nib.Nifti1Image(relabeledAtlasData, atlas.affine, atlas.header)
+    
+    #take care of tractogram ans treamline issues
+    if isinstance(tractStreamlines,str):
+        loadedTractogram=nib.streamlines.load(tractStreamlines)
+        tractStreamlines=loadedTractogram.streamlines
+    
+    
+    feature = ResampleFeature(nb_points=100)
+    #metric = MinimumAverageDirectFlipMetric(feature)
+    metric = AveragePointwiseEuclideanMetric(feature)
+    qb = QuickBundles(threshold=100,metric=metric)
+    cluster = qb.cluster(tractStreamlines)
+    #there should be only one with the distance setting this high
+    tractStreamlines=streamline.orient_by_streamline(tractStreamlines, cluster.centroids[0])
+    
+    #test endpoints
+    endpoints1=[istreamlines[0,:] for istreamlines in tractStreamlines]
+    endpoints2=[istreamlines[-1,:] for istreamlines in tractStreamlines]
+    
+    #segment tractome into connectivity matrix from parcellation
+    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_fdata().astype(int),
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    #get the keys so that you can iterate through them later
+    keyTargets=list(grouping.keys())
+    keyTargetsArray=np.asarray(keyTargets)
+    
+    #work with the input lookup table
+    if isinstance(atlasLookupTable,str):
+        if atlasLookupTable[-4:]=='.csv':
+            atlasLookupTable=pd.read_csv(atlasLookupTable)
+        elif (atlasLookupTable[-4:]=='.xls',atlasLookupTable[-5:]=='.xlsx'):
+            atlasLookupTable=pd.read_excel(atlasLookupTable)
+    
+    if len(atlasLookupTable)>len(np.unique(relabeledAtlasData)):
+        #infer which column contains the original identities
+        #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
+        matchingLabelsCount=[len(list(set(atlasLookupTable[iColumns]).intersection(set(np.unique(atlas.get_fdata()).astype(int))))) for iColumns in atlasLookupTable.columns.to_list()]
+        #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
+        #worry about that later
+        columnBestGuess=atlasLookupTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
+        #we can also take this opportunity to pick the longest average column, which is likely the optimal label name
+        entryLengths=atlasLookupTable.applymap(str).applymap(len)
+        labelColumnGuess=entryLengths.mean(axis=0).idxmax()
+        
+        #now that we have the guess, get the corresponding row entries, and reset the index.
+        #This should make the index match the renumbered label values.
+        LUTWorking=atlasLookupTable[atlasLookupTable[columnBestGuess].isin(np.unique(atlas.get_fdata()).astype(int)).values].reset_index(drop=True)
+        
+    for iEndpoints in range(keyTargetsArray.shape[1]):
+        uniqueLabelValues=np.unique(keyTargetsArray[:,iEndpoints])
+        plotLabels=[]
+        plotValues=[]
+        for iUniqueLabelValues in uniqueLabelValues:
+            targetKeys=list(itertools.compress(keyTargets,[keyTargetsArray[:,iEndpoints]==iUniqueLabelValues][0]))
+            #could also probably just sum up the column in the matrix
+            counts=[len(grouping[iKeys]) for iKeys in targetKeys]
+            #append to the plotValue list
+            plotValues.append(np.sum(counts))
+            plotLabels.append(LUTWorking[labelColumnGuess].iloc[iUniqueLabelValues])
+        
+def basicRadarPlot(values, labels):
+    """
+    https://www.python-graph-gallery.com/web-circular-barplot-with-matplotlib
+    
+
+    Parameters
+    ----------
+    values : TYPE
+        DESCRIPTION.
+    labels : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+    import numpy as np
+    from textwrap import wrap
+    
+    #convert the values to log scale
+    values=np.log10(values)
+    
+    # Values for the x axis
+    ANGLES = np.linspace(0.05, 2 * np.pi - 0.05, len(labels), endpoint=False)
+    
+    # Set default font to Bell MT
+    plt.rcParams.update({"font.family": "Bell MT"})
+
+    GREY12 = "#1f1f1f"
+    # Set default font color to GREY12
+    plt.rcParams["text.color"] = GREY12
+
+    # The minus glyph is not available in Bell MT
+    # This disables it, and uses a hyphen
+    plt.rc("axes", unicode_minus=False)
+
+    # Colors
+    COLORS = ["#6C5B7B","#C06C84","#F67280","#F8B195"]
+
+    # Colormap
+    cmap = mpl.colors.LinearSegmentedColormap.from_list("my color", COLORS, N=256)
+
+    # Normalizer
+    #norm = mpl.colors.Normalize(vmin=TRACKS_N.min(), vmax=TRACKS_N.max())
+
+    # Normalized colors. Each number of tracks is mapped to a color in the 
+    # color scale 'cmap'
+    #COLORS = cmap(norm(TRACKS_N))
+
+    # Some layout stuff ----------------------------------------------
+    # Initialize layout in polar coordinates
+    fig, ax = plt.subplots(figsize=(9, 12.6), subplot_kw={"projection": "polar"})
+
+    # Set background color to white, both axis and figure.
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
+    ax.set_theta_offset(1.2 * np.pi / 2)
+    ax.set_ylim(-.5, np.max(values)*1.3)
+
+    # Add geometries to the plot -------------------------------------
+    # See the zorder to manipulate which geometries are on top
+
+    # Add bars to represent the cumulative track lengths
+    ax.bar(ANGLES, values, color=COLORS, alpha=0.9, width=(3.1415/(len(values)))*1.5 )
+    
+    #overly specific to aparcaseg, fix later
+    #try and do split lines
+    for iREGION in range(len(labels)):
+        if 'ctx_lh_G_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_lh_G_','ctx_lh_G\n')
+        elif 'ctx_lh_S_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_lh_S_','ctx_lh_S\n')
+        elif 'ctx_lh_G\nand_S_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_lh_G\nand_S_','ctx_lh_G_and_S\n')
+            
+    for iREGION in range(len(labels)):
+        if 'ctx_rh_G_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_rh_G_','ctx_rh_G\n')
+        elif 'ctx_rh_S_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_rh_S_','ctx_rh_S\n')
+        elif 'ctx_rh_G\nand_S_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_rh_G\nand_S_','ctx_rh_G_and_S\n')
+
+    REGION = ["\n".join(wrap(r, 5, break_long_words=False)) for r in labels]
+    
+    #XTICKS = ax.xaxis.get_major_ticks()
+    #for tick in XTICKS:
+    #    tick.set_pad(10)
+    
+    YTICKS = ax.yaxis.get_major_ticks()
+    YTICKS[-2].set_visible(False)
+    YTICKS[-1].set_visible(False)
+    
+    #ax.spines["start"].set_color("none")
+    ax.spines["polar"].set_color("none")
+    
+    ax.xaxis.grid(False)
+    ax.set_xticks(ANGLES)
+    ax.set_xticklabels(REGION, size=14);
+    ax.text(0, np.max(values)-.5, "Log10  # \n of streamlines", rotation=-69, 
+        ha="center", va="center", size=12, zorder=12)
+
+def dipyPlotTract(streamlines):
+    import numpy as np
+    from fury import actor, window
+    from dipy.tracking.streamline import transform_streamlines
+    import matplotlib
+    from matplotlib import cm
+
+    scene = window.Scene()
+    scene.clear()
+    
+    cmap = matplotlib.cm.get_cmap('seismic')
+    
+    #https://dipy.org/documentation/1.4.1./examples_built/streamline_tools/#example-streamline-tools
+
+    #cmap(np.array(range(streamline.shape[0]))/streamline.shape[0])
+    
+    colors = [cmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
+
+    stream_actor = actor.line(streamlines, colors, linewidth=0.2)
+
+    scene.add(stream_actor)
+
+    scene.set_camera(position=(-176.42, 118.52, 128.20),
+                 focal_point=(113.30, 128.31, 76.56),
+                 view_up=(0.18, 0.00, 0.98))    
+
+    # window.show(scene, size=(600, 600), reset_camera=False)
+    window.record(scene, out_path='bundle6.png', size=(600, 600))
