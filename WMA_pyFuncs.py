@@ -2475,7 +2475,7 @@ def wmc2tracts(inputTractogram,classification,outdir):
         
         save_tractogram(statefulTractogramOut,out_filename)
 
-def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName=None,saveDir=None):
+def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',saveDir=None):
     """radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName=None,saveDir=None)
     A function used to generate radial fingerprint plots for input tracts, as 
     found in Folloni 2021
@@ -2502,92 +2502,104 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
     The figure generated
 
     """ 
-    import pandas as pd
-    import seaborn as sns
+    import os
     import matplotlib.pyplot as plt
-    import nibabel as nib
-    import dipy
+    [endpointsDF1, endpointsDF2]=quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable)
+    
+    figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']))
+    figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']))
+    
+    figure1.get_axes()[0].set_title(tractName+'\nRAS endpoints')
+    figure1.get_axes()[0].set_facecolor([0,0,1,.15])
+    #figure1.patch.set_facecolor([0,0,1,.2])
+    figure2.get_axes()[0].set_title(tractName+'\nLPI endpoints')
+    figure2.get_axes()[0].set_facecolor([1,0,0,.15])
+    #figure2.patch.set_facecolor([1,0,0,.2])
+    
+    if saveDir==None:
+        saveDir=os.getcwd()
+        
+    figure1.savefig(os.path.join(saveDir,tractName+'_RAS_endpointMap.eps'))
+    figure2.savefig(os.path.join(saveDir,tractName+'_LPI_endpointMap.eps'))
+    
+def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,atlasLookupTable,tractName='tract',saveDir=None):
+    """
+    
+
+    Parameters
+    ----------
+    tractTractogramList : TYPE
+        DESCRIPTION.
+    atlasList : TYPE
+        DESCRIPTION.
+    atlasLookupTable : TYPE
+        DESCRIPTION.
+    tractName : TYPE, optional
+        DESCRIPTION. The default is 'tract'.
+    saveDir : TYPE, optional
+        DESCRIPTION. The default is None.
+
+    Returns
+    -------
+    None.
+
+    """
+    import pandas as pd
     import numpy as np
-    from dipy.segment.clustering import QuickBundles
-    from dipy.tracking.utils import reduce_labels
-    from dipy.tracking import utils
-    import dipy.tracking.streamline as streamline
-    from dipy.segment.metric import ResampleFeature
-    from dipy.segment.metric import AveragePointwiseEuclideanMetric
-    from dipy.segment.metric import MinimumAverageDirectFlipMetric
-    import itertools
+    import os
     
-    #use dipy function to reduce labels to contiguous values
-    relabeledAtlasData=reduce_labels(atlas.get_fdata())[0]
-    #create new nifti object
-    renumberedAtlasNifti=nib.Nifti1Image(relabeledAtlasData, atlas.affine, atlas.header)
-    
-    #take care of tractogram and treamline issues
-    if isinstance(tractStreamlines,str):
-        loadedTractogram=nib.streamlines.load(tractStreamlines)
-        tractStreamlines=loadedTractogram.streamlines
-    elif  isinstance(tractStreamlines,nib.streamlines.tck.TckFile):
-        tractStreamlines=tractStreamlines.streamlines
-    
-    
-    feature = ResampleFeature(nb_points=100)
-    #metric = MinimumAverageDirectFlipMetric(feature)
-    metric = AveragePointwiseEuclideanMetric(feature)
-    qb = QuickBundles(threshold=100,metric=metric)
-    cluster = qb.cluster(tractStreamlines)
-    #there should be only one with the distance setting this high
-    tractStreamlines=streamline.orient_by_streamline(tractStreamlines, cluster.centroids[0])
-    
-    #test endpoints
-    endpoints1=[istreamlines[0,:] for istreamlines in tractStreamlines]
-    endpoints2=[istreamlines[-1,:] for istreamlines in tractStreamlines]
-    
-    #segment tractome into connectivity matrix from parcellation
-    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_fdata().astype(int),
-                            return_mapping=True,
-                            mapping_as_streamlines=False)
-    #get the keys so that you can iterate through them later
-    keyTargets=list(grouping.keys())
-    keyTargetsArray=np.asarray(keyTargets)
-    
-    #work with the input lookup table
-    if isinstance(atlasLookupTable,str):
-        if atlasLookupTable[-4:]=='.csv':
-            atlasLookupTable=pd.read_csv(atlasLookupTable)
-        elif (atlasLookupTable[-4:]=='.xls',atlasLookupTable[-5:]=='.xlsx'):
-            atlasLookupTable=pd.read_excel(atlasLookupTable)
-    
-    if len(atlasLookupTable)>len(np.unique(relabeledAtlasData)):
-        #infer which column contains the original identities
-        #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
-        matchingLabelsCount=[len(list(set(atlasLookupTable[iColumns]).intersection(set(np.unique(atlas.get_fdata()).astype(int))))) for iColumns in atlasLookupTable.columns.to_list()]
-        #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
-        #worry about that later
-        columnBestGuess=atlasLookupTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
-        #we can also take this opportunity to pick the longest average column, which is likely the optimal label name
-        entryLengths=atlasLookupTable.applymap(str).applymap(len)
-        labelColumnGuess=entryLengths.mean(axis=0).idxmax()
+    RASendpointData=[]
+    LPIendpointData=[]
+    for iTracts in range(len(tractTractogramList)):
+        [currentRAS,currentLPI]=quantifyTractEndpoints(tractTractogramList[iTracts],atlasList[iTracts],atlasLookupTable)
+        RASendpointData.append(currentRAS)
+        LPIendpointData.append(currentLPI)
         
-        #now that we have the guess, get the corresponding row entries, and reset the index.
-        #This should make the index match the renumbered label values.
-        LUTWorking=atlasLookupTable[atlasLookupTable[columnBestGuess].isin(np.unique(atlas.get_fdata()).astype(int)).values].reset_index(drop=True)
+    #normalize them
+    for iTracts in range(len(tractTractogramList)):
+        RASendpointData[iTracts]['endpointCounts']=RASendpointData[iTracts]['endpointCounts'].divide(RASendpointData[iTracts]['endpointCounts'].sum())
+        LPIendpointData[iTracts]['endpointCounts']=LPIendpointData[iTracts]['endpointCounts'].divide(LPIendpointData[iTracts]['endpointCounts'].sum())
+    
+    firstRASDF=RASendpointData[0]
+    firstLPIDF=LPIendpointData[0]
+    for iTracts in range(1,len(tractTractogramList)):
+        firstRASDF=pd.merge(firstRASDF,RASendpointData[iTracts], on='labelNames', how='outer')
+        firstLPIDF=pd.merge(firstLPIDF,LPIendpointData[iTracts], on='labelNames', how='outer')
+    
+    #set NaNs to 0
+    firstRASDF.fillna(0)
+    firstLPIDF.fillna(0)
+    
+    #compute means and variances
+    firstLPIDF[['meanProportion','proportionSTD']]=pd.DataFrame(np.squeeze(np.asarray([np.mean(firstLPIDF.iloc[:,1:-1],axis=1),np.std(firstLPIDF.iloc[:,1:-1],axis=1)])).T, index=firstLPIDF.index)
+    firstRASDF[['meanProportion','proportionSTD']]=pd.DataFrame(np.squeeze(np.asarray([np.mean(firstRASDF.iloc[:,1:-1],axis=1),np.std(firstRASDF.iloc[:,1:-1],axis=1)])).T, index=firstRASDF.index)
+    
+    figure2=basicRadarPlot(list(firstLPIDF['labelNames']),list(firstLPIDF['meanProportion']),metaValues=list(firstLPIDF['proportionSTD']))
+    figure1=basicRadarPlot(list(firstRASDF['labelNames']),list(firstRASDF['meanProportion']),metaValues=list(firstRASDF['proportionSTD']))
+    
+    figure1.get_axes()[0].set_title(tractName+'\nRAS endpoints')
+    figure1.get_axes()[0].set_facecolor([0,0,1,.15])
+    figure1.get_axes()[0].text(0, np.max(firstRASDF['meanProportion'])-.5, "avg proportion\n of streamlines", rotation=-69, 
+        ha="center", va="center", size=12, zorder=12)
+
+    figure2.get_axes()[0].set_title(tractName+'\nLPI endpoints')
+    figure2.get_axes()[0].set_facecolor([1,0,0,.15])
+    figure2.get_axes()[0].text(0, np.max(firstLPIDF['meanProportion'])-.5, "avg proportion\n of streamlines", rotation=-69, 
+        ha="center", va="center", size=12, zorder=12)
+    #figure2.patch.set_facecolor([1,0,0,.2])
+    
+    if saveDir==None:
+        saveDir=os.getcwd()
         
-    for iEndpoints in range(keyTargetsArray.shape[1]):
-        uniqueLabelValues=np.unique(keyTargetsArray[:,iEndpoints])
-        plotLabels=[]
-        plotValues=[]
-        for iUniqueLabelValues in uniqueLabelValues:
-            targetKeys=list(itertools.compress(keyTargets,[keyTargetsArray[:,iEndpoints]==iUniqueLabelValues][0]))
-            #could also probably just sum up the column in the matrix
-            counts=[len(grouping[iKeys]) for iKeys in targetKeys]
-            #append to the plotValue list
-            plotValues.append(np.sum(counts))
-            plotLabels.append(LUTWorking[labelColumnGuess].iloc[iUniqueLabelValues])
-        
-def basicRadarPlot(values, labels):
+    figure1.savefig(os.path.join(saveDir,tractName+'_group_RAS_endpointMap.svg'))
+    figure2.savefig(os.path.join(saveDir,tractName+'_group_LPI_endpointMap.svg'))
+    
+def basicRadarPlot(labels,values, metaValues=None):
     """
     https://www.python-graph-gallery.com/web-circular-barplot-with-matplotlib
-    
+    #maybe also consider
+    https://www.python-graph-gallery.com/circular-barplot/
+    and group with lobes?
 
     Parameters
     ----------
@@ -2598,7 +2610,7 @@ def basicRadarPlot(values, labels):
 
     Returns
     -------
-    None.
+    figure handle
 
     """
     import matplotlib.pyplot as plt
@@ -2607,7 +2619,9 @@ def basicRadarPlot(values, labels):
     from textwrap import wrap
     
     #convert the values to log scale
-    values=np.log10(values)
+    #figure out a way to do this conditionally
+    #maybe if standard deviation of values is greater than 100 ?
+    #values=np.log10(values)
     
     # Values for the x axis
     ANGLES = np.linspace(0.05, 2 * np.pi - 0.05, len(labels), endpoint=False)
@@ -2645,14 +2659,19 @@ def basicRadarPlot(values, labels):
     ax.set_facecolor("white")
 
     ax.set_theta_offset(1.2 * np.pi / 2)
-    ax.set_ylim(-.5, np.max(values)*1.3)
+    #find adaptive way to set min value
+    ax.set_ylim(-.1, np.max(values)*1.3)
 
     # Add geometries to the plot -------------------------------------
     # See the zorder to manipulate which geometries are on top
 
     # Add bars to represent the cumulative track lengths
-    ax.bar(ANGLES, values, color=COLORS, alpha=0.9, width=(3.1415/(len(values)))*1.5 )
-    
+    #make conditional on metavalues
+    if metaValues==None:
+        ax.bar(ANGLES, values, color=COLORS, alpha=0.9, width=(3.1415/(len(values)))*1.5 )
+    else:
+        ax.bar(ANGLES, values, yerr=metaValues,color=COLORS, alpha=0.9, width=(3.1415/(len(values)))*1.5 )
+        
     #overly specific to aparcaseg, fix later
     #try and do split lines
     for iREGION in range(len(labels)):
@@ -2687,15 +2706,14 @@ def basicRadarPlot(values, labels):
     ax.xaxis.grid(False)
     ax.set_xticks(ANGLES)
     ax.set_xticklabels(REGION, size=14);
-    ax.text(0, np.max(values)-.5, "Log10  # \n of streamlines", rotation=-69, 
-        ha="center", va="center", size=12, zorder=12)
+    #ax.text(0, np.max(values)-.5, "Log10  # \n of streamlines", rotation=-69, 
+    #    ha="center", va="center", size=12, zorder=12)
+    return plt.gcf()
 
-def dipyPlotTract(streamlines):
+def dipyPlotTract(streamlines,refAnatT1=None):
     import numpy as np
     from fury import actor, window
-    from dipy.tracking.streamline import transform_streamlines
     import matplotlib
-    from matplotlib import cm
 
     scene = window.Scene()
     scene.clear()
@@ -2754,7 +2772,7 @@ def dipyPlotTract(streamlines):
                  view_up=(0.18, 0.00, 0.98))    
 
     # window.show(scene, size=(600, 600), reset_camera=False)
-    window.record(scene, out_path='badStreamsFigure.png', size=(600, 600))
+    window.record(scene, out_path='tractFigure.png', size=(600, 600))
     window.exit()
 
 def orientTractUsingNeck(streamlines):
@@ -2779,74 +2797,200 @@ def orientTractUsingNeck(streamlines):
     """
     import numpy as np
     from scipy.spatial.distance import cdist
+    import copy
     
-    #get the neck nodes for the tract
-    neckNodes=findTractNeckNode(streamlines)
-    
-    #obtain the coordinates for each of these neck nodes
-    neckCoords=[]
-    for iStreamlines in range(len(streamlines)):
-        neckCoords.append(streamlines[iStreamlines][neckNodes[iStreamlines]])
-    
-    #now get the node that's 5 "ahead" and 5 "behind" the neck node
-    lookDistance=10
-    aheadNodes=[]
-    behindNodes=[]
-    for iStreamlines in range(len(streamlines)):
-       #A check to make sure you've got room to do this indexing on both sides
-       if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines])>lookDistance,(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))>lookDistance):
-           aheadNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]+lookDistance])
-           behindNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]-lookDistance])
-       #otherwise do the best you can
-       else:
-           #if there's a limit to how many nodes are available ahead, do the best you can
-           spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
-           if spaceAhead<lookDistance:
-               aheadWindow=spaceAhead-1
-           else:
-               aheadWindow=lookDistance
-           #if there's a limit to how many nodes are available behind, do the best you can
-           spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
-           if spaceBehind<lookDistance:
-               behindWindow=spaceBehind-1
-           else:
-               behindWindow=lookDistance
-           
-           #append the relevant values
-           aheadNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]+(aheadWindow)])
-           behindNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]-(behindWindow)])
-           
-    # use the coords that are at the heart of the tract
-    neckCoords=np.zeros([len(streamlines),3])
-
-    for iStreamlines in range(len(streamlines)):
-         neckCoords[iStreamlines,:]=(streamlines[iStreamlines][neckNodes[iStreamlines]])
-         
-    neckNodeDistances=cdist(np.atleast_2d(np.mean(neckCoords,axis=0)),neckCoords)
-    aheadDistances=np.squeeze(cdist(np.atleast_2d(np.mean(np.squeeze(np.asarray(aheadNodes)),axis=0)),np.squeeze(np.asarray(aheadNodes))))
-    behindDistances=np.squeeze(cdist(np.atleast_2d(np.mean(np.squeeze(np.asarray(behindNodes)),axis=0)),np.squeeze(np.asarray(behindNodes))))
-
-    orientationGuideAheadNode=aheadNodes[np.where(np.min(aheadDistances)==aheadDistances)[0][0]].flatten()
-    orientationGuideBehindNode=behindNodes[np.where(np.min(behindDistances)==behindDistances)[0][0]].flatten()
-    #iterate across streamlines
+    #this has to be run a couple times to ensure that streamlines that are initially 
+    #flipped aren't throwing off the group average too bad
+    flipRuns=1
     flipCount=0
-    for iStreamlines in range(len(streamlines)):
-        #compute the distances from the comparison orientation for both possible
-        #orientations
-        sumDistanceOrientation1=np.sum([cdist(np.atleast_2d(orientationGuideAheadNode),np.atleast_2d(aheadNodes[iStreamlines])),cdist(np.atleast_2d(orientationGuideBehindNode),np.atleast_2d(behindNodes[iStreamlines]))])
-        sumDistanceOrientation2=np.sum([cdist(np.atleast_2d(orientationGuideAheadNode),np.atleast_2d(behindNodes[iStreamlines])),cdist(np.atleast_2d(orientationGuideBehindNode),np.atleast_2d(aheadNodes[iStreamlines]))])
-        #flip if necessary
-        if sumDistanceOrientation2<sumDistanceOrientation1:
-            streamlines[iStreamlines]= streamlines[iStreamlines][::-1]
-            flipCount=flipCount+1
-            
-            
-    #there's still a few that aren't flipping right, so now we use peer pressure
+    exitTrigger=False
+    while not exitTrigger: 
     
+        #get the neck nodes for the tract
+        neckNodes=findTractNeckNode(streamlines)
+        
+        #obtain the coordinates for each of these neck nodes
+        neckCoords=[]
+        for iStreamlines in range(len(streamlines)):
+            neckCoords.append(streamlines[iStreamlines][neckNodes[iStreamlines]])
+        
+        #now get the node that's 5 "ahead" and 5 "behind" the neck node
+        lookDistance=10
+        aheadNodes=[]
+        behindNodes=[]
+        for iStreamlines in range(len(streamlines)):
+           #A check to make sure you've got room to do this indexing on both sides
+           if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
+               aheadNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]+lookDistance])
+               behindNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]-lookDistance])
+           #otherwise do the best you can
+           else:
+               #if there's a limit to how many nodes are available ahead, do the best you can
+               spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
+               if spaceAhead<=lookDistance:
+                   aheadWindow=spaceAhead-1
+               else:
+                   aheadWindow=lookDistance
+               #if there's a limit to how many nodes are available behind, do the best you can
+               spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
+               if spaceBehind<=lookDistance:
+                   behindWindow=spaceBehind-1
+               else:
+                   behindWindow=lookDistance
+               
+               #append the relevant values
+               aheadNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]+(aheadWindow)])
+               behindNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]-(behindWindow)])
+         
+        
+        # use the coords that are at the heart of the tract
+        neckCoords=np.zeros([len(streamlines),3])
+    
+        for iStreamlines in range(len(streamlines)):
+             neckCoords[iStreamlines,:]=(streamlines[iStreamlines][neckNodes[iStreamlines]])
+             
+        aheadDistances=np.squeeze(cdist(np.atleast_2d(np.mean(np.squeeze(np.asarray(aheadNodes)),axis=0)),np.squeeze(np.asarray(aheadNodes))))
+        behindDistances=np.squeeze(cdist(np.atleast_2d(np.mean(np.squeeze(np.asarray(behindNodes)),axis=0)),np.squeeze(np.asarray(behindNodes))))
+    
+        orientationGuideAheadNode=aheadNodes[np.where(np.min(aheadDistances)==aheadDistances)[0][0]].flatten()
+        orientationGuideBehindNode=behindNodes[np.where(np.min(behindDistances)==behindDistances)[0][0]].flatten()
+        
+        #if you wanted to force RAS / LPI on your tractogram orientatiuon, now would be the time to do it
+        #first store the current values in a separate variable
+        currentAheadNode=copy.deepcopy(orientationGuideAheadNode)
+        currentBehindNode=copy.deepcopy(orientationGuideBehindNode)
+        #find the displacement for each dimension
+        currentDiaplacement=currentAheadNode-currentBehindNode
+        maxDisplacementDim=np.where(np.max(np.abs(currentDiaplacement))==np.abs(currentDiaplacement))[0][0]
+        #if that value is negative, switch the identity of the ahead and behind nodes
+        if currentDiaplacement[maxDisplacementDim]<0:
+            orientationGuideAheadNode=currentBehindNode
+            orientationGuideBehindNode=currentAheadNode
+        
+        #iterate across streamlines     
+        for iStreamlines in range(len(streamlines)):
+            #compute the distances from the comparison orientation for both possible
+            #orientations
+            sumDistanceOrientation1=np.sum([cdist(np.atleast_2d(orientationGuideAheadNode),np.atleast_2d(aheadNodes[iStreamlines])),cdist(np.atleast_2d(orientationGuideBehindNode),np.atleast_2d(behindNodes[iStreamlines]))])
+            sumDistanceOrientation2=np.sum([cdist(np.atleast_2d(orientationGuideAheadNode),np.atleast_2d(behindNodes[iStreamlines])),cdist(np.atleast_2d(orientationGuideBehindNode),np.atleast_2d(aheadNodes[iStreamlines]))])
+            #flip if necessary
+            if sumDistanceOrientation2<sumDistanceOrientation1:
+                streamlines[iStreamlines]= streamlines[iStreamlines][::-1]
+                flipCount=flipCount+1    
+        print('flip run ' + str(flipRuns) +': ' + str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
             
-    print(str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
+        if np.logical_and(flipRuns!=1,flipCount==0) :
+            exitTrigger=True
+        else:
+            #set the counters
+            flipRuns=flipRuns+1
+            flipCount=0
+            
     #I don't know that I trust the whole in place flipping mechanism, so
     #we will return the modified streamline object from this function
     return streamlines
+
+def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
+    """rquantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable)
+    A function used to quantify the terminations of a tract and output a 
+    table for both endpoint clusters.  Basically a complicated wrapper around
+    dipy's connectivity_matrix that outputs organized tables
+
+    Parameters
+    ----------
+    tractStreamlines : streamlines type
+        Streamlines corresponding to the tract of interest
+    atlas : Nifti, int based
+        A nifti atlas that will be used to determine the endpoint connectivity
+    atlasLookupTable : pandas dataframe or file loadable to pandas dataframe
+        A dataframe of the atlas lookup table which includes the labels featured
+        in the atlas and their identities.  These identities will be used
+        to label the periphery of the radial plot.
+    Returns
+    -------
+    Two pandas dataframes, one for each endpoint group
+
+    """ 
+    import pandas as pd
+    import seaborn as sns
+    import matplotlib.pyplot as plt
+    import nibabel as nib
+    import dipy
+    import numpy as np
+    from dipy.segment.clustering import QuickBundles
+    from dipy.tracking.utils import reduce_labels
+    from dipy.tracking import utils
+    import dipy.tracking.streamline as streamline
+    from dipy.segment.metric import ResampleFeature
+    from dipy.segment.metric import AveragePointwiseEuclideanMetric
+    from dipy.segment.metric import MinimumAverageDirectFlipMetric
+    import itertools
+    
+    #use dipy function to reduce labels to contiguous values
+    if isinstance(atlas,str):
+        atlas=nib.load(atlas)
+    relabeledAtlasData=reduce_labels(atlas.get_fdata())[0]
+    #create new nifti object
+    renumberedAtlasNifti=nib.Nifti1Image(relabeledAtlasData, atlas.affine, atlas.header)
+    
+    #take care of tractogram and treamline issues
+    if isinstance(tractStreamlines,str):
+        loadedTractogram=nib.streamlines.load(tractStreamlines)
+        tractStreamlines=loadedTractogram.streamlines
+    elif  isinstance(tractStreamlines,nib.streamlines.tck.TckFile):
+        tractStreamlines=tractStreamlines.streamlines
+    
+    #this may need to be run multiple times.  probably involves a dangerous while loop
+    tractStreamlines=orientTractUsingNeck(tractStreamlines)
+    
+    #segment tractome into connectivity matrix from parcellation
+    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_fdata().astype(int),
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    #get the keys so that you can iterate through them later
+    keyTargets=list(grouping.keys())
+    keyTargetsArray=np.asarray(keyTargets)
+    
+    #work with the input lookup table
+    if isinstance(atlasLookupTable,str):
+        if atlasLookupTable[-4:]=='.csv':
+            atlasLookupTable=pd.read_csv(atlasLookupTable)
+        elif (np.logical_or(atlasLookupTable[-4:]=='.xls',atlasLookupTable[-5:]=='.xlsx')):
+            atlasLookupTable=pd.read_excel(atlasLookupTable)
+
+    # if the lookup table has more entries than the atlas has items, we'll need to do some readjusting
+    # probably need to do some readjusting in any case
+    if len(atlasLookupTable)>len(np.unique(relabeledAtlasData)):
+        #infer which column contains the original identities
+        #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
+        matchingLabelsCount=[len(list(set(atlasLookupTable[iColumns]).intersection(set(np.unique(atlas.get_fdata()).astype(int))))) for iColumns in atlasLookupTable.columns.to_list()]
+        #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
+        #worry about that later
+        columnBestGuess=atlasLookupTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
+        #we can also take this opportunity to pick the longest average column, which is likely the optimal label name
+        entryLengths=atlasLookupTable.applymap(str).applymap(len)
+        labelColumnGuess=entryLengths.mean(axis=0).idxmax()
         
+        #now that we have the guess, get the corresponding row entries, and reset the index.
+        #This should make the index match the renumbered label values.
+        LUTWorking=atlasLookupTable[atlasLookupTable[columnBestGuess].isin(np.unique(atlas.get_fdata()).astype(int)).values].reset_index(drop=True)
+    
+    #iterate across both sets of endpoints
+    for iEndpoints in range(keyTargetsArray.shape[1]):
+        uniqueLabelValues=np.unique(keyTargetsArray[:,iEndpoints])
+        plotLabels=[]
+        plotValues=[]
+        for iUniqueLabelValues in uniqueLabelValues:
+            targetKeys=list(itertools.compress(keyTargets,[keyTargetsArray[:,iEndpoints]==iUniqueLabelValues][0]))
+            #could also probably just sum up the column in the matrix
+            counts=[len(grouping[iKeys]) for iKeys in targetKeys]
+            #append to the plotValue list
+            plotValues.append(np.sum(counts))
+            plotLabels.append(LUTWorking[labelColumnGuess].iloc[iUniqueLabelValues])
         
+        if iEndpoints==0:
+            endpoints1DF=pd.DataFrame(data ={'labelNames': plotLabels, 'endpointCounts':plotValues})
+        else:
+            endpoints2DF=pd.DataFrame(data ={'labelNames': plotLabels, 'endpointCounts':plotValues})
+    
+    return endpoints1DF, endpoints2DF
