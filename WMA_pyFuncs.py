@@ -2547,6 +2547,7 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     import pandas as pd
     import numpy as np
     import os
+    from matplotlib import pyplot as plt
     
     RASendpointData=[]
     LPIendpointData=[]
@@ -2567,32 +2568,84 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
         firstLPIDF=pd.merge(firstLPIDF,LPIendpointData[iTracts], on='labelNames', how='outer')
     
     #set NaNs to 0
-    firstRASDF.fillna(0)
-    firstLPIDF.fillna(0)
+    firstRASDF=firstRASDF.fillna(0)
+    firstLPIDF=firstLPIDF.fillna(0)
     
     #compute means and variances
     firstLPIDF[['meanProportion','proportionSTD']]=pd.DataFrame(np.squeeze(np.asarray([np.mean(firstLPIDF.iloc[:,1:-1],axis=1),np.std(firstLPIDF.iloc[:,1:-1],axis=1)])).T, index=firstLPIDF.index)
     firstRASDF[['meanProportion','proportionSTD']]=pd.DataFrame(np.squeeze(np.asarray([np.mean(firstRASDF.iloc[:,1:-1],axis=1),np.std(firstRASDF.iloc[:,1:-1],axis=1)])).T, index=firstRASDF.index)
     
-    figure2=basicRadarPlot(list(firstLPIDF['labelNames']),list(firstLPIDF['meanProportion']),metaValues=list(firstLPIDF['proportionSTD']))
-    figure1=basicRadarPlot(list(firstRASDF['labelNames']),list(firstRASDF['meanProportion']),metaValues=list(firstRASDF['proportionSTD']))
+    #arbitrary criteria for mean proportion
+    minThresh=.01
+    #split the dataframe in ordert to get the common and uncommon endpoints
+    firstLPIDFCommon= firstLPIDF[firstLPIDF['meanProportion'] >= minThresh]
+    firstLPIDFUnCommon= firstLPIDF[firstLPIDF['meanProportion'] <= minThresh]
+    firstRASDFCommon= firstRASDF[firstRASDF['meanProportion'] >= minThresh]
+    firstRASDFFUnCommon= firstRASDF[firstRASDF['meanProportion'] <= minThresh]
     
-    figure1.get_axes()[0].set_title(tractName+'\nRAS endpoints')
+    #Plot the common endpoints
+    figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['meanProportion']),metaValues=list(firstRASDFCommon['proportionSTD']))
+    figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['meanProportion']),metaValues=list(firstLPIDFCommon['proportionSTD']))
+    
+    figure1.get_axes()[0].set_title(tractName+'RAS\n common endpoints\n',size=16)
     figure1.get_axes()[0].set_facecolor([0,0,1,.15])
-    figure1.get_axes()[0].text(0, np.max(firstRASDF['meanProportion'])-.5, "avg proportion\n of streamlines", rotation=-69, 
-        ha="center", va="center", size=12, zorder=12)
+    
+    #find optimal location for axis label
+    clearSpaceSizes=firstRASDFCommon['meanProportion']+firstRASDFCommon['proportionSTD']
+    lowestLocation=np.where(np.min(clearSpaceSizes)==clearSpaceSizes)[0]
+    #generate the angle locations
+    ANGLES = np.linspace(0.05, 2 * np.pi - 0.05, len(firstRASDFCommon['labelNames']), endpoint=False)
+    #the .2 and .4 here need to be adaptive to the number of labels, not sure how yet though.
+    locationSelect=ANGLES[lowestLocation[0]]-.2*((ANGLES[lowestLocation[0]]+1)-ANGLES[lowestLocation[0]])
+    rotationAngle=(((ANGLES[lowestLocation[0]]+1)-.4*((ANGLES[lowestLocation[0]]+1)-ANGLES[lowestLocation[0]]))*57.295)/2
+    
+    figure1.get_axes()[0].text(locationSelect, np.max(firstRASDFCommon['meanProportion']*.5), "avg proportion\n of streamlines", rotation=rotationAngle+180, 
+        ha="center", va="center", size=14, zorder=12)
 
-    figure2.get_axes()[0].set_title(tractName+'\nLPI endpoints')
+    figure2.get_axes()[0].set_title(tractName+'LPI\n common endpoints')
     figure2.get_axes()[0].set_facecolor([1,0,0,.15])
-    figure2.get_axes()[0].text(0, np.max(firstLPIDF['meanProportion'])-.5, "avg proportion\n of streamlines", rotation=-69, 
+    
+    #find optimal location for axis label
+    clearSpaceSizes=firstLPIDFCommon['meanProportion']+firstLPIDFCommon['proportionSTD']
+    lowestLocation=np.where(np.min(clearSpaceSizes)==clearSpaceSizes)[0]
+    #generate the angle locations
+    ANGLES = np.linspace(0.05, 2 * np.pi - 0.05, len(firstLPIDFCommon['labelNames']), endpoint=False)
+    #the .2 and .4 here need to be adaptive to the number of labels, not sure how yet though.
+    locationSelect=ANGLES[lowestLocation[0]]-.2*((ANGLES[lowestLocation[0]]+1)-ANGLES[lowestLocation[0]])
+    rotationAngle=(((ANGLES[lowestLocation[0]]+1)-.4*((ANGLES[lowestLocation[0]]+1)-ANGLES[lowestLocation[0]]))*57.295)/2
+    
+    figure2.get_axes()[0].text(locationSelect, np.max(firstLPIDFCommon['meanProportion']), "avg proportion\n of streamlines", rotation=rotationAngle+180, 
         ha="center", va="center", size=12, zorder=12)
-    #figure2.patch.set_facecolor([1,0,0,.2])
+ 
     
     if saveDir==None:
         saveDir=os.getcwd()
         
-    figure1.savefig(os.path.join(saveDir,tractName+'_group_RAS_endpointMap.svg'))
-    figure2.savefig(os.path.join(saveDir,tractName+'_group_LPI_endpointMap.svg'))
+    figure1.savefig(os.path.join(saveDir,tractName+'_group_RAS_commonEndpointMap.svg'))
+    figure2.savefig(os.path.join(saveDir,tractName+'_group_LPI_commonEndpointMap.svg'))
+    plt.close()
+    
+    #Plot the UNcommon endpoints
+    figure1=basicRadarPlot(list(firstRASDFFUnCommon['labelNames']),list(firstRASDFFUnCommon['meanProportion']),metaValues=list(firstRASDFFUnCommon['proportionSTD']))
+    figure2=basicRadarPlot(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['meanProportion']),metaValues=list(firstLPIDFUnCommon['proportionSTD']))
+    
+    figure1.get_axes()[0].set_title(tractName+'RAS\n *UN*common endpoints')
+    figure1.get_axes()[0].set_facecolor([0,0,1,.15])
+    figure1.get_axes()[0].text(0, np.max(firstRASDFFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
+        ha="center", va="center", size=12, zorder=12)
+
+    figure2.get_axes()[0].set_title(tractName+'LPI\n *UN*common endpoints')
+    figure2.get_axes()[0].set_facecolor([1,0,0,.15])
+    figure2.get_axes()[0].text(0, np.max(firstLPIDFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
+        ha="center", va="center", size=12, zorder=12)
+
+    
+    if saveDir==None:
+        saveDir=os.getcwd()
+        
+    figure1.savefig(os.path.join(saveDir,tractName+'_group_RAS_UNcommonEndpointMap.svg'))
+    figure2.savefig(os.path.join(saveDir,tractName+'_group_LPI_UNcommonEndpointMap.svg'))
+    plt.close()
     
 def basicRadarPlot(labels,values, metaValues=None):
     """
@@ -2660,7 +2713,11 @@ def basicRadarPlot(labels,values, metaValues=None):
 
     ax.set_theta_offset(1.2 * np.pi / 2)
     #find adaptive way to set min value
-    ax.set_ylim(-.1, np.max(values)*1.3)
+    if metaValues==None:
+        ax.set_ylim(np.min(values)*-1.3, np.max(values)*1.3)
+    else:
+        ax.set_ylim((np.min(values)+np.max(metaValues))*-1.3, (np.max(values)+np.max(metaValues))*1.3)
+    
 
     # Add geometries to the plot -------------------------------------
     # See the zorder to manipulate which geometries are on top
@@ -2700,7 +2757,7 @@ def basicRadarPlot(labels,values, metaValues=None):
     YTICKS[-2].set_visible(False)
     YTICKS[-1].set_visible(False)
     
-    #ax.spines["start"].set_color("none")
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            #ax.spines["start"].set_color("none")
     ax.spines["polar"].set_color("none")
     
     ax.xaxis.grid(False)
@@ -2710,13 +2767,23 @@ def basicRadarPlot(labels,values, metaValues=None):
     #    ha="center", va="center", size=12, zorder=12)
     return plt.gcf()
 
-def dipyPlotTract(streamlines,refAnatT1=None):
+def dipyPlotTract(streamlines,refAnatT1=None, tractName=None):
     import numpy as np
     from fury import actor, window
     import matplotlib
+    import nibabel as nib
+    
+    if refAnatT1!=None:
+        if isinstance(refAnatT1,str):
+            refAnatT1=nib.load(refAnatT1)
 
     scene = window.Scene()
     scene.clear()
+    
+    if refAnatT1!=None:
+       vol_actor = actor.slicer(refAnatT1)
+       vol_actor.display(x=0)
+       scene.add(vol_actor)
     
     #colormap for main tract
     cmap = matplotlib.cm.get_cmap('seismic')
@@ -2734,29 +2801,29 @@ def dipyPlotTract(streamlines,refAnatT1=None):
     aheadNodes=[]
     behindNodes=[]
     for iStreamlines in range(len(streamlines)):
-       #A check to make sure you've got room to do this indexing on both sides
-       if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines])>lookDistance,(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))>lookDistance):
-           aheadNodes.append(neckNodes[iStreamlines]+lookDistance)
-           behindNodes.append(neckNodes[iStreamlines]-lookDistance)
-       #otherwise do the best you can
-       else:
-           #if there's a limit to how many nodes are available ahead, do the best you can
-           spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
-           if spaceAhead<lookDistance:
-               aheadWindow=spaceAhead-1
-           else:
-               aheadWindow=lookDistance
-           #if there's a limit to how many nodes are available behind, do the best you can
-           spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
-           if spaceBehind<lookDistance:
-               behindWindow=spaceBehind-1
-           else:
-               behindWindow=lookDistance
+        #A check to make sure you've got room to do this indexing on both sides
+        if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
+            aheadNodes.append(neckNodes[iStreamlines]+lookDistance)
+            behindNodes.append(neckNodes[iStreamlines]-lookDistance)
+            #otherwise do the best you can
+        else:
+            #if there's a limit to how many nodes are available ahead, do the best you can
+            spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
+            if spaceAhead<=lookDistance:
+                aheadWindow=spaceAhead-1
+            else:
+                aheadWindow=lookDistance
+            #if there's a limit to how many nodes are available behind, do the best you can
+            spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
+            if spaceBehind<=lookDistance:
+                behindWindow=spaceBehind-1
+            else:
+                behindWindow=lookDistance
            
-           #append the relevant values
-           aheadNodes.append(neckNodes[iStreamlines]+(aheadWindow))
-           behindNodes.append(neckNodes[iStreamlines]-(behindWindow))
-    
+            #append the relevant values
+            aheadNodes.append(neckNodes[iStreamlines]+(aheadWindow))
+            behindNodes.append(neckNodes[iStreamlines]-(behindWindow))
+
     aheadNodes=np.asarray(aheadNodes).flatten()
     behindNodes=np.asarray(behindNodes).flatten()
            
@@ -2772,8 +2839,13 @@ def dipyPlotTract(streamlines,refAnatT1=None):
                  view_up=(0.18, 0.00, 0.98))    
 
     # window.show(scene, size=(600, 600), reset_camera=False)
-    window.record(scene, out_path='tractFigure.png', size=(600, 600))
-    window.exit()
+    if tractName!=None:
+        outName=tractName
+    else:
+        outName='tractFigure'
+        
+    window.record(scene, out_path=outName+'.png', size=(600, 600))
+
 
 def orientTractUsingNeck(streamlines):
     """orientTractUsingNeck(streamlines)
@@ -2814,17 +2886,30 @@ def orientTractUsingNeck(streamlines):
         for iStreamlines in range(len(streamlines)):
             neckCoords.append(streamlines[iStreamlines][neckNodes[iStreamlines]])
         
-        #now get the node that's 5 "ahead" and 5 "behind" the neck node
-        lookDistance=10
+        #here lets arbitrarily aim for 5 mm, and compute that distance per streamline.  Probably expensive
+        #but we can't always assume that 
+        
+        #set ths value here, the mm space target distance for neck evaluation
+        targetMM=2.5
+        
         aheadNodes=[]
         behindNodes=[]
         for iStreamlines in range(len(streamlines)):
+            nodeDists=np.sqrt(np.sum(np.square(np.diff(streamlines[iStreamlines],axis=0)),axis=1))
+            #if the standard deviation is a sufficiently low proportion of the avreage node distance
+            if np.std(nodeDists)/np.mean(nodeDists)<.01:
+                #compute the look distance based on this average for 5mm
+                lookDistance=np.round(targetMM/np.mean(nodeDists)).astype(int)
+            else:
+                #need to code case for highly variable strealine sampling
+                lookDistance=10
+                print('you need to code this')
            #A check to make sure you've got room to do this indexing on both sides
-           if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
+            if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
                aheadNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]+lookDistance])
                behindNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]-lookDistance])
            #otherwise do the best you can
-           else:
+            else:
                #if there's a limit to how many nodes are available ahead, do the best you can
                spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
                if spaceAhead<=lookDistance:
@@ -2994,3 +3079,206 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
             endpoints2DF=pd.DataFrame(data ={'labelNames': plotLabels, 'endpointCounts':plotValues})
     
     return endpoints1DF, endpoints2DF
+
+def removeIslandsFromAtlas(atlasNifti):
+    """
+    
+
+    Parameters
+    ----------
+    atlasNifti : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import nibabel as nib
+    import scipy
+    import numpy as np
+    import pandas as pd
+    from scipy.ndimage import binary_erosion
+    
+    if isinstance(atlasNifti,str):
+        atlas=nib.load(atlasNifti)
+    else:
+        atlas=atlasNifti
+        
+    #count the label instances, and make an inference as to the background value
+    #it's almost certianly the most common value, eg. 0
+    (labels,counts)=np.unique(atlas.get_fdata(), return_counts=True)
+    detectBackground=int(labels[np.where(np.max(counts)==counts)[0]])
+    
+    #get the list of labels without the background
+    atlasLabels=labels.astype(int)[labels.astype(int)!=detectBackground]
+    
+    atlasData=atlas.get_fdata()
+    removalReport=pd.DataFrame(columns=['label','max_erosion','islands_removed'])
+    #remove the background values
+    for iLabels in atlasLabels:
+        #create a blank vector to add to the report
+        reportRow=[]
+        #add the current label
+        reportRow.append(iLabels)
+        erosionIterations=0
+        #the default max iterations, will be reduced in cases where implementation
+        #results in complete loss
+        forcedMaxIterations=3
+        currentErosion=atlas.get_fdata()==iLabels
+        #I guess we can use this to set something like minimum island size?
+        #a 3x3 block (last before singleton point) would have 27 voxels in it
+        #using strcit less than allows for escape in cases where forcedMaxIterations
+        #gets down to zero
+        while np.logical_and(erosionIterations<forcedMaxIterations,np.sum(currentErosion)>28):
+            currentErosion=binary_erosion(currentErosion)
+            erosionIterations=erosionIterations+1
+            #reset the thing if the number of voxels hits zero
+            if np.sum(currentErosion) ==0:
+                forcedMaxIterations=forcedMaxIterations-1
+                erosionIterations=0
+                currentErosion=atlas.get_fdata()==iLabels
+        #print how much was eroded
+        print(str(np.abs(np.sum(currentErosion) - (np.sum(atlas.get_fdata()==iLabels))))+ ' of ' + str(np.sum(atlas.get_fdata()==iLabels)) + ' voxels eroded label ' + str(iLabels) )
+        #add that value to the report list for this label
+        reportRow.append(np.abs(np.sum(currentErosion) - (np.sum(atlas.get_fdata()==iLabels))))
+        #perform the propigation function, wherein the eroded label is inflated back
+        #islandRemoved=scipy.ndimage.binary_propagation(currentErosion, structure=np.ones([3,3,3]).astype(int), mask=atlas.get_fdata()==iLabels)
+        islandRemoved=scipy.ndimage.binary_propagation(currentErosion, mask=atlas.get_fdata()==iLabels)
+        #print the resulting difference between the intitial label and this eroded+inflated one
+        print(str(np.abs(np.sum(islandRemoved) - (np.sum(atlas.get_fdata()==iLabels))))+ ' of ' + str(np.sum(atlas.get_fdata()==iLabels)) + ' voxels removed for label ' + str(iLabels) )
+        #add that value to the report list for this label
+        reportRow.append(np.abs(np.sum(islandRemoved) - (np.sum(atlas.get_fdata()==iLabels))))
+        #add the row to the output report
+        removalReport.loc[len(removalReport)]=reportRow
+
+        #now actually modify the data
+        #what you want are the areas that are true in the origional atlas but false in the eroded+inflated version
+        #set those to background
+        atlasData[np.logical_and(atlas.get_fdata()==iLabels,np.logical_not(islandRemoved))]=detectBackground
+    
+        
+    return nib.Nifti1Image(atlasData, atlas.affine, atlas.header),removalReport 
+
+def inflateAtlasIntoWMandBG(atlasNifti,iterations):
+    """
+    
+
+    Parameters
+    ----------
+    atlasNifti : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import nibabel as nib
+    import numpy as np
+    from scipy.interpolate import NearestNDInterpolator
+    import scipy
+    import dipy.tracking.utils as ut
+    
+    if isinstance(atlasNifti,str):
+        atlas=nib.load(atlasNifti)
+    else:
+        atlas=atlasNifti
+    
+    #first perform the island removal operation
+    [noIslandAtlas,report]=removeIslandsFromAtlas(atlasNifti)
+    
+    #now we need to detect the wm and bg labels
+    #lots of ways we could do this, I guess
+    #bg we can detect in the same way that we detected in the deIsland code
+        
+    #count the label instances, and make an inference as to the background value
+    #it's almost certianly the most common value, eg. 0
+    (labels,counts)=np.unique(atlas.get_fdata(), return_counts=True)
+    detectBackground=int(labels[np.where(np.max(counts)==counts)[0]])
+    
+    #now comes a tougher part, how do we detect WM labels, if any (because they might not be there)
+    #one heuristic would be that it would be the label that would be inflated into most 
+    #(and would inflated into the most other things) if you did some sort of iterative
+    #inflation assesment across labels
+    #seems time consuming
+    #another alternative would be to use the relative total labeled volume proportion
+    #occupied by any given label, and infer which of these (if any) might plausibly
+    #be the wm
+    
+    #we can remove the bg from contention just like we did last time
+    nonBGLabels=labels.astype(int)[labels.astype(int)!=detectBackground]
+    #but we should also remove it from the counts
+    nonBGCounts=counts[labels.astype(int)!=detectBackground]
+    
+    #now we can get the total labeled volume of the brain, in mm, using the size of a single voxel
+    #the result of this is the cubic volume of a single voxel in this atlas
+    voxVolume=np.prod(atlas.header.get_zooms())
+    #we can then use this to multiply the total number of labeled voxels
+    #I guess we can use the initial atlas rather than the modified atlas
+    #shouldn't matter in either case
+    #should be around 1 to 1.5 liters, with 1 liter = 1000000 cubic mm
+    totalVolume=np.sum(nonBGCounts)*voxVolume
+    #normalize the volumes of each label to this sum
+    volumeProportions=(nonBGCounts*voxVolume)/totalVolume
+    # generally speaking the brain is between 40 to 50 % wm by volume, with 
+    #that tisue being split between both hemisphers.  However, in order 
+    #to account for ventricles and other such things we can reduce this to a
+    #lower threshold of approximately 12 percent.  This can be played with
+    #in the future if it proves to be aproblem
+    thresholdValue=.12
+    #now find the indexes of the labels that meet this criterion
+    presumedWMLabels=nonBGLabels[volumeProportions>thresholdValue]
+    #its possible that the atlas didn't have WM to begin with, or that the WM
+    #has been subdivided, in which case this heuristic would work, but probably
+    #neither would the iterative inflation assesment heuristic either, because
+    #we would have no apriori intutions about which labels were the WM.
+    #in the event that no labels meet the threshold, the presumedWMLabels should
+    #be empty, and a simple cat of it and the BG label shouldn't result in a problem
+    inflationLabelTargets=list(presumedWMLabels)+list(np.atleast_1d(detectBackground))
+    #also get remaining labels
+    remaining=nonBGLabels[np.isin(nonBGLabels,inflationLabelTargets,invert=True)]
+    
+    #now iteratively perform the inflation
+    
+    #so long as nothing is on the edge this will probably work, due to coord weirdness
+    #get the image data
+    noIslandAtlasData=noIslandAtlas.get_fdata()
+    
+    for iInflations in range(iterations):
+        #pad the data to avoid indexing issues
+        noIslandAtlasData=np.pad(noIslandAtlasData,[1,1])
+        #create a mask of the non target data
+        dataMask=np.isin(noIslandAtlasData,remaining)
+        #get essentially the opposite of this, in the form of the mask of the inflation targets
+        inflationTargetsMask=np.isin(noIslandAtlasData,inflationLabelTargets)
+        #inflate the datamask
+        inflatedLabelsMask=scipy.ndimage.binary_dilation(dataMask)
+        #find the intersection of the inflated data mask and the inflation targets
+        infationArrayTargets=np.logical_and(inflatedLabelsMask,inflationTargetsMask)
+        #find the coordinates for these targets
+        inflationTargetCoords=np.asarray(np.where(infationArrayTargets)).T
+    
+        #this manuver is going to cost us .gif
+        for iInflationTargetCoords in inflationTargetCoords:
+            #because I dont trust iteration in 
+            print(str(iInflationTargetCoords))
+            #set some while loop iteration values
+            window=1
+            #if you set the vector to longer than 2 by default, it will run until fixed
+            voteWinner=[0,0]
+            while len(voteWinner)>1:
+            #+2 because python is weird and doesn't include the top index
+                voxelVotes=noIslandAtlasData[(iInflationTargetCoords[0])-window:(iInflationTargetCoords[0]+1+window),(iInflationTargetCoords[1]-window):(iInflationTargetCoords[1]+1+window),(iInflationTargetCoords[2]-window):(iInflationTargetCoords[2]+1+window)]
+                #get the vote counts
+                (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
+                voteWinner=labels[np.where(np.max(counts)==counts)[0]]
+                window=window+1
+            #print(str(noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]))
+            #print(str(voteWinner))
+            noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+        
+        #return the data object to its regular size
+        noIslandAtlasData=noIslandAtlasData[1:-1,1:-1,1:-1]
+    
+    return nib.Nifti1Image(noIslandAtlasData, atlas.affine, atlas.header)
