@@ -2846,11 +2846,12 @@ def basicRadarPlot(labels,values, metaValues=None):
     #    ha="center", va="center", size=12, zorder=12)
     return plt.gcf()
 
-def dipyPlotTract(streamlines,refAnatT1=None, tractName=None):
+def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensityKernel=7):
     import numpy as np
     from fury import actor, window
     import matplotlib
     import nibabel as nib
+    from scipy.spatial.distance import cdist
     
     if refAnatT1!=None:
         if isinstance(refAnatT1,str):
@@ -2867,18 +2868,48 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None):
     #colormap for main tract
     cmap = matplotlib.cm.get_cmap('seismic')
     #colormap for neck
-    neckCmap = matplotlib.cm.get_cmap('spring')
+    neckCmap = matplotlib.cm.get_cmap('twilight')
+    #jet could work too
+    
+    endpoints1Cmap=matplotlib.cm.get_cmap('winter')
+    endpoints2Cmap=matplotlib.cm.get_cmap('autumn')
        
     colors = [cmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
     
     #find the neck nodes
     neckNodes=findTractNeckNode(streamlines)
     
+    #lets set some parameters for the exponential decay computation we'll be doing
+    #for the endpoint coloration here
+    #in essence we'll be altering the color of endpoints such that the "rarer"
+    #(e.g. more outlier-like) they are, the more they will diverge from the standard
+    #coloration scheme
+    #the endpointColorDensityKernel variable is used to set the distance at which
+    #the "value" of an endpoint is equal to one, closer and it is worth more, 
+    #further and it is worth less.
+    #in a standard exponential decay function a= the y intercept, b = the fraction being exponentiated
+    #we'll just stipulate that it is 1/2 here, but this value could be modified, if desired
+    expFrac=1/2
+    expIntercept=(np.power(np.power(expFrac,-1),endpointColorDensityKernel))
+    
     #steal come code from orientTractUsingNeck to color the neck
-    #now get the node that's 5 "ahead" and 5 "behind" the neck node
-    lookDistance=10
+    #lets aim for a realspace distance when orienting our streamlines
+    #we'll arbitrarily say 5 for the moment
+    #we'll assume that all streamlines have the same internode distance
+    #it's a TERRIBLE assumption, but really, people who violate it are the ones in error...
+    avgNodeDistance=np.mean(np.sqrt(np.sum(np.square(np.diff(streamlines[0],axis=0)),axis=1)))
+    lookDistanceMM=2.5
+    #find the number of nodes this is equivalent to
+    lookDistance=np.round(lookDistanceMM/avgNodeDistance).astype(int)
     aheadNodes=[]
     behindNodes=[]
+    #set an empty vector for the density values, and also pre-extract the endpoints
+    endpoints1Density=np.zeros(len(streamlines))
+    endpoints2Density=np.zeros(len(streamlines))
+    endpoints1=np.asarray([iStreams[0,:] for iStreams in streamlines])
+    endpoints2=np.asarray([iStreams[-1,:] for iStreams in streamlines])
+    #this gets you all endpoints in an array, will be used later
+    allEndpoints=np.vstack((endpoints1,endpoints2))
     for iStreamlines in range(len(streamlines)):
         #A check to make sure you've got room to do this indexing on both sides
         if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
@@ -2902,20 +2933,86 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None):
             #append the relevant values
             aheadNodes.append(neckNodes[iStreamlines]+(aheadWindow))
             behindNodes.append(neckNodes[iStreamlines]-(behindWindow))
+        #compute the endpoint desnity for this streamline's endpoints
+        #note that we are being agnostic about the endpoint identity when we compare
+        #to allEndpoints as opposed to just this side's endpoints.  This is
+        #reasonable because (1), ideally the other side's endpoint are far away and will 
+        #essentially contribute nothing to this value (2), if they are close, something
+        #has probably gone wrong with our orientation methods in the first place.
+        currentEndpoint1Distances=cdist(allEndpoints,np.atleast_2d(endpoints1[iStreamlines,:]))
+        endpoints1Density[iStreamlines]=np.sum([expIntercept*np.power(expFrac,iDistances) for iDistances in currentEndpoint1Distances])
+        #other side
+        currentEndpoint2Distances=cdist(allEndpoints,np.atleast_2d(endpoints2[iStreamlines,:]))
+        endpoints2Density[iStreamlines]=np.sum([expIntercept*np.power(expFrac,iDistances) for iDistances in currentEndpoint2Distances])
 
+        
     aheadNodes=np.asarray(aheadNodes).flatten()
     behindNodes=np.asarray(behindNodes).flatten()
-           
-    for iStreamlines in range(len(streamlines)):
-        colors[iStreamlines][behindNodes[iStreamlines]:aheadNodes[iStreamlines]]=neckCmap(np.array(range(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))/(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))
     
-    stream_actor = actor.line(streamlines, colors, linewidth=0.2)
-
+    #invert normalize the density vectors
+    invNormEndpoints1Density=np.power(endpoints1Density,-1)*np.min(endpoints1Density)
+    invNormEndpoints2Density=np.power(endpoints2Density,-1)*np.min(endpoints2Density)
+    
+    #short for the short middle
+    #could proably clean up discreapancy between using len of arrayas and the lookdistance
+    whiteArray=np.ones([np.round(lookDistance/2).astype(int),4])
+    blendWeightsArray=np.asarray([np.arange(np.round(lookDistance/2).astype(int))/len(whiteArray),np.flip(np.arange(np.round(lookDistance/2).astype(int))/len(whiteArray))])
+    blendWeightsArray=np.stack([blendWeightsArray]*4,axis=-1)
+    #make a long array too for blending
+    longBlendWeightsArray=np.asarray([np.arange(np.round(lookDistance).astype(int))/np.round(lookDistance).astype(int),np.flip(np.arange(np.round(lookDistance).astype(int))/np.round(lookDistance).astype(int))])
+    longBlendWeightsArray=np.stack([longBlendWeightsArray]*4,axis=-1)
+ 
+    
+    for iStreamlines in range(len(streamlines)):
+        #do the neck
+        colors[iStreamlines][behindNodes[iStreamlines]:aheadNodes[iStreamlines]]=neckCmap(np.array(range(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))/(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))
+        #but also blend it a bit
+        #don't need to do an if check, because streamlines can always be shorter
+        #if len(streamlines[iStreamlines])
+        #ok, so what we are doing here: blending the existing streamline color with white using a weighed average along the streamline
+        #this turned out extremely nice, so lets also do it for the endpoints as well
+        behindColors=colors[iStreamlines][behindNodes[iStreamlines]-(np.round(lookDistance/2).astype(int)):behindNodes[iStreamlines]]
+        blendColorsStack=np.asarray([behindColors,whiteArray])
+        blendedReplacement=np.average(blendColorsStack,axis=0,weights=np.flip(blendWeightsArray,axis=1))
+        colors[iStreamlines][behindNodes[iStreamlines]-(np.round(lookDistance/2).astype(int)):behindNodes[iStreamlines]]=blendedReplacement
+        #now do the other side
+        #if there's room, don't bother with it otherwise
+        if len(colors[iStreamlines])>=aheadNodes[iStreamlines]+(np.round(lookDistance/2).astype(int)):
+            aheadColors=colors[iStreamlines][aheadNodes[iStreamlines]:aheadNodes[iStreamlines]+(np.round(lookDistance/2).astype(int))]
+            blendColorsStack=np.asarray([aheadColors,whiteArray])
+            blendedReplacement=np.average(blendColorsStack,axis=0,weights=blendWeightsArray)
+            colors[iStreamlines][aheadNodes[iStreamlines]:aheadNodes[iStreamlines]+(np.round(lookDistance/2).astype(int))]=blendedReplacement
+        
+        #also, this will recolor the streamlines if they had a neck point near the end of the streamline
+        #do endpoints 1
+        #no need to flip in order to ensure correct sequencing, apprently?
+        end1Colors=colors[iStreamlines][0:lookDistance]
+        #you know, like a telomere
+        newEndpoint1Cap=np.flip(endpoints1Cmap(np.linspace(0,invNormEndpoints1Density[iStreamlines],num=lookDistance)),axis=0)
+        blendColorsStack=np.asarray([end1Colors,newEndpoint1Cap])
+        blendedReplacement=np.average(blendColorsStack,axis=0,weights=longBlendWeightsArray)
+        colors[iStreamlines][0:lookDistance]=blendedReplacement
+        #do endpoints 2
+        #we do need to flip here in order to get sequecning at end of streamline correct
+        #actually it was for the other one
+        end2Colors=colors[iStreamlines][-(lookDistance+1):-1]
+        #you know, like a telomere
+        newEndpoint2Cap=endpoints2Cmap(np.linspace(0,invNormEndpoints2Density[iStreamlines],num=lookDistance))
+        blendColorsStack=np.asarray([end2Colors,newEndpoint2Cap])
+        blendedReplacement=np.average(blendColorsStack,axis=0,weights=np.flip(longBlendWeightsArray,axis=1))
+        colors[iStreamlines][-(lookDistance+1):-1]=blendedReplacement
+      
+        
+    stream_actor = actor.line(streamlines, colors, linewidth=10,fake_tube=True,opacity=1)
+    #scene.clear()
     scene.add(stream_actor)
 
     scene.set_camera(position=(-176.42, 118.52, 128.20),
                  focal_point=(113.30, 128.31, 76.56),
                  view_up=(0.18, 0.00, 0.98))    
+
+    scene.reset_camera()
+ 
 
     # window.show(scene, size=(600, 600), reset_camera=False)
     if tractName!=None:
@@ -2923,7 +3020,29 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None):
     else:
         outName='tractFigure'
         
-    window.record(scene, out_path=outName+'.png', size=(600, 600))
+    #window.record(scene, out_path=outName+'.png', size=(600, 600))
+     
+    outArray=window.snapshot(scene, fname=None, size=(6000, 6000))
+    #for whatever reason, the output of window.snapshot is upside down
+    #the record function inverts this
+    #https://github.com/fury-gl/fury/blob/0ff2c0ad98b92d9d2a80dc2bcc4e5c2e12f600a7/fury/window.py#L754
+    #but the record function opens an unclosable window, so we can't use that
+    #so here we flip it and rotate 90
+    outArray=np.flipud(outArray)
+    #outArray=np.rot90(outArray)
+    #now crop it; 0,0,0 is the rgb color for black, so those pixels sum to 0
+    colorsum=np.sum(outArray,axis=2)
+    pixelsWithColor=np.asarray(np.where(colorsum>0))
+    #find the borders
+    minVals=np.min(pixelsWithColor,axis=1)
+    maxVals=np.max(pixelsWithColor,axis=1)
+    #arbitrarily establish a desired border width
+    borderPixels=20
+    #subselect
+    croppedArray=outArray[(minVals[0]-borderPixels):(maxVals[0]+borderPixels),(minVals[1]-borderPixels):(maxVals[1]+borderPixels),:]
+    
+    matplotlib.pyplot.imsave(outName + '.png',croppedArray)
+    #now lets crop it a bit
 
 
 def orientTractUsingNeck(streamlines):
