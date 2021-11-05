@@ -44,7 +44,8 @@ def makePlanarROI(reference, mmPlane, dimension):
     
     #if the requested planar coordinate is outside of the image, throw a full on error
     if convertedBoundCoords[0,selectedDim]>mmPlane or convertedBoundCoords[1,selectedDim]<mmPlane: 
-        raise ValueError('Requested planar coordinate outside of reference image')
+        raise ValueError('Requested planar coordinate outside of reference image \n coordinate ' + str(mmPlane) + ' requested for bounds ' + str(convertedBoundCoords[:,selectedDim]))
+        
     
     #not always 0,0,0
     subjectCenterCoord=np.mean(convertedBoundCoords,axis=0)
@@ -272,6 +273,36 @@ def multiROIrequestToMask(atlas,roiNums):
     
     return concatOutNifti
 
+def multiROIrequestToMask_Inflate(atlas,roiNums,inflateIter):
+    """multiROIrequestToMask(atlas,roiNums):
+    #creates a nifti structure mask for the input atlas image of the specified labels
+    #
+    # INPUTS:
+    # -atlas:  an atlas nifti
+    #
+    # -roiNums: an 1d int array input indicating the labels that are to be extracted.  Singleton request (single int) will work fine.  Will throw warning if not present
+    #
+    # -inflateIter: the number of inflate iterations you would like to perform
+    #
+    # OUTPUTS:
+    # -outImg:  a mask with int(1) in those voxels where the associated labels were found.  If the label wasn't found, an empty nifti structure is output.
+    
+    ##NOTE REPLACE WITH nil.masking.intersect_masks when you get a chance
+    """
+
+    import nibabel as nib
+    from scipy import ndimage
+    
+    #yes, this function is a glorified wrapper, why do you ask?
+    selectROINifti=multiROIrequestToMask(atlas,roiNums)
+    
+    inflatedArray=ndimage.binary_dilation(selectROINifti.get_fdata(), iterations=inflateIter)
+
+    #set all appropriate values to true
+    inflatedOutNifti=nib.nifti1.Nifti1Image(inflatedArray, affine=atlas.affine, header=atlas.header)
+    
+    return inflatedOutNifti
+
 def planarROIFromAtlasLabelBorder(inputAtlas,roiNums, relativePosition):
     """#planarROIFromAtlasLabelBorder(referenceNifti, mmPlane, dimension):
     #generates a planar ROI at the specified label border from the input atlas
@@ -444,6 +475,7 @@ def alignROItoReference(inputROI,reference):
     outData=np.zeros(reference.shape).astype(bool)
     #set the relevant indexes to true
     #-1 because of zero indexing
+    #TEST THIS
     outData[inds[:,0]-1,inds[:,1]-1,inds[:,2]-1]=True 
     
     #create a nifti structure for this object
@@ -2256,10 +2288,17 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     from nilearn.image import reorder_img  
     from mpl_toolkits.axes_grid1.inset_locator import inset_axes
     from matplotlib import figure
-    
+    from nilearn.image import crop_img, resample_img 
+    import matplotlib.pyplot as plt
     
     #resample crop (doesn't seem to work)
     #[refAnatT1,overlayNifti]=dualCropNifti(refAnatT1,overlayNifti)
+    #ok, but if we assume that the overlay is *always* going to be smaller than the 
+    #reference, we can crop the overlay safely and work adaptively.  Why would
+    #you even have overlay **outside** of the refernce
+    #nilearn doesn't handle NAN gracefully, so we have to be inelegant
+    #overlayNifti=nib.nifti1.Nifti1Image(np.nan_to_num(overlayNifti.get_fdata()), overlayNifti.affine, overlayNifti.header)
+    #croppedOverlayNifti=crop_img(overlayNifti)
     
     #RAS reoreintation
     refAnatT1=reorder_img(refAnatT1)
@@ -2274,14 +2313,49 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     #obtain boundary coords in subject space in order to
     #use plane generation function
     convertedBoundCoords=subjectSpaceMaskBoundaryCoords(refAnatT1)
+    #overlayBoundCoords=subjectSpaceMaskBoundaryCoords(overlayNifti)
+    
+    #find which input has the highest resolution
+    refAnatT1Resolution=refAnatT1.header.get_zooms()
+    overlayResolution=overlayNifti.header.get_zooms()
+    
+    #change datatype so that nilearn doesn't mess up
+    #it doesn't like bool so we have to do something about that
+    #somehow the data can be set to nifti, but can't be extracted as nifti, so...
+    overlayNifti=nib.nifti1.Nifti1Image(overlayNifti.get_fdata(),overlayNifti.affine,overlayNifti.header)
+    overlayNifti.set_data_dtype(overlayNifti.get_fdata().dtype)
+    
+    #resample to the best resolution
+    #but also assuming that the refernce anatomy is ultimately the shape that we want
+    #this is going to cause huge problems if the user passes in a super cropped overlay
+    if np.prod(refAnatT1Resolution)>np.prod(overlayResolution):
+        print('resampling reference anatomy to overlay')
+        refAnatT1=resample_img(refAnatT1,target_affine=overlayNifti.affine[0:3,0:3])
+        overlayNifti=resample_img(overlayNifti,target_affine=overlayNifti.affine[0:3,0:3])
+    else:
+        print('resampling overlay to reference anatomy')
+        refAnatT1=resample_img(refAnatT1,target_affine=refAnatT1.affine[0:3,0:3])
+        overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine[0:3,0:3])
+    
+    #crop the anatomy back down in case it has gotten overly widened
+    refAnatT1=crop_img(refAnatT1)
+    
+    #now crop the overlay to the dimensions of the reference anatomy
+    overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine, target_shape=refAnatT1.shape)
+    #WARNING THIS INTRODUCES NIQUEST SAMPLING ERRORS INTO THE OVERLAY
     
     dimsList=['x','y','z']
     #brute force with matplotlib
-    import matplotlib.pyplot as plt
+   
     for iDims in list(range(len(refAnatT1.shape))):
         #this assumes that get_zooms returns zooms in subject space and not image space orientation
         # which may not be a good assumption if the orientation is weird
-        subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1.header.get_zooms()[iDims])
+        
+        #pick whichever input has the best resolution in this dimension
+        if refAnatT1Resolution[iDims]<=overlayResolution[iDims]:
+            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1Resolution[iDims])
+        else:
+            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],overlayResolution[iDims])
         #get the desired broadcast shape and delete current dim value
         broadcastShape=list(refAnatT1.shape)
         del broadcastShape[iDims]
@@ -2289,17 +2363,22 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
         #iterate across slices
         for iSlices in list(range(len(subjectSpaceSlices))):
             #set the slice list entry to the appropriate singular value
-            currentSlice=makePlanarROI(refAnatT1, subjectSpaceSlices[iSlices], dimsList[iDims])
+            #THE SOLUTION WAS SO OBVIOUS. DONT USE A SINGLE SLICE FOR BOTH THE
+            #REFERNCE AND THE OVERLAY.  DUH!
+            #actually this doesn't matter if we resample
+            currentRefSlice=makePlanarROI(refAnatT1, subjectSpaceSlices[iSlices], dimsList[iDims])
+            #could be an issue if overlay nifti is signifigantly smaller
+            currentOverlaySlice=makePlanarROI(overlayNifti, subjectSpaceSlices[iSlices], dimsList[iDims])
 
             #set up the figure
             fig,ax = plt.subplots()
             ax.axis('off')
             #kind of overwhelming to do this in one line
-            refData=np.rot90(np.reshape(refAnatT1.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),1)
-            plt.imshow(refData, cmap='gray', interpolation='nearest')
+            refData=np.rot90(np.reshape(refAnatT1.get_fdata()[currentRefSlice.get_fdata().astype(bool)],broadcastShape),1)
+            plt.imshow(refData, cmap='gray', interpolation='gaussian')
             #kind of overwhelming to do this in one line
-            overlayData=np.rot90(np.reshape(overlayNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),1)
-            plt.imshow(np.ma.masked_where(overlayData<=0,overlayData), cmap='jet', alpha=.75, interpolation='nearest',vmin=1,vmax=np.nanmax(overlayNifti.get_fdata()))
+            overlayData=np.rot90(np.reshape(overlayNifti.get_fdata()[currentOverlaySlice.get_fdata().astype(bool)],broadcastShape),1)
+            plt.imshow(np.ma.masked_where(overlayData<=0,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_fdata()))
             curFig=plt.gcf()
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
             plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_fdata())], orientation='vertical')
@@ -2587,7 +2666,7 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['meanProportion']),metaValues=list(firstRASDFCommon['proportionSTD']))
     figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['meanProportion']),metaValues=list(firstLPIDFCommon['proportionSTD']))
     
-    figure1.get_axes()[0].set_title(tractName+'RAS\n common endpoints\n',size=16)
+    figure1.get_axes()[0].set_title(tractName+' RAS\n common endpoints\n',size=16)
     figure1.get_axes()[0].set_facecolor([0,0,1,.15])
     
     #find optimal location for axis label
@@ -2602,7 +2681,7 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     figure1.get_axes()[0].text(locationSelect, np.max(firstRASDFCommon['meanProportion']*.5), "avg proportion\n of streamlines", rotation=rotationAngle+180, 
         ha="center", va="center", size=14, zorder=12)
 
-    figure2.get_axes()[0].set_title(tractName+'LPI\n common endpoints')
+    figure2.get_axes()[0].set_title(tractName+' LPI\n common endpoints')
     figure2.get_axes()[0].set_facecolor([1,0,0,.15])
     
     #find optimal location for axis label
@@ -2629,12 +2708,12 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     figure1=basicRadarPlot(list(firstRASDFFUnCommon['labelNames']),list(firstRASDFFUnCommon['meanProportion']),metaValues=list(firstRASDFFUnCommon['proportionSTD']))
     figure2=basicRadarPlot(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['meanProportion']),metaValues=list(firstLPIDFUnCommon['proportionSTD']))
     
-    figure1.get_axes()[0].set_title(tractName+'RAS\n *UN*common endpoints')
+    figure1.get_axes()[0].set_title(tractName+' RAS\n *UN*common endpoints')
     figure1.get_axes()[0].set_facecolor([0,0,1,.15])
     figure1.get_axes()[0].text(0, np.max(firstRASDFFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
         ha="center", va="center", size=12, zorder=12)
 
-    figure2.get_axes()[0].set_title(tractName+'LPI\n *UN*common endpoints')
+    figure2.get_axes()[0].set_title(tractName+' LPI\n *UN*common endpoints')
     figure2.get_axes()[0].set_facecolor([1,0,0,.15])
     figure2.get_axes()[0].text(0, np.max(firstLPIDFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
         ha="center", va="center", size=12, zorder=12)
@@ -2876,6 +2955,11 @@ def orientTractUsingNeck(streamlines):
     flipRuns=1
     flipCount=0
     exitTrigger=False
+    #here lets arbitrarily aim for 5 mm, and compute that distance per streamline.  Probably expensive
+    #but we can't always assume that 
+    
+    #set the value here, the mm space target distance for neck evaluation
+    targetMM=2.0
     while not exitTrigger: 
     
         #get the neck nodes for the tract
@@ -2886,11 +2970,18 @@ def orientTractUsingNeck(streamlines):
         for iStreamlines in range(len(streamlines)):
             neckCoords.append(streamlines[iStreamlines][neckNodes[iStreamlines]])
         
-        #here lets arbitrarily aim for 5 mm, and compute that distance per streamline.  Probably expensive
-        #but we can't always assume that 
-        
-        #set ths value here, the mm space target distance for neck evaluation
-        targetMM=2.5
+      
+        #however, if the algorithm gets stuck (and keeps flipping one streamline back and forth, for example)
+        #expand the window a bit to hopefully introduce more variability in to the system
+        #(under the presumption that streamlines get more variable as you move away from the neck)
+        #the modulo operator here will expand the window everytime the flip run counter reaches a multiple of 10
+        if flipRuns % 10 == 0 :
+            print('algorithm stuck, expanding consideration window and randomizing streamline orientations')
+            targetMM=targetMM+.5
+            
+            for iStreamlines in range(len(streamlines)):
+                if np.random.choice([True,False]):
+                    streamlines[iStreamlines]= streamlines[iStreamlines][::-1]
         
         aheadNodes=[]
         behindNodes=[]
@@ -2906,8 +2997,8 @@ def orientTractUsingNeck(streamlines):
                 print('you need to code this')
            #A check to make sure you've got room to do this indexing on both sides
             if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
-               aheadNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]+lookDistance])
-               behindNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]-lookDistance])
+               aheadNodes.append(neckNodes[iStreamlines]+lookDistance)
+               behindNodes.append(neckNodes[iStreamlines]-lookDistance)
            #otherwise do the best you can
             else:
                #if there's a limit to how many nodes are available ahead, do the best you can
@@ -2924,21 +3015,26 @@ def orientTractUsingNeck(streamlines):
                    behindWindow=lookDistance
                
                #append the relevant values
-               aheadNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]+(aheadWindow)])
-               behindNodes.append(streamlines[iStreamlines][neckNodes[iStreamlines]-(behindWindow)])
+               aheadNodes.append(neckNodes[iStreamlines]+(aheadWindow))
+               behindNodes.append(neckNodes[iStreamlines]-(behindWindow))
          
         
-        # use the coords that are at the heart of the tract
+        # use the coords that are at the heart of the tract to establish the orientation guide
+        
+        #first set empty vectors for neck, ahead, and behind coords
         neckCoords=np.zeros([len(streamlines),3])
-    
+        aheadCoords=[ streamlines[iStreamlines][behindNodes[iStreamlines]] for iStreamlines in range(len(streamlines))]
+        behindCoords=[ streamlines[iStreamlines][aheadNodes[iStreamlines]] for iStreamlines in range(len(streamlines))]
+        #establish 
+        aheadDistances=np.zeros(len(streamlines))
+        behindDistances=np.zeros(len(streamlines))
         for iStreamlines in range(len(streamlines)):
              neckCoords[iStreamlines,:]=(streamlines[iStreamlines][neckNodes[iStreamlines]])
-             
-        aheadDistances=np.squeeze(cdist(np.atleast_2d(np.mean(np.squeeze(np.asarray(aheadNodes)),axis=0)),np.squeeze(np.asarray(aheadNodes))))
-        behindDistances=np.squeeze(cdist(np.atleast_2d(np.mean(np.squeeze(np.asarray(behindNodes)),axis=0)),np.squeeze(np.asarray(behindNodes))))
+             aheadDistances[iStreamlines]=np.squeeze(cdist(np.atleast_2d(np.mean(np.squeeze(np.asarray(aheadCoords)),axis=0)),streamlines[iStreamlines][behindNodes[iStreamlines]]))
+             behindDistances[iStreamlines]=np.squeeze(cdist(np.atleast_2d(np.mean(np.squeeze(np.asarray(behindCoords)),axis=0)),streamlines[iStreamlines][behindNodes[iStreamlines]]))
     
-        orientationGuideAheadNode=aheadNodes[np.where(np.min(aheadDistances)==aheadDistances)[0][0]].flatten()
-        orientationGuideBehindNode=behindNodes[np.where(np.min(behindDistances)==behindDistances)[0][0]].flatten()
+        orientationGuideAheadNode=aheadCoords[np.where(np.min(aheadDistances)==aheadDistances)[0][0]].flatten()
+        orientationGuideBehindNode=behindCoords[np.where(np.min(behindDistances)==behindDistances)[0][0]].flatten()
         
         #if you wanted to force RAS / LPI on your tractogram orientatiuon, now would be the time to do it
         #first store the current values in a separate variable
@@ -2952,16 +3048,22 @@ def orientTractUsingNeck(streamlines):
             orientationGuideAheadNode=currentBehindNode
             orientationGuideBehindNode=currentAheadNode
         
+        #print(str(orientationGuideAheadNode))
+        #print(str(orientationGuideBehindNode))
+        
         #iterate across streamlines     
         for iStreamlines in range(len(streamlines)):
             #compute the distances from the comparison orientation for both possible
             #orientations
-            sumDistanceOrientation1=np.sum([cdist(np.atleast_2d(orientationGuideAheadNode),np.atleast_2d(aheadNodes[iStreamlines])),cdist(np.atleast_2d(orientationGuideBehindNode),np.atleast_2d(behindNodes[iStreamlines]))])
-            sumDistanceOrientation2=np.sum([cdist(np.atleast_2d(orientationGuideAheadNode),np.atleast_2d(behindNodes[iStreamlines])),cdist(np.atleast_2d(orientationGuideBehindNode),np.atleast_2d(aheadNodes[iStreamlines]))])
+            sumDistanceOrientation1=np.sum([cdist(np.atleast_2d(orientationGuideAheadNode),np.atleast_2d(aheadCoords[iStreamlines])),cdist(np.atleast_2d(orientationGuideBehindNode),np.atleast_2d(behindCoords[iStreamlines]))])
+            sumDistanceOrientation2=np.sum([cdist(np.atleast_2d(orientationGuideAheadNode),np.atleast_2d(behindCoords[iStreamlines])),cdist(np.atleast_2d(orientationGuideBehindNode),np.atleast_2d(aheadCoords[iStreamlines]))])
             #flip if necessary
             if sumDistanceOrientation2<sumDistanceOrientation1:
+                #print(str(iStreamlines))
+                #print(str(sumDistanceOrientation1))
+                #print(str(sumDistanceOrientation2))
                 streamlines[iStreamlines]= streamlines[iStreamlines][::-1]
-                flipCount=flipCount+1    
+                flipCount=flipCount+1
         print('flip run ' + str(flipRuns) +': ' + str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
             
         if np.logical_and(flipRuns!=1,flipCount==0) :
@@ -3014,7 +3116,8 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     #use dipy function to reduce labels to contiguous values
     if isinstance(atlas,str):
         atlas=nib.load(atlas)
-    relabeledAtlasData=reduce_labels(atlas.get_fdata())[0]
+    #NOTE astype(int) is causing all sorts of problems, BE WARNED
+    [relabeledAtlasData, labelMappings]=reduce_labels(atlas.get_fdata())
     #create new nifti object
     renumberedAtlasNifti=nib.Nifti1Image(relabeledAtlasData, atlas.affine, atlas.header)
     
@@ -3045,10 +3148,10 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
 
     # if the lookup table has more entries than the atlas has items, we'll need to do some readjusting
     # probably need to do some readjusting in any case
-    if len(atlasLookupTable)>len(np.unique(relabeledAtlasData)):
+    if len(atlasLookupTable)>len(labelMappings):
         #infer which column contains the original identities
         #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
-        matchingLabelsCount=[len(list(set(atlasLookupTable[iColumns]).intersection(set(np.unique(atlas.get_fdata()).astype(int))))) for iColumns in atlasLookupTable.columns.to_list()]
+        matchingLabelsCount=[len(list(set(atlasLookupTable[iColumns]).intersection(set(np.unique(atlas.get_fdata()))))) for iColumns in atlasLookupTable.columns.to_list()]
         #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
         #worry about that later
         columnBestGuess=atlasLookupTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
@@ -3056,9 +3159,17 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
         entryLengths=atlasLookupTable.applymap(str).applymap(len)
         labelColumnGuess=entryLengths.mean(axis=0).idxmax()
         
+        #lets get the correspondances of the labels in the two atlases, we can 
+        #assume that ordering has been preserved, it's just that identity has been 
+        #shifted to a contiguous integer sequence
+                
         #now that we have the guess, get the corresponding row entries, and reset the index.
         #This should make the index match the renumbered label values.
-        LUTWorking=atlasLookupTable[atlasLookupTable[columnBestGuess].isin(np.unique(atlas.get_fdata()).astype(int)).values].reset_index(drop=True)
+        #NOTE np.round results in a very different outcome than .astype(int) WHY
+        LUTWorking=atlasLookupTable[atlasLookupTable[columnBestGuess].isin(np.round(labelMappings))].reset_index(drop=True)
+        
+        #indexMappings=np.asar[np.where(labelMappings[iLabels]==atlasLookupTable[columnBestGuess].values)[0] for iLabels in range(len(labelMappings))]
+      
     
     #iterate across both sets of endpoints
     for iEndpoints in range(keyTargetsArray.shape[1]):
@@ -3260,9 +3371,11 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
         inflationTargetCoords=np.asarray(np.where(infationArrayTargets)).T
     
         #this manuver is going to cost us .gif
+        #NOTE, sequencing of coordinates may influence votes
+        #create a dummy array for each inflation iteration to avoid this
         for iInflationTargetCoords in inflationTargetCoords:
             #because I dont trust iteration in 
-            print(str(iInflationTargetCoords))
+            #print(str(iInflationTargetCoords))
             #set some while loop iteration values
             window=1
             #if you set the vector to longer than 2 by default, it will run until fixed
