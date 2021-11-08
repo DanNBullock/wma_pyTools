@@ -731,10 +731,12 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
     #find the streamlines that are within the bounding box of the maskROI,
     #NOTE: this isn't necessarily the full mask input by the user, as a result of the
     #intersection with the tract mask
-    [boundedIndexes, boundedStreams]=subsetStreamsNodesByROIboundingBox(streamlines, tractMaskROIIntersection)
     
+
+    #maybe not catching the streams will save ram?
+    boundedIndexes=subsetStreamsNodesByROIboundingBox(streamlines, tractMaskROIIntersection)[0]
     #use dipy's near roi function to generate bool
-    criteriaStreamsBool=near_roi(boundedStreams, tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata().astype(bool), mode=operationSpec)
+    criteriaStreamsBool=near_roi(streamlines[boundedIndexes], tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata().astype(bool), mode=operationSpec)
 
     originalIndexes=boundedIndexes[np.where(criteriaStreamsBool)[0]]
     
@@ -2553,6 +2555,47 @@ def wmc2tracts(inputTractogram,classification,outdir):
             out_filename=os.path.join(outdir,tract_name + '.trk')
         
         save_tractogram(statefulTractogramOut,out_filename)
+
+def stubbornSaveTractogram(streamlines,savePath):
+    """
+    Why shouuld i supply a reference nifti?
+
+    Returns
+    -------
+    None.
+
+    """
+    import nibabel as nib
+    import dipy
+    import numpy as np
+    from dipy.io.stateful_tractogram import Space, StatefulTractogram
+    from dipy.io.streamline import load_tractogram, save_tractogram
+    import dipy.tracking.utils as ut
+
+    #dipy is stubborn and wants a reference nifti for some reason
+    #fineI'llDoItMyself.jpg
+    tractBounds=np.asarray([np.min(streamlines._data,axis=0),np.max(streamlines._data,axis=0)])
+    roundedTractBounds=np.asarray([np.floor(tractBounds[0,:]),np.ceil(tractBounds[1,:])])
+    constructedAffine=np.eye(4)
+    constructedAffine[0:3,3]=tractBounds[0,:]
+
+    lin_T, offset =ut._mapping_to_voxel(constructedAffine)
+    inds = ut._to_voxel_coordinates(streamlines._data, lin_T, offset)
+    
+    testBounds=np.asarray([np.min(inds,axis=0),np.max(inds,axis=0)])
+    
+    #now create a dummy nifit, because that's what dipy demands
+    dataShape=(roundedTractBounds[1,:]-roundedTractBounds[0,:]).astype(int)
+    #adding a +1 pad because it yells otherwise?
+    dummyData=np.zeros(dataShape+1)
+    dummyNifti= nib.nifti1.Nifti1Image(dummyData, constructedAffine)
+    
+    
+    voxStreams=dipy.tracking.streamline.transform_streamlines(streamlines,np.linalg.inv(constructedAffine))
+    statefulTractogramOut=StatefulTractogram(voxStreams, dummyNifti, Space.VOX)
+    
+    save_tractogram(statefulTractogramOut,savePath)
+    return statefulTractogramOut
 
 def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',saveDir=None):
     """radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName=None,saveDir=None)
