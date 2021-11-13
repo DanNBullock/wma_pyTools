@@ -2605,6 +2605,52 @@ def wmc2tracts(inputTractogram,classification,outdir):
         print('saving '+ str(len(idx_tract)) + ' streamlines for' + t_name+ ' to')
         print(out_filename)
         stubbornSaveTractogram(inputTractogram.streamlines[idx_tract],out_filename)
+        
+def matWMC2jsonWMC(classification):
+    """
+    "wmc2tracts(trk_file,classification,outdir):
+     convert a .mat wmc to a dict / .json variant
+    based on @giulia-berto's
+ https://github.com/FBK-NILab/app-classifyber-segmentation/blob/1.3/wmc2trk.py
+
+    Parameters
+    ----------
+
+    classification : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+
+    """
+    from scipy.io import loadmat
+    import json
+    
+    if isinstance(classification,str):
+        #load the .mat object
+        classification=loadmat(classification)
+        #it comes back as an eldridch horror, so parse it appropriately
+        #get the index vector
+    indices=classification['classification'][0][0]['index'][0]
+        #get the names vector
+    tractIdentities=[str(iIdenties) for iIdenties in classification['classification'][0][0][0][0]]
+    tractNames=[]
+    for tractID in range(len(tractIdentities)):
+        #remove unncessary characters, adds unnecessary '[]'
+        t_name = tractIdentities[tractID][2:-2]
+        #standard practice: get rid of all spaces
+        tractNames.append(t_name.replace(' ', '_'))
+        #also consider using this opportunity to fix/enforce naming conventions
+    
+    #create the dictionary object 
+    wmc_Dict={}
+    wmc_Dict['names']=tractNames
+    wmc_Dict['index']=indices.tolist()
+    
+    outJson=json.dumps(wmc_Dict)
+    return outJson
 
 def stubbornSaveTractogram(streamlines,savePath):
     """
@@ -2956,10 +3002,12 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     scene = window.Scene()
     scene.clear()
     
+    #fix this later
     if refAnatT1!=None:
-       vol_actor = actor.slicer(refAnatT1.get_fdata())
-       vol_actor.display(x=0)
-       scene.add(vol_actor)
+       # vol_actor = actor.slicer(refAnatT1.get_fdata())
+       # vol_actor.display(x=0)
+       # scene.add(vol_actor)
+       print('skipping')
     else:
         refAnatT1=dummyNiftiForStreamlines(streamlines)
         
@@ -3550,7 +3598,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     import numpy as np
     
     if isinstance(streamlines,str):
-        streamlinesLoad=nib.load(streamlines)
+        streamlinesLoad=nib.streamlines.load(streamlines)
         streamlines=streamlinesLoad.streamlines
         
     if isinstance(refAnatT1,str):
@@ -3575,7 +3623,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     
     #plots currently work better without reference T1
     print('creating anatomy plot')
-    dipyPlotTract(streamlines,refAnatT1=None, tractName=os.path.join(outdir,tractName))
+    dipyPlotTract(streamlines,refAnatT1=refAnatT1, tractName=os.path.join(outdir,tractName))
     #we use the group variant because it normalizes by proportion and splits out the endpoints into common and uncommon 
     #if an atlas + lookup table isn't provided, skip this
     if np.logical_not(np.logical_or(atlas==None,atlasLookupTable==None)):
