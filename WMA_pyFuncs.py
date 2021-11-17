@@ -171,14 +171,14 @@ def planeAtMaskBorder(inputMask,relativePosition):
     #return the planar roi you have created
     return outPlaneNifti
 
-def createSphere(r, p, reference):
+def createSphere(r, p, reference, supress=True):
     """ create a sphere of given radius at some point p in the brain mask
     Args:
     r: radius of the sphere
     p: point (in subject coordinates of the brain mask, i.e. not the image space) of the center of the
     sphere)
     reference:  The reference nifti whose space the sphere will be in
-    
+    supress:  Bool indicating whether to supress the output print behavior
     
     modified version of nltools sphere function which outputs the sphere ROI in the
     coordinate space of the input reference
@@ -186,7 +186,8 @@ def createSphere(r, p, reference):
     import nibabel as nib
     import numpy as np
     
-    print('Creating '+ str(r) +' mm radius spherical roi at '+str(p))
+    if not supress:
+        print('Creating '+ str(r) +' mm radius spherical roi at '+str(p))
     
     fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_fdata().shape), reference.affine, reference.header)
     #obtain boundary coords in subject space in order set max min values for interactive visualization
@@ -1130,12 +1131,13 @@ def dummyNiftiForStreamlines(streamlines):
     #now create a dummy nifit, because that's what dipy demands
     dataShape=(roundedTractBounds[1,:]-roundedTractBounds[0,:]).astype(int)
     #adding a +1 pad because it yells otherwise?
+    #should I pad here?
     dummyData=np.zeros(dataShape+1)
     dummyNifti= nib.nifti1.Nifti1Image(dummyData, constructedAffine)
     return dummyNifti
     
 
-def findTractNeckNode(streamlines):
+def findTractNeckNode(streamlines, refAnatT1=None):
     #findTractNeckNode(streamlines):
     # finds the node index for each streamline which corresponds to the most tightly constrained
     # portion of the tract (i.e. the "neck).
@@ -1149,9 +1151,7 @@ def findTractNeckNode(streamlines):
     #
     # -neckNodeVec:  a 1d int vector array that indicates, for each streamline, the node that is associated with the "neck" of the input streamline collection.
     #
-    from dipy.segment.clustering import QuickBundles
-    from dipy.segment.metric import ResampleFeature
-    from dipy.segment.metric import AveragePointwiseEuclideanMetric
+
     from scipy.spatial.distance import cdist
     import numpy as np
     import dipy.tracking.utils as ut
@@ -1159,9 +1159,12 @@ def findTractNeckNode(streamlines):
     import nibabel as nib
     
     #lets presuppose that the densest point in the density mask ocurrs within
-    #the neck.  Thus we need a 
-    dummyNifti=dummyNiftiForStreamlines(streamlines)
-    tractMask=ut.density_map(streamlines, dummyNifti.affine, dummyNifti.shape)
+    #the neck.  Thus we need a
+    if refAnatT1==None:
+        dummyNifti=dummyNiftiForStreamlines(streamlines)
+        tractMask=ut.density_map(streamlines, dummyNifti.affine, dummyNifti.shape)
+    else:
+        tractMask=ut.density_map(streamlines, refAnatT1.affine, refAnatT1.shape)
     #we smooth it just in case there are weird local maxima
     #that sigma may need to be worked on
     smoothedDensity=gaussian_filter(np.square(tractMask),sigma=3)
@@ -1170,7 +1173,11 @@ def findTractNeckNode(streamlines):
     #pick the first one arbitrarily in case there are multiple
     maxDensityImgCoord=maxDensityLoc[:,0]
     #get the coordinate in subject space
-    subjCoord = nib.affines.apply_affine(dummyNifti.affine,maxDensityImgCoord)
+    if refAnatT1==None:
+        subjCoord = nib.affines.apply_affine(dummyNifti.affine,maxDensityImgCoord)
+    else:
+        subjCoord = nib.affines.apply_affine(refAnatT1.affine,maxDensityImgCoord)
+    
 
     #iterate across streamlines
     neckNodeIndexVecOut=[]
@@ -1448,31 +1455,26 @@ def mergeBundlesViaNeck(streamlines,clusters,distanceThresh):
 def smoothStreamlines(tractogram):
     #smoothStreamlines(tractogram):
     #
-    #Smooths streamlines using spline method.  
-    #Probably hugely memory inefficient, and will resample all streamlines to 400 nodes
-    #Resource intensive, but look at those smooth streamlines!
+    #Smooths streamlines using spline method.  Replaces tractogram's streamlines
+    #with the smoothed versions
+
     #
     # -tractogram: an input stateful tractogram 
     #
-    # -out_tractogram:  an output stateful tractogram with the streamlines smmothed and
-    #                   resampled to 400 nodes
     #
     # distanceThresh the threshold between neck centroids that is accepted for merging
     import dipy
     import nibabel as nib
+    from dipy.tracking.streamlinespeed import set_number_of_points
     #extract the streamlines, but not really because this is just linking
-    inputStreamlines=tractogram.streamlines
+    #inputStreamlines=tractogram.streamlines
     #get the count before anything is done
-    initialLength=len(inputStreamlines)
+    initialLength=len(tractogram.streamlines)
     for iStreams in range(initialLength):
         #use the spline method to get the smoothed streamline
-        dipySplineOut=dipy.tracking.metrics.spline(inputStreamlines[iStreams])
-        #this is an ugly way to do this
+        tractogram.streamlines[iStreams]=set_number_of_points(dipy.tracking.metrics.spline(tractogram.streamlines[iStreams]),len(tractogram.streamlines[iStreams]))
         
-        inputStreamlines.append(dipySplineOut)
-    outStreamlines=inputStreamlines[initialLength-1:-1]
-    out_tractogram = nib.streamlines.tractogram.Tractogram(outStreamlines)
-    return out_tractogram
+    return tractogram
 
 def cullViaClusters(clusters,tractogram,streamThresh):
     #cullViaClusters(clusters,tractogram,streamThresh)
@@ -1834,6 +1836,234 @@ def bundleTest(streamlines):
     outReport={'mean':np.mean(neckNodeDistances),'median':np.median(neckNodeDistances),'std':np.std(neckNodeDistances),'mirrored_std':np.std(np.hstack([neckNodeDistances,-neckNodeDistances]))}
     
     return outReport
+
+def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti,distanceParameter,bootstrapNum):
+    """
+    uses Scipy's ndimage.generic_filter to perform the endpoint dispersion analysis
+    Ideally this code is cleaner and may also be faster.
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+    referenceNifti : TYPE
+        DESCRIPTION.
+    distanceParameter : TYPE
+        DESCRIPTION.
+    bootstrapNum : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import scipy
+    from dipy.tracking.vox2track import streamline_mapping
+    import nibabel as nib
+    import numpy as np
+    import itertools
+    from multiprocessing import Pool
+    import os
+    import time
+    from functools import partial
+    import tqdm
+    
+    #this value is used to define the radius distance within which we look for streamlines
+    distanceParameter=3
+    
+    #create a dummy nifti in order to get a get an affine?
+    dummyNifti=dummyNiftiForStreamlines(streamlines)
+    
+    
+    
+    #this is probably faster than geting the density map, turning that into a mask,
+    #and then getting the voxel indexes for that
+    # get a streamline index dict of the whole brain tract
+    streamlineMapping=streamline_mapping(streamlines, dummyNifti.affine)
+    #use this to get the size
+    #sys.getsizeof(streamlineMapping)
+    #use this to set the coordinate ordering
+    imgCoords=sorted(list(streamlineMapping.keys()))
+    
+    # lets create a standard mask/kernel for the search window
+    #standard vector, centered at the midpoint
+    dimVoxelDistVals=np.arange(0, 1+distanceParameter*2) -distanceParameter
+    #if your input was non iso-metric, you would use the voxeldims vector variale to adjust 
+    #the size of the relevant dimensions.  we're assuming isometric for this kernel
+    voxelDims=np.ones(3)
+    #create a default "footprint" for the filter, e.g. this is the array form of the kernel
+    x, y, z = np.meshgrid(dimVoxelDistVals, dimVoxelDistVals, dimVoxelDistVals,indexing='ij')          
+    #I didn't abs, but apparently that doesn't cause a problem?
+    mask_r = x*x*voxelDims[0] + y*y*voxelDims[1] + z*z*voxelDims[2] <= distanceParameter*distanceParameter
+    
+    #this is what we iterate over per coord
+    def streamsInImgSpaceWindow(coord, streamlineMapping, mask_r):
+        #listPosition=sorted(list(streamlineMapping.keys())).index(coord)/len(streamlineMapping)
+        #print(listPosition,  end = "\r")
+        x2, y2, z2 = np.meshgrid(dimVoxelDistVals+coord[0], dimVoxelDistVals+coord[1], dimVoxelDistVals+coord[2],indexing='ij')  
+        
+        coordsToCheck=np.asarray([ x2, y2, z2])[:,mask_r].T
+        
+        
+        #try a few different methods here
+        #set base intersection
+        #find the roi coords which correspond to voxels within the streamline mask
+        #validCoords=list(set(list(tuple([tuple(e) for e in coordsToCheck]))) & set(list(streamlineMapping.keys())))
+        #get the streamline indexes for the streamlines that fall within these coords
+        #streamIndexes=list(itertools.chain(*[streamlineMapping[iCoords] for iCoords in validCoords]))
+        
+        #for list
+        # streamIndexes=[]
+        # for iCoords in coordsToCheck:
+        #     if tuple(iCoords) in list(streamlineMapping.keys()):
+        #         streamIndexes=streamIndexes+streamlineMapping[tuple(iCoords)]
+                
+        #try except
+        #COMICALLY FASTER
+        streamIndexes=[]
+        for iCoords in coordsToCheck:
+            try:
+                streamIndexes=streamIndexes+streamlineMapping[tuple(iCoords)]
+            except:
+                pass
+        streamIndexes=np.unique(streamIndexes)
+        return streamIndexes
+        
+    #now do it many times in a parallel pool 
+    #processesCount=os.cpu_count()
+    #processes_pool = Pool(processesCount)
+    t1_start=time.process_time()
+    #streamsListList=processes_pool.map(partial(streamsInImgSpaceWindow,streamlineMapping=streamlineMapping,mask_r=mask_r), imgCoords)
+    print('computing voxel-wise collections of streamlines to check for while using a ' + str(distanceParameter) + 'mm spherical window')
+    streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in tqdm.tqdm(imgCoords, position=0, leave=True)]
+    t1_stop=time.process_time()
+    modifiedTime=t1_stop-t1_start
+    print(str(modifiedTime) + ' seconds to find streamline groups to check')  
+    
+    #create an output structure
+    #remember it's endpoints1 Avg, endpoints1 Var, endpoints2 Avg, endpoints2 Var for 4th dim, 
+    #then 5th dim = repeats
+    outArray=np.zeros([referenceNifti.shape[0],referenceNifti.shape[1],referenceNifti.shape[2],4,bootstrapNum])
+    #arbitrarily set that we'll be bootstrapping across half of the input streams
+   
+    #iterate across repeats
+    
+    
+    t1_start=time.process_time()
+    #compute the dispersion for each subset of streamlines, and output the quantificaitons
+    #outValues=processes_pool.map(computeStreamsDispersion,streamlines[subsampledStreamLists])
+    outValues=[computeStreamsDispersion_bootstrap(streamlines[iStreamLists],bootstrapProportion=.5,bootstrapIter=1,refAnatT1=referenceNifti) for iStreamLists in tqdm.tqdm(streamsListList, position=0, leave=True)] 
+    #places those quantifications in the correct space in the output array
+    outArray[np.asarray(imgCoords)[:,0],np.asarray(imgCoords)[:,1],np.asarray(imgCoords)[:,2],:,:]=np.asrray(outValues)
+    t1_stop=time.process_time()
+    modifiedTime=t1_stop-t1_start
+    print(str(modifiedTime) + ' seconds to compute endpoint dispersions') 
+     
+    #now we actually have to do the output computations
+    
+    
+    meanOfMeans=np.mean(outValues[:,:,:,[0,2],:],axes=(3,4))
+    varianceOfMeans=np.var(outValues[:,:,:,[0,2],:],axes=(3,4))
+    meanOfVariances[iCoords]=np.mean(dispersionVariances)
+    varianceOfVariances[iCoords]=np.var(dispersionVariances)
+    
+    #asym
+    meanOfMeansAsym[iCoords]=np.mean(dispersionMeansAsym)
+    varianceOfMeansAsym[iCoords]=np.var(dispersionMeansAsym)
+    meanOfVariancesAsym[iCoords]=np.mean(dispersionVariancesAsym)
+    varianceOfVariancesAsym[iCoords]=np.var(dispersionVariancesAsym)
+    
+    refAnatT1=resample_img(refAnatT1,target_affine=overlayNifti.affine[0:3,0:3])
+    overlayNifti=resample_img(overlayNifti,target_affine=overlayNifti.affine[0:3,0:3])
+       
+    
+def computeStreamsDispersion_bootstrap(streamlines,bootstrapProportion=.5,bootstrapIter=1,refAnatT1=None):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+    bootstrapProportion : TYPE, optional
+        DESCRIPTION. The default is .5.
+    bootstrapIter : TYPE, optional
+        DESCRIPTION. The default is 1.  As in no actual boot strap
+
+    Returns
+    -------
+    endPoint1DistAvg : TYPE
+        DESCRIPTION.
+    endPoint2DistAvg : TYPE
+        DESCRIPTION.
+    endPoint1DistVar : TYPE
+        DESCRIPTION.
+    endPoint2DistVar : TYPE
+        DESCRIPTION.
+
+
+    """
+    import numpy as np
+    from scipy.spatial.distance import cdist
+    
+    #check to see if theinput is singleton
+    if type(streamlines) == np.ndarray:
+        #bulk it up
+        streamlines=[streamlines]
+        
+    #we can use the non-multi version of orientTractUsingNeck because we essentially
+    #know that we are selecting these streamlines by their neck, at least insofar
+    #as our (spatially defined) collection of streamlines is concerned
+    if refAnatT1==None:
+        orientedStreams=orientTractUsingNeck_Robust(streamlines,surpressReport=True)
+    else:
+        orientedStreams=orientTractUsingNeck_Robust(streamlines,refAnatT1, surpressReport=True)
+        
+    #set number of streamlines to subsample
+    subSampleNum=np.floor(len(streamlines)/2).astype(int)
+    
+    
+    endpoints=np.zeros((len(orientedStreams),6))
+    #get the endpoints, taken from
+    #https://github.com/dipy/dipy/blob/f149c756e09f172c3b77a9e6c5b5390cc08af6ea/dipy/tracking/utils.py#L708
+    for iStreamline in range(len(orientedStreams)):
+        #remember, first 3 = endpoint 1, last 3 = endpoint 2    
+        endpoints[iStreamline,:]= np.concatenate([orientedStreams[iStreamline][0,:], orientedStreams[iStreamline][-1,:]])
+    
+    #select the appropriate endpoints
+    Endpoints1=endpoints[:,0:3]
+    Endpoints2=endpoints[:,3:7]
+    
+    endPoint1DistAvg=np.zeros(bootstrapIter)
+    endPoint1DistVar=np.zeros(bootstrapIter)
+    endPoint2DistAvg=np.zeros(bootstrapIter)
+    endPoint2DistVar=np.zeros(bootstrapIter)
+    for iRepeats in range(bootstrapIter):
+        subsampleIndexes=[np.random.randint(0,len(streamlines),subSampleNum)]
+        if not len(subsampleIndexes)==0:
+        
+            #compute the subset mean distance and variance for endpoint cluster 1
+            avgEndPoint1=np.mean(Endpoints1[subsampleIndexes],axis=0)
+            curNearDistsFromAvg1=cdist(np.atleast_2d(Endpoints1[subsampleIndexes]), np.atleast_2d(avgEndPoint1), 'euclidean')
+            endPoint1DistAvg[iRepeats]=np.mean(curNearDistsFromAvg1)
+            endPoint1DistVar[iRepeats]=np.var(curNearDistsFromAvg1)
+            
+            #compute the subset mean distance and variance for endpoint cluster 2
+            avgEndPoint2=np.mean(Endpoints2[subsampleIndexes],axis=0)
+            curNearDistsFromAvg2=cdist(np.atleast_2d(Endpoints2[subsampleIndexes]), np.atleast_2d(avgEndPoint2), 'euclidean')
+            endPoint2DistAvg[iRepeats]=np.mean(curNearDistsFromAvg2)
+            endPoint2DistVar[iRepeats]=np.var(curNearDistsFromAvg2)
+            
+        else:
+            endPoint1DistAvg[iRepeats]=float("NaN")
+            endPoint1DistVar[iRepeats]=float("NaN")
+            
+            endPoint2DistAvg[iRepeats]=float("NaN")
+            endPoint2DistVar[iRepeats]=float("NaN")
+        
+    return endPoint1DistAvg, endPoint2DistAvg, endPoint1DistVar, endPoint2DistVar
+    
 
 def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParameter,bootstrapNum):
     """endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParameter,bootstrapNum)    
@@ -3208,7 +3438,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     #now lets crop it a bit
 
 
-def orientTractUsingNeck(streamlines):
+def orientTractUsingNeck(streamlines,refAnatT1=None,surpressReport=False):
     """orientTractUsingNeck(streamlines)
     A function which uses the neck of a (presumed) tract to flip consituent
     streamlines so that they are all in the same orientation.  This function
@@ -3245,7 +3475,11 @@ def orientTractUsingNeck(streamlines):
     
     #we only need to do this once per orientation
     #get the neck nodes for the tract
-    neckNodes=findTractNeckNode(streamlines)
+    #if you're doing this a lot, it speeds it up to pass a ref anat
+    if refAnatT1==None:
+        neckNodes=findTractNeckNode(streamlines)
+    else:
+        neckNodes=findTractNeckNode(streamlines,refAnatT1)
     
     #obtain the coordinates for each of these neck nodes
     neckCoords=np.zeros([len(streamlines),3])
@@ -3297,7 +3531,8 @@ def orientTractUsingNeck(streamlines):
     streamTraversals=[cumulativeTraversalStream(istreamlines) for istreamlines in streamlines]
     avgTraversals=np.mean(streamTraversals,axis=0)
     
-    print('initial orientation complete')
+    if not surpressReport:
+        print('initial orientation complete')
     
     while not exitTrigger: 
       
@@ -3305,7 +3540,7 @@ def orientTractUsingNeck(streamlines):
         #expand the window a bit to hopefully introduce more variability in to the system
         #(under the presumption that streamlines get more variable as you move away from the neck)
         #the modulo operator here will expand the window everytime the flip run counter reaches a multiple of 10
-        if flipRuns % 10 == 0 :
+        if flipRuns % 12 == 0 :
             print('algorithm stuck, expanding consideration window and randomizing streamline orientations')
             targetMM=targetMM+.5
             
@@ -3347,7 +3582,8 @@ def orientTractUsingNeck(streamlines):
         # use the coords that are at the heart of the tract to establish the orientation guide
         
         #first set empty vectors for neck, ahead, and behind coords
-        print('coord corespondances extracted')
+        if not surpressReport:
+            print('coord corespondances extracted')
         #establish 
         aheadDistances=np.zeros(len(streamlines))
         behindDistances=np.zeros(len(streamlines))
@@ -3356,7 +3592,8 @@ def orientTractUsingNeck(streamlines):
         for iStreamlines in range(len(streamlines)):
              aheadDistances[iStreamlines]=np.squeeze(cdist(np.atleast_2d(averageAheadCoord),np.atleast_2d(streamlines[iStreamlines][behindNodes[iStreamlines]])))
              behindDistances[iStreamlines]=np.squeeze(cdist(np.atleast_2d(averageBehindCoord),np.atleast_2d(streamlines[iStreamlines][behindNodes[iStreamlines]])))
-        print('coord distances from mean computed')
+        if not surpressReport:
+            print('coord distances from mean computed')
         orientationGuideAheadCoord=aheadCoords[np.where(np.min(aheadDistances)==aheadDistances)[0][0]].flatten()
         orientationGuideBehindCoord=behindCoords[np.where(np.min(behindDistances)==behindDistances)[0][0]].flatten()
         
@@ -3378,7 +3615,8 @@ def orientTractUsingNeck(streamlines):
         
         #print(str(orientationGuideAheadCoord))
         #print(str(orientationGuideBehindCoord))
-        print('orentation nodes specified')
+        if not surpressReport:
+            print('orentation nodes specified')
         #iterate across streamlines     
         for iStreamlines in range(len(streamlines)):
             #compute the distances from the comparison orientation for both possible
@@ -3401,7 +3639,8 @@ def orientTractUsingNeck(streamlines):
                 
                 streamlines[iStreamlines]= streamlines[iStreamlines][::-1]
                 flipCount=flipCount+1
-        print('flip run ' + str(flipRuns) +': ' + str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
+        if not surpressReport:
+            print('flip run ' + str(flipRuns) +': ' + str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
             
         if np.logical_and(flipRuns!=1,flipCount==0) :
             exitTrigger=True
@@ -3413,6 +3652,288 @@ def orientTractUsingNeck(streamlines):
     #I don't know that I trust the whole in place flipping mechanism, so
     #we will return the modified streamline object from this function
     return streamlines
+
+def findAheadAndBehindNodes(streamlines,neckNodes,lookDistance):    
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    aheadNodes : TYPE
+        DESCRIPTION.
+    behindNodes : TYPE
+        DESCRIPTION.
+
+    """
+    import numpy as np
+    aheadNodes=np.zeros(len(streamlines)).astype(int)
+    behindNodes=np.zeros(len(streamlines)).astype(int)
+    for iStreamlines in range(len(streamlines)):
+
+       #A check to make sure you've got room to do this indexing on both sides
+        if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
+           aheadNodes[iStreamlines]=neckNodes[iStreamlines]+lookDistance
+           behindNodes[iStreamlines]=neckNodes[iStreamlines]-lookDistance
+       #otherwise do the best you can
+        else:
+           #if there's a limit to how many nodes are available ahead, do the best you can
+           spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
+           if spaceAhead<=lookDistance:
+               aheadWindow=spaceAhead-1
+           else:
+               aheadWindow=lookDistance
+           #if there's a limit to how many nodes are available behind, do the best you can
+           spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
+           if spaceBehind<=lookDistance:
+               behindWindow=spaceBehind-1
+           else:
+               behindWindow=lookDistance
+           
+           #append the relevant values
+           aheadNodes[iStreamlines]=neckNodes[iStreamlines]+(aheadWindow)
+           behindNodes[iStreamlines]=neckNodes[iStreamlines]-(behindWindow)
+           
+    return aheadNodes, behindNodes
+
+def orientTractUsingNeck_Robust(streamlines,refAnatT1=None,surpressReport=False):
+    """orientTractUsingNeck(streamlines)
+    A function which uses the neck of a (presumed) tract to flip consituent
+    streamlines so that they are all in the same orientation.  This function
+    exists because dipy's streamline.orient_by_streamline doesn't work, at
+    at least not when used with a centroid streamline
+
+    Parameters
+    ----------
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence
+        A collection of streamlines presumably corresponding to a tract.
+        Unknown functionality if a random collection of streamlines is used
+
+    Returns
+    -------
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence 
+        The input streamlines, but with the appropriate streamlines flipped 
+        such that all streamlines proceed in the same orientation
+
+    """
+    import numpy as np
+    from scipy.spatial.distance import cdist
+    import copy
+    from dipy.segment.metric import SumPointwiseEuclideanMetric
+    from dipy.segment.metric import ResampleFeature
+    from dipy.segment.metric import AveragePointwiseEuclideanMetric
+    from dipy.segment.clustering import QuickBundles
+    
+    #this has to be run a couple times to ensure that streamlines that are initially 
+    #flipped aren't throwing off the group average too bad
+    flipRuns=1
+    flipCount=0
+    expandCount=0
+    splitCount=0
+    exitTrigger=False
+    #here lets arbitrarily aim for 5 mm, and compute that distance per streamline.  Probably expensive
+    #but we can't always assume that 
+    
+    #set the value here, the mm space target distance for neck evaluation
+    targetMM=2.0
+    
+    #we only need to do this once per orientation
+    #get the neck nodes for the tract
+    #if you're doing this a lot, it speeds it up to pass a ref anat
+    if refAnatT1==None:
+        neckNodes=findTractNeckNode(streamlines)
+    else:
+        neckNodes=findTractNeckNode(streamlines,refAnatT1)
+    
+    #obtain the coordinates for each of these neck nodes
+    neckCoords=np.zeros([len(streamlines),3])
+    for iStreamlines in range(len(streamlines)):
+        neckCoords[iStreamlines,:]=streamlines[iStreamlines][neckNodes[iStreamlines]]
+        
+    #establish correspondance of lookdistance
+    nodeDists1=np.sqrt(np.sum(np.square(np.diff(streamlines[0],axis=0)),axis=1))
+    nodeDists2=np.sqrt(np.sum(np.square(np.diff(streamlines[len(streamlines)-1],axis=0)),axis=1))
+    #if the streamlines have a fairly regular internode distance
+    if np.abs(np.mean(nodeDists1)-np.mean(nodeDists2))/np.mean([np.mean(nodeDists1),np.mean(nodeDists2)]) <.10:
+        #compute the look distance based on this average for 5mm
+        lookDistance=np.round(targetMM/np.mean([np.mean(nodeDists1),np.mean(nodeDists2)])).astype(int)
+    else:
+        
+        raise Exception('streamlines have variable internode distances, \nplease resample to a standard spacing')
+
+    #find the initial arrangement of ahead and behind nodes (i.e. naieve)
+    [aheadNodes, behindNodes]=findAheadAndBehindNodes(streamlines,neckNodes,lookDistance)
+    
+    if not surpressReport:
+        print('initial orientation complete')
+    
+    #at first, try and flip all of the streamlines
+    tryTheseIndexes=[range(len(streamlines))]
+    exitTriggerAll=False
+    while not exitTriggerAll:
+        try:
+            for iSubsets in range(len(tryTheseIndexes)):
+                exitTriggerOne=False
+                flipRuns=1
+                flipCount=0
+                expandCount=0
+                while not exitTriggerOne:                   
+                    #if we've expanded a full 5mm and we still can't get anywhere
+                    if expandCount==10:
+                        print('splitting streamlines into subgroups')
+                        #iterate the split count
+                        splitCount=splitCount+1
+                        #clear the tryThese structure
+                        tryTheseIndexes=[]
+                        #lets split the tract up and try again
+                        feature = ResampleFeature(nb_points=100)
+                        metric = AveragePointwiseEuclideanMetric(feature)
+                        qb = QuickBundles(threshold=2,metric=metric, max_nb_clusters = splitCount+1)
+                        cluster = qb.cluster(streamlines)
+                        for iClusters in range(len(cluster)):
+                            tryTheseIndexes.append(cluster.clusters[iClusters].indices)
+                        
+                        raise Exception
+                        
+                    
+                  
+                    #however, if the algorithm gets stuck (and keeps flipping one streamline back and forth, for example)
+                    #expand the window a bit to hopefully introduce more variability in to the system
+                    #(under the presumption that streamlines get more variable as you move away from the neck)
+                    #the modulo operator here will expand the window everytime the flip run counter reaches a multiple of 10
+                    if flipRuns % 12 == 0 :
+                        if not surpressReport:
+                            print('algorithm stuck, expanding consideration window and randomizing streamline orientations')
+                        targetMM=targetMM+.5
+                        expandCount=expandCount+1
+                        lookDistance=np.round(targetMM/np.mean([np.mean(nodeDists1),np.mean(nodeDists2)])).astype(int)
+        
+                        
+                        for iStreamlines in range(len(streamlines[tryTheseIndexes[iSubsets]])):
+                            if np.random.choice([True,False]):
+                                streamlines[tryTheseIndexes[iSubsets]][iStreamlines]= streamlines[tryTheseIndexes[iSubsets]][iStreamlines][::-1]
+                        
+                        [aheadNodes, behindNodes]=findAheadAndBehindNodes(streamlines[tryTheseIndexes[iSubsets]],neckNodes[tryTheseIndexes[iSubsets]],lookDistance)
+                       
+                        
+                       
+                    # use the coords that are at the heart of the tract to establish the orientation guide
+                    
+                    [streamlines[tryTheseIndexes[iSubsets]], aheadNodes, behindNodes, flipCount]=flipStreamstoAB_OrientOnce(streamlines[tryTheseIndexes[iSubsets]], aheadNodes, behindNodes,surpressReport=True)
+                    if not surpressReport:
+                        print('flip run ' + str(flipRuns) +': ' + str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
+                
+                    if np.all([flipRuns!=1,flipCount==0]) :
+                        exitTriggerOne=True
+                    else:
+                      #set the counters
+                          flipRuns=flipRuns+1
+                          flipCount=0
+        except:
+            pass
+        
+        if np.all([flipRuns!=1,flipCount==0, iSubsets==len(tryTheseIndexes)-1]) :
+            exitTriggerAll=True
+        else:
+            #set the counters
+            flipRuns=flipRuns+1
+            flipCount=0
+            
+    #I don't know that I trust the whole in place flipping mechanism, so
+    #we will return the modified streamline object from this function
+    return streamlines
+
+
+def flipStreamstoAB_OrientOnce(streamlines, aheadNodes, behindNodes,surpressReport=False):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import numpy as np
+    from scipy.spatial.distance import cdist
+    import copy
+    
+    flipCount=0
+    #compute the coordinates
+    aheadCoords=[ streamlines[iStreamlines][behindNodes[iStreamlines]] for iStreamlines in range(len(streamlines))]
+    behindCoords=[ streamlines[iStreamlines][aheadNodes[iStreamlines]] for iStreamlines in range(len(streamlines))]
+
+    # use the coords that are at the heart of the tract to establish the orientation guide
+
+    #first set empty vectors for neck, ahead, and behind coords
+    if not surpressReport:
+        print('coord corespondances extracted')
+    #establish 
+    aheadDistances=np.zeros(len(streamlines))
+    behindDistances=np.zeros(len(streamlines))
+    averageAheadCoord=np.mean(np.asarray(aheadCoords),axis=0)
+    averageBehindCoord=np.mean(np.asarray(behindCoords),axis=0)
+    for iStreamlines in range(len(streamlines)):
+         #print(str(iStreamlines))
+         aheadDistances[iStreamlines]=np.squeeze(cdist(np.atleast_2d(averageAheadCoord),np.atleast_2d(streamlines[iStreamlines][behindNodes[iStreamlines]])))
+         behindDistances[iStreamlines]=np.squeeze(cdist(np.atleast_2d(averageBehindCoord),np.atleast_2d(streamlines[iStreamlines][behindNodes[iStreamlines]])))
+    if not surpressReport:
+        print('coord distances from mean computed')
+    orientationGuideAheadCoord=aheadCoords[np.where(np.min(aheadDistances)==aheadDistances)[0][0]].flatten()
+    orientationGuideBehindCoord=behindCoords[np.where(np.min(behindDistances)==behindDistances)[0][0]].flatten()
+    
+    streamTraversals=[cumulativeTraversalStream(istreamlines) for istreamlines in streamlines]
+    avgTraversals=np.mean(streamTraversals,axis=0)
+    
+    
+    #if you wanted to force RAS / LPI on your tractogram orientatiuon, now would be the time to do it
+    #first store the current values in a separate variable
+    #DISPALCEMENT IS ACTUALLY BAD FOR THIS, WHAT YOU WANT IS TRAVERSAL
+    currentAheadNode=copy.deepcopy(orientationGuideAheadCoord)
+    currentBehindNode=copy.deepcopy(orientationGuideBehindCoord)
+    #find the displacement for each dimension
+    currentDiaplacement=currentAheadNode-currentBehindNode
+    maxTraversalDim=np.where(np.max(avgTraversals)==avgTraversals)[0]
+    #if that value is negative, switch the identity of the ahead and behind nodes
+    if currentDiaplacement[maxTraversalDim]<0:
+        orientationGuideAheadCoord=currentBehindNode
+        orientationGuideBehindCoord=currentAheadNode
+    
+    #print(str(orientationGuideAheadCoord))
+    #print(str(orientationGuideBehindCoord))
+    if not surpressReport:
+        print('orentation nodes specified')
+    #iterate across streamlines     
+    for iStreamlines in range(len(streamlines)):
+        #compute the distances from the comparison orientation for both possible
+        #orientations
+        sumDistanceOrientation1=np.sum(cdist(np.atleast_2d(orientationGuideAheadCoord),np.atleast_2d(aheadCoords[iStreamlines])))+np.sum(cdist(np.atleast_2d(orientationGuideBehindCoord),np.atleast_2d(behindCoords[iStreamlines])))
+        sumDistanceOrientation2=np.sum(cdist(np.atleast_2d(orientationGuideAheadCoord),np.atleast_2d(behindCoords[iStreamlines])))+np.sum(cdist(np.atleast_2d(orientationGuideBehindCoord),np.atleast_2d(aheadCoords[iStreamlines])))
+        #flip if necessary
+        if sumDistanceOrientation2<sumDistanceOrientation1:
+            #print(str(iStreamlines))
+            #print(str(sumDistanceOrientation1))
+            #print(str(sumDistanceOrientation2))
+            
+            #flip the nodes and coords if necessary
+            currentAheadNode=copy.deepcopy(aheadNodes[iStreamlines])
+            currentBehindNode=copy.deepcopy(behindNodes[iStreamlines])
+            aheadNodes[iStreamlines]=currentBehindNode
+            behindNodes[iStreamlines]=currentAheadNode
+            #aheadCoords[iStreamlines]=streamlines[iStreamlines][aheadNodes[iStreamlines]]
+            #behindCoords[iStreamlines]=streamlines[iStreamlines][behindNodes[iStreamlines]]
+            
+            streamlines[iStreamlines]= streamlines[iStreamlines][::-1]
+            flipCount=flipCount+1
+    return streamlines, aheadNodes, behindNodes, flipCount
 
 def cumulativeTraversalStream(streamline):
     import numpy as np
@@ -3614,7 +4135,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     #determine whether te input streamlines are a coherent bundle
     neckQuantifications=bundleTest(streamlines)
     
-    if neckQuantifications['mean'] <5:
+    if neckQuantifications['mean'] <8:
         print('submitted streamlines appear to be coherent bundle via neck criterion')
         streamlines=orientTractUsingNeck(streamlines)
     else:
