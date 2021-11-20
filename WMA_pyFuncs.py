@@ -1837,7 +1837,7 @@ def bundleTest(streamlines):
     
     return outReport
 
-def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti,distanceParameter,bootstrapNum):
+def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceParameter=3,bootstrapNum=1):
     """
     uses Scipy's ndimage.generic_filter to perform the endpoint dispersion analysis
     Ideally this code is cleaner and may also be faster.
@@ -1869,18 +1869,17 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti,distanceParame
     from functools import partial
     import tqdm
     
-    #this value is used to define the radius distance within which we look for streamlines
-    distanceParameter=3
     
-    #create a dummy nifti in order to get a get an affine?
-    dummyNifti=dummyNiftiForStreamlines(streamlines)
+    #create a dummy nifti if necessary in order to get a get an affine?
+    if referenceNifti==None:
+        referenceNifti=dummyNiftiForStreamlines(streamlines)
     
-    
+    streamlines=orientAllStreamlines(streamlines)
     
     #this is probably faster than geting the density map, turning that into a mask,
     #and then getting the voxel indexes for that
     # get a streamline index dict of the whole brain tract
-    streamlineMapping=streamline_mapping(streamlines, dummyNifti.affine)
+    streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
     #use this to get the size
     #sys.getsizeof(streamlineMapping)
     #use this to set the coordinate ordering
@@ -1953,9 +1952,12 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti,distanceParame
     t1_start=time.process_time()
     #compute the dispersion for each subset of streamlines, and output the quantificaitons
     #outValues=processes_pool.map(computeStreamsDispersion,streamlines[subsampledStreamLists])
-    outValues=[computeStreamsDispersion_bootstrap(streamlines[iStreamLists],bootstrapProportion=.5,bootstrapIter=1,refAnatT1=referenceNifti) for iStreamLists in tqdm.tqdm(streamsListList, position=0, leave=True)] 
+    outValues=[computeStreamsDispersion_bootstrapNoOrient(streamlines[iStreamLists],bootstrapProportion=.5,bootstrapIter=1,refAnatT1=referenceNifti) for iStreamLists in tqdm.tqdm(streamsListList, position=0, leave=True)] 
+    #A reminder of what's coming out of this:
+    #endPoint1DistAvg, endPoint2DistAvg, endPoint1DistVar, endPoint2DistVar, X repeats
+    
     #places those quantifications in the correct space in the output array
-    outArray[np.asarray(imgCoords)[:,0],np.asarray(imgCoords)[:,1],np.asarray(imgCoords)[:,2],:,:]=np.asrray(outValues)
+    outArray[np.asarray(imgCoords)[:,0],np.asarray(imgCoords)[:,1],np.asarray(imgCoords)[:,2],:,:]=np.asarray(outValues)
     t1_stop=time.process_time()
     modifiedTime=t1_stop-t1_start
     print(str(modifiedTime) + ' seconds to compute endpoint dispersions') 
@@ -1963,20 +1965,116 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti,distanceParame
     #now we actually have to do the output computations
     
     
-    meanOfMeans=np.mean(outValues[:,:,:,[0,2],:],axes=(3,4))
-    varianceOfMeans=np.var(outValues[:,:,:,[0,2],:],axes=(3,4))
-    meanOfVariances[iCoords]=np.mean(dispersionVariances)
-    varianceOfVariances[iCoords]=np.var(dispersionVariances)
+    meanOfMeans=np.mean(outArray[:,:,:,[0,2],:],axis=(3,4),where=outArray[:,:,:,[0,2],:]>0)
+    varianceOfMeans=np.var(outArray[:,:,:,[0,2],:],axis=(3,4))
+    meanOfVariances=np.mean(outArray[:,:,:,[1,3],:],axis=(3,4))
+    varianceOfVariances=np.var(outArray[:,:,:,[1,3],:],axis=(3,4))
     
     #asym
-    meanOfMeansAsym[iCoords]=np.mean(dispersionMeansAsym)
-    varianceOfMeansAsym[iCoords]=np.var(dispersionMeansAsym)
-    meanOfVariancesAsym[iCoords]=np.mean(dispersionVariancesAsym)
-    varianceOfVariancesAsym[iCoords]=np.var(dispersionVariancesAsym)
+    #(endPoint1DistAvg-endPoint2DistAvg)/(endPoint1DistAvg+endPoint2DistAvg)
+    meanOfMeansAsym=np.mean(np.divide(np.subtract(outArray[:,:,:,0,:],outArray[:,:,:,2,:]),np.add(outArray[:,:,:,0,:],outArray[:,:,:,2,:])),axis=3)
+    varianceOfMeansAsym=np.var(np.divide(np.subtract(outArray[:,:,:,0,:],outArray[:,:,:,2,:]),np.add(outArray[:,:,:,0,:],outArray[:,:,:,2,:])),axis=3)
+    meanOfVariancesAsym=np.mean(np.divide(np.subtract(outArray[:,:,:,1,:],outArray[:,:,:,3,:]),np.add(outArray[:,:,:,1,:],outArray[:,:,:,3,:])),axis=3)
+    varianceOfVariancesAsym=np.var(np.divide(np.subtract(outArray[:,:,:,1,:],outArray[:,:,:,3,:]),np.add(outArray[:,:,:,1,:],outArray[:,:,:,3,:])),axis=3)
     
-    refAnatT1=resample_img(refAnatT1,target_affine=overlayNifti.affine[0:3,0:3])
-    overlayNifti=resample_img(overlayNifti,target_affine=overlayNifti.affine[0:3,0:3])
+    #create nifti objects for each metric
+    meanOfMeansNifti=nib.nifti1.Nifti1Image(np.nan_to_num(meanOfMeans), referenceNifti.affine, referenceNifti.header)
+    varianceOfMeansNifti=nib.nifti1.Nifti1Image(np.nan_to_num(varianceOfMeans), referenceNifti.affine, referenceNifti.header)
+    meanOfVariancesNifti=nib.nifti1.Nifti1Image(np.nan_to_num(meanOfVariances), referenceNifti.affine, referenceNifti.header)
+    varianceOfVariancesNifti=nib.nifti1.Nifti1Image(np.nan_to_num(varianceOfVariances), referenceNifti.affine, referenceNifti.header)
+    
+    meanOfMeansAsymNifti=nib.nifti1.Nifti1Image(np.nan_to_num(meanOfMeansAsym), referenceNifti.affine, referenceNifti.header)
+    varianceOfMeansAsymNifti=nib.nifti1.Nifti1Image(np.nan_to_num(varianceOfMeansAsym), referenceNifti.affine, referenceNifti.header)
+    meanOfVariancesAsymNifti=nib.nifti1.Nifti1Image(np.nan_to_num(meanOfVariancesAsym), referenceNifti.affine, referenceNifti.header)
+    varianceOfVariancesAsymNifti=nib.nifti1.Nifti1Image(np.nan_to_num(varianceOfVariancesAsym), referenceNifti.affine, referenceNifti.header)
+    
+    #propbably should output a dict for this
+    outDict={'meanOfMeansNifti':meanOfMeansNifti, 'varianceOfMeansNifti':varianceOfMeansNifti, 'meanOfVariancesNifti':meanOfVariancesNifti, 'varianceOfVariancesNifti':varianceOfVariancesNifti, 'meanOfMeansAsymNifti':meanOfMeansAsymNifti, 'varianceOfMeansAsymNifti':varianceOfMeansAsymNifti, 'meanOfVariancesAsymNifti':meanOfVariancesAsymNifti, 'varianceOfVariancesAsymNifti':varianceOfVariancesAsymNifti}
+    
+    return outDict
+
        
+def computeStreamsDispersion_bootstrapNoOrient(streamlines,bootstrapProportion=.5,bootstrapIter=1,refAnatT1=None):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+    bootstrapProportion : TYPE, optional
+        DESCRIPTION. The default is .5.
+    bootstrapIter : TYPE, optional
+        DESCRIPTION. The default is 1.  As in no actual boot strap
+
+    Returns
+    -------
+    endPoint1DistAvg : TYPE
+        DESCRIPTION.
+    endPoint2DistAvg : TYPE
+        DESCRIPTION.
+    endPoint1DistVar : TYPE
+        DESCRIPTION.
+    endPoint2DistVar : TYPE
+        DESCRIPTION.
+
+
+    """
+    import numpy as np
+    from scipy.spatial.distance import cdist
+    
+    #check to see if theinput is singleton
+    if type(streamlines) == np.ndarray:
+        #bulk it up
+        streamlines=[streamlines]
+        
+    #we can use the non-multi version of orientTractUsingNeck because we essentially
+    #know that we are selecting these streamlines by their neck, at least insofar
+    #as our (spatially defined) collection of streamlines is concerned
+
+        
+    #set number of streamlines to subsample
+    subSampleNum=np.floor(len(streamlines)/2).astype(int)
+    
+    endpoints=np.zeros((len(streamlines),6))
+    #get the endpoints, taken from
+    #https://github.com/dipy/dipy/blob/f149c756e09f172c3b77a9e6c5b5390cc08af6ea/dipy/tracking/utils.py#L708
+    for iStreamline in range(len(streamlines)):
+        #remember, first 3 = endpoint 1, last 3 = endpoint 2    
+        endpoints[iStreamline,:]= np.concatenate([streamlines[iStreamline][0,:], streamlines[iStreamline][-1,:]])
+    
+    #select the appropriate endpoints
+    Endpoints1=endpoints[:,0:3]
+    Endpoints2=endpoints[:,3:7]
+    
+    endPoint1DistAvg=np.zeros(bootstrapIter)
+    endPoint1DistVar=np.zeros(bootstrapIter)
+    endPoint2DistAvg=np.zeros(bootstrapIter)
+    endPoint2DistVar=np.zeros(bootstrapIter)
+    for iRepeats in range(bootstrapIter):
+        subsampleIndexes=[np.random.randint(0,len(streamlines),subSampleNum)]
+        if not len(subsampleIndexes)==0:
+        
+            #compute the subset mean distance and variance for endpoint cluster 1
+            avgEndPoint1=np.mean(Endpoints1[subsampleIndexes],axis=0)
+            curNearDistsFromAvg1=cdist(np.atleast_2d(Endpoints1[subsampleIndexes]), np.atleast_2d(avgEndPoint1), 'euclidean')
+            endPoint1DistAvg[iRepeats]=np.mean(curNearDistsFromAvg1)
+            endPoint1DistVar[iRepeats]=np.var(curNearDistsFromAvg1)
+            
+            #compute the subset mean distance and variance for endpoint cluster 2
+            avgEndPoint2=np.mean(Endpoints2[subsampleIndexes],axis=0)
+            curNearDistsFromAvg2=cdist(np.atleast_2d(Endpoints2[subsampleIndexes]), np.atleast_2d(avgEndPoint2), 'euclidean')
+            endPoint2DistAvg[iRepeats]=np.mean(curNearDistsFromAvg2)
+            endPoint2DistVar[iRepeats]=np.var(curNearDistsFromAvg2)
+            
+        else:
+            endPoint1DistAvg[iRepeats]=float("NaN")
+            endPoint1DistVar[iRepeats]=float("NaN")
+            
+            endPoint2DistAvg[iRepeats]=float("NaN")
+            endPoint2DistVar[iRepeats]=float("NaN")
+        
+    return endPoint1DistAvg, endPoint2DistAvg, endPoint1DistVar, endPoint2DistVar
     
 def computeStreamsDispersion_bootstrap(streamlines,bootstrapProportion=.5,bootstrapIter=1,refAnatT1=None):
     """
@@ -2452,6 +2550,130 @@ def endpointDispersionAsymmetryMapping_Bootstrap(streamlines,referenceNifti,dist
     
     return meanOfMeansNifti, varianceOfMeansNifti, meanOfVariancesNifti, varianceOfVariancesNifti, meanOfMeansAsymNifti, varianceOfMeansAsymNifti, meanOfVariancesAsymNifti, varianceOfVariancesAsymNifti
 
+
+    
+
+
+def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
+    """
+    
+
+    Parameters
+    ----------
+    outDict : TYPE
+        DESCRIPTION.
+    saveDir : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import matplotlib.pyplot as plt
+    import os
+    import numpy as np
+    import dipy.tracking.utils as ut
+    from dipy.tracking.vox2track import streamline_mapping
+    
+    streamlineMapping=streamline_mapping(streamlines, refAnatT1.affine)
+    
+    
+    ### ugly stuff, but needed for later
+    
+    dimVoxelDistVals=np.arange(0, 1+distanceParameter*2) -distanceParameter
+    #if your input was non iso-metric, you would use the voxeldims vector variale to adjust 
+    #the size of the relevant dimensions.  we're assuming isometric for this kernel
+    voxelDims=np.ones(3)
+    #create a default "footprint" for the filter, e.g. this is the array form of the kernel
+    x, y, z = np.meshgrid(dimVoxelDistVals, dimVoxelDistVals, dimVoxelDistVals,indexing='ij')          
+    #I didn't abs, but apparently that doesn't cause a problem?
+    mask_r = x*x*voxelDims[0] + y*y*voxelDims[1] + z*z*voxelDims[2] <= distanceParameter*distanceParameter
+    
+    #this is what we iterate over per coord
+    def streamsInImgSpaceWindow(coord, streamlineMapping, mask_r):
+        #listPosition=sorted(list(streamlineMapping.keys())).index(coord)/len(streamlineMapping)
+        #print(listPosition,  end = "\r")
+        x2, y2, z2 = np.meshgrid(dimVoxelDistVals+coord[0], dimVoxelDistVals+coord[1], dimVoxelDistVals+coord[2],indexing='ij')  
+        
+        coordsToCheck=np.asarray([ x2, y2, z2])[:,mask_r].T
+        
+        
+        #try a few different methods here
+        #set base intersection
+        #find the roi coords which correspond to voxels within the streamline mask
+        #validCoords=list(set(list(tuple([tuple(e) for e in coordsToCheck]))) & set(list(streamlineMapping.keys())))
+        #get the streamline indexes for the streamlines that fall within these coords
+        #streamIndexes=list(itertools.chain(*[streamlineMapping[iCoords] for iCoords in validCoords]))
+        
+        #for list
+        # streamIndexes=[]
+        # for iCoords in coordsToCheck:
+        #     if tuple(iCoords) in list(streamlineMapping.keys()):
+        #         streamIndexes=streamIndexes+streamlineMapping[tuple(iCoords)]
+                
+        #try except
+        #COMICALLY FASTER
+        streamIndexes=[]
+        for iCoords in coordsToCheck:
+            try:
+                streamIndexes=streamIndexes+streamlineMapping[tuple(iCoords)]
+            except:
+                pass
+        streamIndexes=np.unique(streamIndexes)
+        return streamIndexes
+    
+    
+    outputFiles=list(outDict.keys())
+    for iOutFiles in outputFiles:
+        outPath=os.path.join(saveDir, iOutFiles)
+        if not os.path.exists(outPath):
+            os.makedirs(outPath)
+        
+        currentData=outDict[iOutFiles].get_fdata()
+        smallestNotZero=np.unique(currentData)[1]
+        crossSectionGIFsFromNifti(outDict[iOutFiles],refAnatT1,outPath, blendOption=False)
+        #lets mask out the background
+        [unique, counts] = np.unique(currentData, return_counts=True)
+        backgroundVal=unique[np.where(np.max(counts)==counts)]        
+        fig = plt.hist(np.ravel(currentData[currentData!=backgroundVal]),bins=2000)
+        #fig = plt.hist(np.ravel(currentData[currentData!=backgroundVal]))
+      
+        plt.title(iOutFiles)
+        plt.xlabel("value")
+        plt.ylabel("Frequency")
+        plt.savefig(os.path.join(outPath,iOutFiles+".png"),dpi=300)
+        #plot lowest and highest 
+        densityMap=ut.density_map(streamlines, refAnatT1.affine, refAnatT1.shape)
+        countWeightedValues=np.nan_to_num(np.divide(currentData,densityMap))
+        #highest first
+        #find where that location is
+        maxLocation=np.where(countWeightedValues==np.max(countWeightedValues))
+        #find the streams in that window
+        maxLocationList=[maxLocation[0][0],maxLocation[1][0],maxLocation[2][0]]
+        maxLocationIndexes= streamsInImgSpaceWindow(maxLocationList, streamlineMapping, mask_r)
+        #name the plot
+        tractName=os.path.join(outPath,'_'.join([str(x) for x in maxLocationList]) +'_maxValStreams')
+        dipyPlotTract(streamlines[maxLocationIndexes],refAnatT1=None, tractName=tractName,endpointColorDensityKernel=7)
+        #
+        smallestNotZero=np.unique(countWeightedValues)[1]
+        minLocation=np.where(countWeightedValues==np.min(countWeightedValues[countWeightedValues>=smallestNotZero]))
+        #find the streams in that window
+        minLocationList=[minLocation[0][0],minLocation[1][0],minLocation[2][0]]
+        minLocationIndexes= streamsInImgSpaceWindow(minLocationList, streamlineMapping, mask_r)
+        #name the plot
+        tractName=os.path.join(outPath,'_'.join([str(x) for x in minLocationList]) +'_minValStreams')
+        dipyPlotTract(streamlines[minLocationIndexes],refAnatT1=None, tractName=tractName,endpointColorDensityKernel=7)
+        
+        
+        #find highest and lowest streamline-count-weighted values
+        
+
+        
+        # get a streamline index dict of the whole brain tract
+       
+     
+
 def complexStreamlinesIntersect(streamlines, maskNifti):
         import dipy.tracking.utils as ut
         import copy
@@ -2650,7 +2872,7 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     
     dimsList=['x','y','z']
     #brute force with matplotlib
-   
+    
     for iDims in list(range(len(refAnatT1.shape))):
         #this assumes that get_zooms returns zooms in subject space and not image space orientation
         # which may not be a good assumption if the orientation is weird
@@ -2682,7 +2904,11 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
             plt.imshow(refData, cmap='gray', interpolation='gaussian')
             #kind of overwhelming to do this in one line
             overlayData=np.rot90(np.reshape(overlayNifti.get_fdata()[currentOverlaySlice.get_fdata().astype(bool)],broadcastShape),1)
-            plt.imshow(np.ma.masked_where(overlayData<=0,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_fdata()))
+            #lets mask out the background
+            [unique, counts] = np.unique(overlayData, return_counts=True)
+            backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
+            
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_fdata()))
             curFig=plt.gcf()
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
             plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_fdata())], orientation='vertical')
@@ -3941,6 +4167,53 @@ def cumulativeTraversalStream(streamline):
     totalDelta=np.sum(deltas,axis=0)
     return totalDelta
     
+def orientAllStreamlines(streamlines):
+    """
+    Ok, so here's a philosophical quandry:  do you actually need a specific
+    tract in order to orient a streamline.  That is, do you need the reference
+    of the larger tract in order to determine the appropriate RAS-LPI orientation
+    of all constituent streamlines.  I'd suggest no.  For any given streamline
+    there can be a computation for traversals, and thus an oppriate orientation
+    for THAT particular streamline, relative to he maximal dimension of traversal
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import numpy as np
+    import tqdm
+    
+    #create a counter, for fun
+    flipCount=0
+    for iStreamlines in tqdm.tqdm(range(len(streamlines))):
+        
+        #compute traversals for streamline
+        traversals=cumulativeTraversalStream(streamlines[iStreamlines])
+        #find which dimension has max traversal
+        maxTraversalDim=np.where(np.max(traversals)==traversals)[0][0]
+        #get the current endpoints
+        endpoint1=streamlines[iStreamlines][0,:]
+        endpoint2=streamlines[iStreamlines][-1,:]
+    
+        #if the coordinate of endpoint1 in the max traversal dimension
+        #is less than the coordinate of endpoint1 in the max traversal dimension
+        #flip it
+        if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
+            streamlines[iStreamlines]= streamlines[iStreamlines][::-1]
+            flipCount=flipCount+1
+    
+    #add a report        
+    print( str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
+
+    return  streamlines
+        
+
 def orientTractUsingNeck_multi(streamlines):
     """
     
