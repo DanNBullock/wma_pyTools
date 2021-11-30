@@ -2575,6 +2575,7 @@ def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
     import numpy as np
     import dipy.tracking.utils as ut
     from dipy.tracking.vox2track import streamline_mapping
+    import niabel as nib
     
     streamlineMapping=streamline_mapping(streamlines, refAnatT1.affine)
     
@@ -2664,6 +2665,10 @@ def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
         #name the plot
         tractName=os.path.join(outPath,'_'.join([str(x) for x in minLocationList]) +'_minValStreams')
         dipyPlotTract(streamlines[minLocationIndexes],refAnatT1=None, tractName=tractName,endpointColorDensityKernel=7)
+        
+        #save the nfitis down
+        nib.save(outDict[iOutFiles],os.path.join(outPath, iOutFiles+'.nii.gz'))
+        
         
         
         #find highest and lowest streamline-count-weighted values
