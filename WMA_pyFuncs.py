@@ -102,7 +102,8 @@ def roiFromAtlas(atlas,roiNum):
     import numpy as np
     import nibabel as nib
     outHeader = atlas.header.copy()
-    atlasData = atlas.get_fdata()
+    #numpy and other stuff has been acting weird with ints lately
+    atlasData = np.round(atlas.get_fdata()).astype(int)
     outData = np.zeros((atlasData.shape)).astype(int)
     #check to make sure it is in the atlas
     #not entirely sure how boolean array behavior works here
@@ -484,6 +485,84 @@ def alignROItoReference(inputROI,reference):
     outROI=nib.nifti1.Nifti1Image(outData, reference.affine, header=reference.header)
 
     return outROI
+
+def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
+    """
+    
+
+    Parameters
+    ----------
+    criteriaROIs : TYPE
+        DESCRIPTION.
+    inclusionCriteria : TYPE
+        DESCRIPTION.
+    operations : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    sortedCriteriaROIs : TYPE
+        DESCRIPTION.
+    sortedInclusionCriteria : TYPE
+        DESCRIPTION.
+    sortedOperations : TYPE
+        DESCRIPTION.
+
+    """
+    #also remember all = [some criteria] == any != [some criteria]
+    #we could auto convert those as well to speed things up further.
+    
+    
+    import numpy as np
+    
+    #initialize an output order vector
+    outOrder=list(range(len(criteriaROIs)))
+    
+    #for each of the input ROIs compute the number of voxels that will be checked
+    volumesToCheck=np.zeros(len(criteriaROIs))
+    for iROIs in range(len(criteriaROIs)):
+        #if this is an inclusion criterion
+        if inclusionCriteria[iROIs]:
+            volumesToCheck[iROIs]=np.sum(criteriaROIs[iROIs].get_fdata())
+        #if it is an exclusion, get the number of streamlines that are left out
+        else:
+            volumesToCheck[iROIs]=np.sum(np.logical_not(criteriaROIs[iROIs].get_fdata()))
+    
+    #find the criteria that only involve endpoints (you don't have to check all the nodes
+    #for these, only the endpoints, so it's way faster to do cdist)
+    endpointCriteria=['end' in x for x in operations]
+    #where are these
+    endpointCriteriaIndexes=np.where(endpointCriteria)[0]
+    #sort these in accordance with the relevant volumes
+    sortOrder=endpointCriteriaIndexes[np.argsort(volumesToCheck[endpointCriteriaIndexes]) ]
+    
+    #go ahead and place these in the output order vec
+    for endpointCriteriaIndexes in range(len(endpointCriteriaIndexes)):
+        outOrder[endpointCriteriaIndexes]=sortOrder[endpointCriteriaIndexes]
+        
+    #now do the same thing for the regular criteria
+    allNodeCriteria=[('any' in x) or ('all' in x) for x in operations]
+    #where are these
+    allNodeCriteriaIndexes=np.where(allNodeCriteria)[0]
+    #sort these in accordance with the relevant volumes
+    sortOrder=allNodeCriteriaIndexes[np.argsort(volumesToCheck[allNodeCriteriaIndexes]) ]
+    #find the index of where we should begin filling these in
+    remainFillIndex=len(allNodeCriteriaIndexes)
+    #fill in the remaining values
+    for iRemainIndexes in range(remainFillIndex,len(outOrder)):
+        outOrder[iRemainIndexes]=sortOrder[iRemainIndexes-remainFillIndex]
+    
+    #initialize output objects
+    sortedCriteriaROIs=[]
+    sortedInclusionCriteria=[]
+    sortedOperations=[]
+    #resort the inputs in accordance with predicted stringency
+    for iOutputs in range(len(outOrder)):
+        sortedCriteriaROIs.append(criteriaROIs[outOrder[iOutputs]])
+        sortedInclusionCriteria.append(inclusionCriteria[outOrder[iOutputs]])
+        sortedOperations.append(operations[outOrder[iOutputs]])
+    
+    return sortedCriteriaROIs,sortedInclusionCriteria, sortedOperations
     
 def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     """segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
@@ -513,38 +592,32 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     # of implementing a fast and harsh first criteria.
     """
     import numpy as np
+    import itertools 
     
     if ~ len(np.unique([len(roisvec), len(includeVec), len(operationsVec)]))==1:
         raise ValueError('mismatch between lengths of roi, inclusion, and operation vectors')
 
-    #create an array to store the boolean result of each round of segmentation    
-    outBoolArray=np.zeros([len(streamlines),len(roisvec)],dtype=bool)
+    #ok, but, if you were clever, you would sort the criterion now in the following way:
+    #First do the endpoint criteria, and of those, do those in the order of smallest ROI to largest
+    #Also be sure to account for the negation logic as well
+    #what you're aiming for is to do the criterion in order of harshest to least harsh
+    [roisvec,includeVec,operationsVec]=speedSortSegCriteria(roisvec,includeVec,operationsVec)
+    
+    #ok, lets do this battle royale style
+    #here's our starting "class"
+    remainingStreamIndexes=list(range(len(streamlines)))
     
     for iOperations in list(range(len(roisvec))):
         
         #perform this segmentation operation
-        curBoolVec=applyNiftiCriteriaToTract_DIPY_Test(streamlines, roisvec[iOperations], includeVec[iOperations], operationsVec[iOperations])
+        curBoolVec=applyNiftiCriteriaToTract_DIPY_Test(streamlines[remainingStreamIndexes], roisvec[iOperations], includeVec[iOperations], operationsVec[iOperations])
+        #after the cull
+        remainingStreamIndexes=list(itertools.compress(remainingStreamIndexes,curBoolVec))
         
-        #if this is the first segmentation application
-        if iOperations == 0:
-            #set the relevant column to the current segmentation bool vec
-            outBoolArray[:,iOperations]=curBoolVec
-        #otherwise
-        else:
-            #obtain the indexes for the previous round of survivors
-            lastRoundSurvivingIndexes=np.where(outBoolArray[:,iOperations-1])[0]
-            #of those, determine which survived this round
-            thisRoundSurvivingIndexes=lastRoundSurvivingIndexes[np.where(curBoolVec)[0]]
-        
-            #set the entries that survived the previous round AND this round to true
-            outBoolArray[thisRoundSurvivingIndexes,iOperations]=True
-        
-        #in either case, subsegment the streamlines to the remaining streamlines in order to speed up the next iteration
-        streamlines=streamlines[np.where(curBoolVec)[0]]
-        
-    #when all iterations are complete collapse across the colums and return only those streams that met all criteria
-    outBoolVec=np.all(outBoolArray,axis=1)
-    
+    #create blank output structure
+    outBoolVec=np.zeros(len(streamlines),dtype=bool)
+    #these are the winners
+    outBoolVec[remainingStreamIndexes]=True
     return outBoolVec
    
 
@@ -699,7 +772,11 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
     
     #the conversion to int may cause problems if the input isn't convertable to int.  Then again, the point of this is to raise an error, so...
     elif np.logical_not(np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1])): 
-        raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not convertable to 0,1 int mask.  Likely not a mask.")
+        if np.all(np.unique(maskNifti.get_fdata()).astype(int)[0]==0):
+            import warnings
+            warnings.warn("input mask nifti empty.")
+        else:
+            raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not convertable to 0,1 int mask.  Likely not a mask.")
         
     if np.logical_not(isinstance(includeBool, bool )):
         raise Exception("applyNiftiCriteriaToTract Error: input includeBool not a bool.  See input description for usage")
@@ -736,7 +813,12 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
     
 
     #maybe not catching the streams will save ram?
-    boundedIndexes=subsetStreamsNodesByROIboundingBox(streamlines, tractMaskROIIntersection)[0]
+    #ok, but you can probably do this differently if you're just doing the endpoints
+    if 'end' in operationSpec:
+        #or [[streamline[0,:],streamline[-1,:]] for streamline in streamlines]
+        boundedIndexes=subsetStreamsNodesByROIboundingBox([np.asarray([streamline[0,:],streamline[-1,:]]) for streamline in streamlines], tractMaskROIIntersection)[0]
+    else:
+        boundedIndexes=subsetStreamsNodesByROIboundingBox(streamlines, tractMaskROIIntersection)[0]
     #use dipy's near roi function to generate bool
     criteriaStreamsBool=near_roi(streamlines[boundedIndexes], tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata().astype(bool), mode=operationSpec)
 
@@ -986,7 +1068,7 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     Endpoints2=endpoints[:,3:7]
     
     #sort the bounds
-    sortedBounds=np.sort(planeCoord,positionTermsDict[requirement])
+    sortedBounds=np.sort([planeCoord,positionTermsDict[requirement]])
     #get the relevant image dimension
     spaceDim=np.where(np.equal(uniqueCoordCounts,1))[0][0]
     
@@ -1837,6 +1919,165 @@ def bundleTest(streamlines):
     
     return outReport
 
+def iteratedStreamsInWindow(streamlines,referenceNifti=None):
+    import scipy
+    from dipy.tracking.vox2track import streamline_mapping
+    import nibabel as nib
+    import numpy as np
+    import itertools
+    from multiprocessing import Pool
+    import os
+    import time
+    from functools import partial
+    import tqdm
+    import copy
+    
+    #create a dummy nifti if necessary in order to get a get an affine?
+    if referenceNifti==None:
+        referenceNifti=dummyNiftiForStreamlines(streamlines)
+    
+    #this is probably faster than geting the density map, turning that into a mask,
+    #and then getting the voxel indexes for that
+    # get a streamline index dict of the whole brain tract
+    streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
+    streamMaskCoords=list(streamlineMapping.keys())
+    
+    nfitiHolder=[]
+    dataShape=list(referenceNifti.shape)
+    blankNiftiData=np.zeros((dataShape.append(7)))
+    for iIterations in range(1,8):
+
+        
+        dialatedStreamMappings=streamlinesInWindowFromMapping(streamlines,streamlineMapping,referenceNifti=None,distanceParameter=iIterations)
+        proportionInWindow=[np.divide(len(iCoordinates),len(streamlines)) for iCoordinates in dialatedStreamMappings]
+        #now map those on to the output nifti
+        for iCoordinates in range(len(streamMaskCoords)):
+            blankNiftiData[streamMaskCoords[iCoordinates][0],streamMaskCoords[iCoordinates][1],streamMaskCoords[iCoordinates][2],iIterations-1]=proportionInWindow[iCoordinates]
+
+    niftiOut=nib.nifti1.Nifti1Image(np.asarray(nfitiHolder), referenceNifti.affine, referenceNifti.header)
+    
+    return niftiOut
+
+def plotMultiGifsFrom4DNifti(fourDNifti,referenceAnatomy,saveDir):
+    
+    
+    import os
+    import nibabel as nib
+    
+    for iSlices in range(fourDNifti.shape[3]):
+        
+        outPath=os.path.join(saveDir, str(iSlices))
+        if not os.path.exists(outPath):
+            os.makedirs(outPath)
+        #just try it, maybe it will work
+        densityNifti=nib.nifti1.Nifti1Image(fourDNifti.get_fdata()[:,:,:,iSlices],referenceAnatomy.affine,referenceAnatomy.header)
+        crossSectionGIFsFromNifti(densityNifti,referenceAnatomy,outPath) 
+
+def streamlinesInWindowFromMapping(streamlines,streamlineMapping,referenceNifti=None,distanceParameter=3):
+    """
+    uses Scipy's ndimage.generic_filter to perform the endpoint dispersion analysis
+    Ideally this code is cleaner and may also be faster.
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+    referenceNifti : TYPE
+        DESCRIPTION.
+    distanceParameter : TYPE
+        DESCRIPTION.
+    bootstrapNum : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
+    import scipy
+    from dipy.tracking.vox2track import streamline_mapping
+    import nibabel as nib
+    import numpy as np
+    import itertools
+    from multiprocessing import Pool
+    import os
+    import time
+    from functools import partial
+    import tqdm
+    
+    
+    #create a dummy nifti if necessary in order to get a get an affine?
+    if referenceNifti==None:
+        referenceNifti=dummyNiftiForStreamlines(streamlines)
+    
+    #streamlines=orientAllStreamlines(streamlines)
+    
+    #this is probably faster than geting the density map, turning that into a mask,
+    #and then getting the voxel indexes for that
+    # get a streamline index dict of the whole brain tract
+   
+    #use this to get the size
+    #sys.getsizeof(streamlineMapping)
+    #use this to set the coordinate ordering
+    imgCoords=sorted(list(streamlineMapping.keys()))
+    
+    # lets create a standard mask/kernel for the search window
+    #standard vector, centered at the midpoint
+    dimVoxelDistVals=np.arange(0, 1+distanceParameter*2) -distanceParameter
+    #if your input was non iso-metric, you would use the voxeldims vector variale to adjust 
+    #the size of the relevant dimensions.  we're assuming isometric for this kernel
+    voxelDims=np.ones(3)
+    #create a default "footprint" for the filter, e.g. this is the array form of the kernel
+    x, y, z = np.meshgrid(dimVoxelDistVals, dimVoxelDistVals, dimVoxelDistVals,indexing='ij')          
+    #I didn't abs, but apparently that doesn't cause a problem?
+    mask_r = x*x*voxelDims[0] + y*y*voxelDims[1] + z*z*voxelDims[2] <= distanceParameter*distanceParameter
+    
+    #this is what we iterate over per coord
+    def streamsInImgSpaceWindow(coord, streamlineMapping, mask_r):
+        #listPosition=sorted(list(streamlineMapping.keys())).index(coord)/len(streamlineMapping)
+        #print(listPosition,  end = "\r")
+        x2, y2, z2 = np.meshgrid(dimVoxelDistVals+coord[0], dimVoxelDistVals+coord[1], dimVoxelDistVals+coord[2],indexing='ij')  
+        
+        coordsToCheck=np.asarray([ x2, y2, z2])[:,mask_r].T
+        
+        
+        #try a few different methods here
+        #set base intersection
+        #find the roi coords which correspond to voxels within the streamline mask
+        #validCoords=list(set(list(tuple([tuple(e) for e in coordsToCheck]))) & set(list(streamlineMapping.keys())))
+        #get the streamline indexes for the streamlines that fall within these coords
+        #streamIndexes=list(itertools.chain(*[streamlineMapping[iCoords] for iCoords in validCoords]))
+        
+        #for list
+        # streamIndexes=[]
+        # for iCoords in coordsToCheck:
+        #     if tuple(iCoords) in list(streamlineMapping.keys()):
+        #         streamIndexes=streamIndexes+streamlineMapping[tuple(iCoords)]
+                
+        #try except
+        #COMICALLY FASTER
+        streamIndexes=[]
+        for iCoords in coordsToCheck:
+            try:
+                streamIndexes=streamIndexes+streamlineMapping[tuple(iCoords)]
+            except:
+                pass
+        streamIndexes=np.unique(streamIndexes)
+        return streamIndexes
+        
+    #now do it many times in a parallel pool 
+    #processesCount=os.cpu_count()
+    #processes_pool = Pool(processesCount)
+    t1_start=time.process_time()
+    #streamsListList=processes_pool.map(partial(streamsInImgSpaceWindow,streamlineMapping=streamlineMapping,mask_r=mask_r), imgCoords)
+    print('computing voxel-wise collections of streamlines to check for while using a ' + str(distanceParameter) + 'mm spherical window')
+    streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in tqdm.tqdm(imgCoords, position=0, leave=True)]
+    t1_stop=time.process_time()
+    modifiedTime=t1_stop-t1_start
+    print(str(modifiedTime) + ' seconds to find streamline groups to check')  
+    
+    return streamsListList
+
 def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceParameter=3,bootstrapNum=1):
     """
     uses Scipy's ndimage.generic_filter to perform the endpoint dispersion analysis
@@ -2575,7 +2816,7 @@ def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
     import numpy as np
     import dipy.tracking.utils as ut
     from dipy.tracking.vox2track import streamline_mapping
-    import niabel as nib
+    import nibabel as nib
     
     streamlineMapping=streamline_mapping(streamlines, refAnatT1.affine)
     
@@ -3445,6 +3686,77 @@ def basicRadarPlot(labels,values, metaValues=None):
     #ax.text(0, np.max(values)-.5, "Log10  # \n of streamlines", rotation=-69, 
     #    ha="center", va="center", size=12, zorder=12)
     return plt.gcf()
+
+def dipyPlotPrototypicality(streamlines,filename):
+    
+    import matplotlib
+    prototypeMeasure=streamlinePrototypicalityMeasure(streamlines,'mean')
+    
+    cmap = matplotlib.cm.get_cmap('jet')
+    
+    colors = [cmap(prototypeMeasure[iStreamline]) for iStreamline in range(len(streamlines))]
+   
+    
+    dipyBasicPlotTract(streamlines,colors,'testPrototype2')
+    
+    
+
+
+def dipyBasicPlotTract(streamlines,colors,tractName):
+    import numpy as np
+    from fury import actor, window
+    import matplotlib
+    import nibabel as nib
+    from scipy.spatial.distance import cdist
+    import dipy.tracking.utils as ut
+    from scipy import ndimage
+    from nilearn.image import crop_img, resample_to_img 
+    
+    scene = window.Scene()
+    scene.clear()
+    
+    
+    stream_actor = actor.line(streamlines, colors, linewidth=10,fake_tube=True,opacity=1)
+    #stream_actor = actor.line(streamlines[1:10000], colors[1:10000], linewidth=10,fake_tube=True,opacity=1)
+    #stream_actor = actor.line(streamlines[1:3000], colors[1:3000])
+    #scene.clear()
+    scene.add(stream_actor)
+
+    scene.set_camera(position=(-176.42, 118.52, 128.20),
+                 focal_point=(113.30, 128.31, 76.56),
+                 view_up=(0.18, 0.00, 0.98))    
+
+    scene.reset_camera()
+ 
+
+    # window.show(scene, size=(600, 600), reset_camera=False)
+    if tractName!=None:
+        outName=tractName
+    else:
+        outName='tractFigure'
+        
+    #window.record(scene, out_path=outName+'.png', size=(6000, 6000))
+     
+    outArray=window.snapshot(scene, fname=None, size=(6000, 6000))
+    #for whatever reason, the output of window.snapshot is upside down
+    #the record function inverts this
+    #https://github.com/fury-gl/fury/blob/0ff2c0ad98b92d9d2a80dc2bcc4e5c2e12f600a7/fury/window.py#L754
+    #but the record function opens an unclosable window, so we can't use that
+    #so here we flip it and rotate 90
+    outArray=np.flipud(outArray)
+    #outArray=np.rot90(outArray)
+    #now crop it; 0,0,0 is the rgb color for black, so those pixels sum to 0
+    colorsum=np.sum(outArray,axis=2)
+    pixelsWithColor=np.asarray(np.where(colorsum>0))
+    #find the borders
+    minVals=np.min(pixelsWithColor,axis=1)
+    maxVals=np.max(pixelsWithColor,axis=1)
+    #arbitrarily establish a desired border width
+    borderPixels=20
+    #subselect
+    croppedArray=outArray[(minVals[0]-borderPixels):(maxVals[0]+borderPixels),(minVals[1]-borderPixels):(maxVals[1]+borderPixels),:]
+    
+    matplotlib.pyplot.imsave(outName + '.png',croppedArray)
 
 def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensityKernel=7):
     import numpy as np
@@ -4638,3 +4950,252 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
         noIslandAtlasData=noIslandAtlasData[1:-1,1:-1,1:-1]
     
     return nib.Nifti1Image(noIslandAtlasData, atlas.affine, atlas.header)
+
+def extendROIoneDirection(roi,direction,iterations):
+    """
+    
+
+    Parameters
+    ----------
+    roi : TYPE
+        DESCRIPTION.
+    direction : TYPE
+        DESCRIPTION.
+    iterations : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    extendedROI : TYPE
+        DESCRIPTION.
+
+    """
+    
+    #first, get the planar bounding box of the input ROI
+    boundaryDictionary=boundaryROIPlanesFromMask(roi)
+    
+    
+    return extendedROI
+
+
+def segmentTractUsingTractMask(streamlines,singleTractMask):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+    singleTractMask : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    outBoolVec : TYPE
+        DESCRIPTION.
+
+    """
+    
+    tractProbabilityMap2SegCriteria(singleTractProbMap)
+    
+    
+    return outBoolVec
+
+def tractProbabilityMap2SegCriteria(singleTractProbMap):
+    """
+    This function converts a nifti-based probablity map (presumably of an atlas
+    maping of a tract) to a series of segmentation criteria
+    
+    You know what would make this process a lot easier?
+    If atlases included endpoint masks, and not just allNode masks
+
+    Parameters
+    ----------
+    singleTractProbMap : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    criteriaDict : dictionary
+        DESCRIPTION.
+
+    """
+    import nibabel as nib
+    import numpy as np
+    
+    if isinstance(singleTractProbMap,str):
+        singleTractProbMap=nib.load(singleTractProbMap)
+        
+    #if it turns out we need to inflate the input mask, do it here using scipy dilate
+    
+    #create a bounding box of planarROIS.  These will be exclusion criteria as
+    #nothing from the tract can traverse them.  Theoretically we could require
+    #that all streamlines contain all nodes within the mask, but this is (1)
+    #probably overly constrictive and (2) computationally intensive    
+    boundaryPlanes=boundaryROIPlanesFromMask(singleTractProbMap)
+  
+    
+    #go ahead and get the boundaries in subject space as well
+    #we'll be using these to find the primary axis along which we'll be making 
+    #planar ROIs.  Alternatively, you could make ~3 spherical ROIS that span the
+    #entrity of the mask, one at each end of the thresheld density, and one in the middle
+    # but this presumes a bit about the morphology of the tract
+    # the arcuate is going to be a real test case for this method
+    maskBoundaries=subjectSpaceMaskBoundaryCoords(singleTractProbMap)
+    #compute the span of values for each of these
+    dimSpans=np.abs(maskBoundaries[:,0]-maskBoundaries[:,1])
+    primaryDim=np.where(dimSpans==np.max(dimSpans))[0][0]
+    #kind of an inference here, but ok
+    dimDict={0:'x',1:'y',2:'z'}
+    letterDim=dimDict[primaryDim]
+    
+    #here we're arbitraily going to set a span frequency which will serve as 
+    #the spacing between ROIs
+    planarROISpacing=7
+    #establish the coordinates of the planar ROIs
+    planeCoords=np.arrange(dimSpans[primaryDim,0],dimSpans[primaryDim,1],planarROISpacing)
+    #maybe throw an error here if you end up with less than three values.  This method
+    #is probably ill advised for tracts with length of 21 or less (i.e. ufibers)
+    if len(planeCoords)<3:
+        raise ValueError('dimensional span of ' + str(dimSpans[primaryDim]) + ' for dimension ' + letterDim + ' too small to create reasonable planar ROIs')
+    #This is going to cause problems for curved tracts like the arcuate
+    #you could imagine the plane hitting the extreme rear of the arc, and imposing
+    #an inclusion criterion that ends up shaving everything that curved ahead 
+    #of that point.  That's a problem
+    #So here's what's going to happen in that case:  There will be a plane
+    #which is outside the bounds formed by BOTH endpoint clusters
+    
+    
+    #ACTUALLY, MAYBE IT DOESN'T MATTER IF WE ARE PASSED A DENSITY/PROBABILITY MASK
+    #if we're doing this cleverly, we can assume that the input is density/probabilty
+    #based, so here we can appply some sort of thesholding to extract the
+    # "core" of the tract.
+    
+    #here we'll arbitraily set a threshold value
+    #thresholdProportion=.7
+    #next we find where this is in the unique values of the datablock
+    #and set it as our threshold value
+    #threshVal=np.unique(singleTractProbMap.get_fdata())[np.floor(len(np.unique(singleTractProbMap.get_fdata()))*thresholdProportion).astype(int)]
+    
+    #lets get to making the planar coordinates
+    planarInclusionROIs=[]
+    for iROIcords in planeCoords[1:-1]:
+        planarInclusionROIs.append(makePlanarROI(singleTractProbMap, iROIcords, letterDim))
+        
+    criteriaDict={}
+    criteriaDict['any']['include']=planarInclusionROIs
+    #there's abit of weirdness here, in that the exclusion rois have names.  This will
+    #undoubtedly cause standardization errors later
+    criteriaDict['any']['exclude']=boundaryPlanes
+
+    return criteriaDict
+
+def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    measuresVec : TYPE
+        DESCRIPTION.
+
+    """
+    
+    import numpy as np
+    import dipy.tracking.utils as ut
+    from dipy.tracking.vox2track import streamline_mapping
+    dummyNifti=dummyNiftiForStreamlines(streamlines)
+    streamlineMapping=streamline_mapping(streamlines, dummyNifti.affine)
+    imgSpaceTractVoxels = list(streamlineMapping.keys())
+    #probably a terribly inefficient way to do this
+    traversalValues=[[] for i in range(len(streamlines))]
+    #get the density map
+    densityMap=ut.density_map(streamlines, dummyNifti.affine, dummyNifti.shape)
+    for iVoxels in imgSpaceTractVoxels:
+        currentStreams=streamlineMapping[iVoxels]
+        currentValue=densityMap[iVoxels]
+        for iStreams in currentStreams:
+            traversalValues[iStreams].append(currentValue)
+    
+    #sum it all up
+    if sumOrMean=='sum':
+        perStreamSums=[np.sum(iStreams) for iStreams in traversalValues]
+    elif sumOrMean=='mean':
+        perStreamSums=[np.mean(iStreams) for iStreams in traversalValues]
+    #normalize it
+    measuresVec=np.divide(perStreamSums,np.max(perStreamSums))
+    return measuresVec
+
+
+def densityMaskToSegCriteria(densityMask):
+    
+    import numpy as np
+    import nibabel as nib
+    import scipy
+    import copy
+    
+    #MAJOR INSIGHT:  it is never the case that endpoints can be in the "core" of a
+    #tract.  Ergo, you can erode the mask a bit and use it as an endpoint exclusion criterion, 
+    # but also as a traversal criterion
+    coreMask=scipy.ndimage.binary_erosion(densityMask.get_fdata(), iterations=2)
+    inflatedMask=scipy.ndimage.binary_dilation(densityMask.get_fdata(), iterations=1)
+    endpointsMask=copy.deepcopy(inflatedMask)
+    endpointsMask[coreMask]=False
+    
+    endpointCriteria=nib.Nifti1Image(endpointsMask, densityMask.affine, densityMask.header)
+    coreIntersectCriteria=nib.Nifti1Image(coreMask, densityMask.affine, densityMask.header)
+    
+    criteriaDict={}
+    
+    
+    
+    return criteriaDict
+
+
+def boundaryROIPlanesFromMask(inputMask):
+    """
+    creates a 6 item output dictionary featuring the planar borders which
+    encompass the input mask
+
+    Parameters
+    ----------
+    inputMask : nifti
+        a 3D, nifti mask.  Presumably of a tract.  Can be binarized, 
+        probabalistic (0-1 bound), or density based.
+
+    Returns
+    -------
+    borderDict: dictionary
+        A dictionary with keys ['superior','inferior','medial','lateral','anterior','posterior']
+        corresponding to each of the planar borders of the input mask.
+
+    """
+    import nibabel as nib
+    
+    if isinstance(inputMask,str):
+        inputMask=nib.load(inputMask)
+        
+    #create a binarized copy of the mask
+    binarizedMask=nib.Nifti1Image(inputMask.get_fdata()>0, inputMask.affine, inputMask.header)
+    
+    #initialize the output directory
+    borderDict={}
+    
+    #create list of borders x, y, z
+    bordersList=['medial','lateral','anterior','posterior','superior','inferior']
+    
+    #iterate across dimensions
+    
+    for iBorders in range(len(bordersList)):
+        #generate plane for current border of interest 
+        currentBorderROI=planeAtMaskBorder(binarizedMask,bordersList[iBorders])
+        borderDict[bordersList]=currentBorderROI
+    
+    #having generated those borders, return the dictionary
+    return borderDict
+        
