@@ -10,6 +10,8 @@ def crossSectionGIFsFromTract(streamlines,refAnatT1,saveDir):
     from dipy.tracking import utils
     import numpy as np
     
+    from wmaPyTools import roiTools
+    
     from nilearn.image import crop_img 
     #nilearn.image.resample_img ? to resample output
     
@@ -25,7 +27,7 @@ def crossSectionGIFsFromTract(streamlines,refAnatT1,saveDir):
     
     #obtain boundary coords in subject space in order to
     #use plane generation function
-    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(croppedReference)
+    convertedBoundCoords=roiTools.subjectSpaceMaskBoundaryCoords(croppedReference)
     
     dimsList=['x','y','z']
     #brute force with matplotlib
@@ -41,7 +43,7 @@ def crossSectionGIFsFromTract(streamlines,refAnatT1,saveDir):
         #iterate across slices
         for iSlices in list(range(len(subjectSpaceSlices))):
             #set the slice list entry to the appropriate singular value
-            currentSlice=makePlanarROI(croppedReference, subjectSpaceSlices[iSlices], dimsList[iDims])
+            currentSlice=roiTools.makePlanarROI(croppedReference, subjectSpaceSlices[iSlices], dimsList[iDims])
 
             #set up the figure
             fig,ax = plt.subplots()
@@ -217,6 +219,8 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     from matplotlib import figure
     from nilearn.image import crop_img, resample_img 
     import matplotlib.pyplot as plt
+    from wmaPyTools import roiTools
+    
     
     #resample crop (doesn't seem to work)
     #[refAnatT1,overlayNifti]=dualCropNifti(refAnatT1,overlayNifti)
@@ -239,7 +243,7 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     
     #obtain boundary coords in subject space in order to
     #use plane generation function
-    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(refAnatT1)
+    convertedBoundCoords=roiTools.subjectSpaceMaskBoundaryCoords(refAnatT1)
     #overlayBoundCoords=subjectSpaceMaskBoundaryCoords(overlayNifti)
     
     #find which input has the highest resolution
@@ -293,9 +297,9 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
             #THE SOLUTION WAS SO OBVIOUS. DONT USE A SINGLE SLICE FOR BOTH THE
             #REFERNCE AND THE OVERLAY.  DUH!
             #actually this doesn't matter if we resample
-            currentRefSlice=makePlanarROI(refAnatT1, subjectSpaceSlices[iSlices], dimsList[iDims])
+            currentRefSlice=roiTools.makePlanarROI(refAnatT1, subjectSpaceSlices[iSlices], dimsList[iDims])
             #could be an issue if overlay nifti is signifigantly smaller
-            currentOverlaySlice=makePlanarROI(overlayNifti, subjectSpaceSlices[iSlices], dimsList[iDims])
+            currentOverlaySlice=roiTools.makePlanarROI(overlayNifti, subjectSpaceSlices[iSlices], dimsList[iDims])
 
             #set up the figure
             fig,ax = plt.subplots()
@@ -439,11 +443,12 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     import numpy as np
     import os
     from matplotlib import pyplot as plt
+    from wmaPyTools import analysisTools
     
     RASendpointData=[]
     LPIendpointData=[]
     for iTracts in range(len(tractTractogramList)):
-        [currentRAS,currentLPI]=quantifyTractEndpoints(tractTractogramList[iTracts],atlasList[iTracts],atlasLookupTable)
+        [currentRAS,currentLPI]=analysisTools.quantifyTractEndpoints(tractTractogramList[iTracts],atlasList[iTracts],atlasLookupTable)
         RASendpointData.append(currentRAS)
         LPIendpointData.append(currentLPI)
         
@@ -661,7 +666,8 @@ def basicRadarPlot(labels,values, metaValues=None):
 def dipyPlotPrototypicality(streamlines,filename):
     
     import matplotlib
-    prototypeMeasure=streamlinePrototypicalityMeasure(streamlines,'mean')
+    from wmaPyTools import analysisTools
+    prototypeMeasure=analysis.streamlinePrototypicalityMeasure(streamlines,'mean')
     
     cmap = matplotlib.cm.get_cmap('jet')
     
@@ -739,6 +745,8 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     from scipy import ndimage
     from nilearn.image import crop_img, resample_to_img 
     
+    from wmaPyTools import streamlineTools, roiTools
+    
     if refAnatT1!=None:
         if isinstance(refAnatT1,str):
             refAnatT1=nib.load(refAnatT1)
@@ -753,7 +761,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
        # scene.add(vol_actor)
        print('skipping')
     else:
-        refAnatT1=dummyNiftiForStreamlines(streamlines)
+        refAnatT1=streamlineTools.dummyNiftiForStreamlines(streamlines)
         
     #colormap for main tract
     cmap = matplotlib.cm.get_cmap('seismic')
@@ -767,7 +775,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     colors = [cmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
     
     #find the neck nodes
-    neckNodes=findTractNeckNode(streamlines)
+    neckNodes=streamlineTools.findTractNeckNode(streamlines)
     
     lin_T, offset =ut._mapping_to_voxel(refAnatT1.affine)
     
@@ -807,7 +815,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     #densityNifti=nib.nifti1.Nifti1Image(summedDensityMap.astype(int), refAnatT1.affine, refAnatT1.header)
     #nib.save(densityNifti,'summeddensityNifti100206.nii.gz')
     #create a default sphere kernel to use in the filter.
-    kernelNifti=createSphere(endpointColorDensityKernel, [0,0,0], refAnatT1)
+    kernelNifti=roiTools.createSphere(endpointColorDensityKernel, [0,0,0], refAnatT1)
     kernelNifti=nib.nifti1.Nifti1Image(kernelNifti.get_fdata().astype(int), kernelNifti.affine, kernelNifti.header)
     croppedKernel=crop_img(kernelNifti)
    
@@ -969,6 +977,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     import nibabel as nib
     import os
     import numpy as np
+    from wmaPyTools import streamTools
     
     if isinstance(streamlines,str):
         streamlinesLoad=nib.streamlines.load(streamlines)
@@ -985,14 +994,14 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
         tractName=str(len(streamlines))+'_streamsTract'
     
     #determine whether te input streamlines are a coherent bundle
-    neckQuantifications=bundleTest(streamlines)
+    neckQuantifications=streamTools.bundleTest(streamlines)
     
     if neckQuantifications['mean'] <8:
         print('submitted streamlines appear to be coherent bundle via neck criterion')
-        streamlines=orientTractUsingNeck(streamlines)
+        streamlines=streamTools.orientTractUsingNeck(streamlines)
     else:
         print('submitted streamlines DO NOT appear to be coherent bundle via neck criterion')
-        streamlines=dipyOrientStreamlines(streamlines)
+        streamlines=streamTools.dipyOrientStreamlines(streamlines)
     
     #plots currently work better without reference T1
     print('creating anatomy plot')
