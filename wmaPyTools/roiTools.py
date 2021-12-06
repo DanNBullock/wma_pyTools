@@ -5,28 +5,37 @@ Created on Sun Dec  5 16:03:01 2021
 @author: Daniel
 """
 def makePlanarROI(reference, mmPlane, dimension):
-    """makePlanarROI(reference, mmPlane, dimension):
-    #
-    # INPUTS:
-    # -reference:  the nifti that the ROI will be
-    # applied to, also functions as the source of affine transform.
-    #
-    # -mmPlane: the ACPC (i.e. post affine application) mm plane that you would like to generate a planar ROI
-    # at.  i.e. mmPlane=0 and dimension= x would be a planar roi situated along
-    # the midsaggital plane.
-    #
-    # -dimension: either 'x', 'y', or 'z', to indicate the plane that you would
-    # like the roi generated along
-    #
-    # OUTPUTS:
-    # -planarROI: the roi structure of the planar ROI
-    #
-    #  Daniel Bullock 2020 Bloomington
-    #this plane will be oblique to the subject's *actual anatomy* if they aren't
-    #oriented orthogonally. As such, do this only after acpc-alignment
-    #
-    #adapted from https://github.com/DanNBullock/wma_tools/blob/master/ROI_Tools/bsc_makePlanarROI_v3.m
     """
+    this plane will be oblique to the subject's *actual anatomy* if they aren't
+    oriented orthogonally. As such, do this only AFTER acpc-alignment
+    
+    adapted from https://github.com/DanNBullock/wma_tools/blob/master/ROI_Tools/bsc_makePlanarROI_v3.m
+    
+    Parameters
+    ----------
+    reference : TYPE
+        The nifti that the ROI will be applied to, also functions as 
+        the source of affine transform.
+    mmPlane : TYPE
+        the ACPC (i.e. post affine application) mm plane that you would like 
+        to generate a planar ROI at.  i.e. mmPlane=0 and dimension= x would 
+        be a planar roi situated along the midsaggital plane.
+    dimension : TYPE
+        either 'x', 'y', or 'z', to indicate the plane that you would like the
+        roi generated along
+
+    Raises
+    ------
+    ValueError
+        Raises error if requested coordinate is outside of reference nifti
+
+    Returns
+    -------
+    returnedNifti : TYPE
+        the nifti roi structure of the planar ROI
+
+    """
+    
     import nibabel as nib
     import numpy as np
     import dipy.tracking.utils as ut
@@ -41,8 +50,7 @@ def makePlanarROI(reference, mmPlane, dimension):
     
     #if the requested planar coordinate is outside of the image, throw a full on error
     if convertedBoundCoords[0,selectedDim]>mmPlane or convertedBoundCoords[1,selectedDim]<mmPlane: 
-        raise ValueError('Requested planar coordinate outside of reference image \n coordinate ' + str(mmPlane) + ' requested for bounds ' + str(convertedBoundCoords[:,selectedDim]))
-        
+        raise ValueError('Requested planar coordinate outside of reference image \n coordinate ' + str(mmPlane) + ' requested for bounds ' + str(convertedBoundCoords[:,selectedDim]))   
     
     #not always 0,0,0
     subjectCenterCoord=np.mean(convertedBoundCoords,axis=0)
@@ -81,51 +89,64 @@ def makePlanarROI(reference, mmPlane, dimension):
     returnedNifti=nib.nifti1.Nifti1Image(outData, reference.affine, header=reference.header)
     return returnedNifti
 
-def roiFromAtlas(atlas,roiNum):
-    """roiFromAtlas(atlas,roiNum)
-    #creates a nifti structure mask for the input atlas image of the specified label
-    #
-    #  DEPRICATED BY  multiROIrequestToMask
-    #
-    # INPUTS:
-    # -atlas:  an atlas nifti
-    #
-    # -roiNum: an int input indicating the SINGLE label that is to be extracted.  Will throw warning if not present
-    #
-    # OUTPUTS:
-    # -outImg:  a mask with int(1) in those voxels where the associated label was found.  If the label wasn't found, an empty nifti structure is output.
-    """
+# def roiFromAtlas(atlas,roiNum):
+#     """roiFromAtlas(atlas,roiNum)
+#     #creates a nifti structure mask for the input atlas image of the specified label
+#     #
+#     #  DEPRICATED BY  multiROIrequestToMask
+#     #
+#     # INPUTS:
+#     # -atlas:  an atlas nifti
+#     #
+#     # -roiNum: an int input indicating the SINGLE label that is to be extracted.  Will throw warning if not present
+#     #
+#     # OUTPUTS:
+#     # -outImg:  a mask with int(1) in those voxels where the associated label was found.  If the label wasn't found, an empty nifti structure is output.
+#     """
 
-    import numpy as np
-    import nibabel as nib
-    outHeader = atlas.header.copy()
-    #numpy and other stuff has been acting weird with ints lately
-    atlasData = np.round(atlas.get_fdata()).astype(int)
-    outData = np.zeros((atlasData.shape)).astype(int)
-    #check to make sure it is in the atlas
-    #not entirely sure how boolean array behavior works here
-    if  np.isin(roiNum,atlasData):
-            outData[atlasData==roiNum]=int(1)
-    else:
-        import warnings
-        warnings.warn("WMA.roiFromAtlas WARNING: ROI label " + str(roiNum) + " not found in input Nifti structure.")
+#     import numpy as np
+#     import nibabel as nib
+#     outHeader = atlas.header.copy()
+#     #numpy and other stuff has been acting weird with ints lately
+#     atlasData = np.round(atlas.get_fdata()).astype(int)
+#     outData = np.zeros((atlasData.shape)).astype(int)
+#     #check to make sure it is in the atlas
+#     #not entirely sure how boolean array behavior works here
+#     if  np.isin(roiNum,atlasData):
+#             outData[atlasData==roiNum]=int(1)
+#     else:
+#         import warnings
+#         warnings.warn("WMA.roiFromAtlas WARNING: ROI label " + str(roiNum) + " not found in input Nifti structure.")
                 
-    outImg = nib.nifti1.Nifti1Image(outData, atlas.affine, outHeader)
-    return outImg
+#     outImg = nib.nifti1.Nifti1Image(outData, atlas.affine, outHeader)
+#     return outImg
 
 def planeAtMaskBorder(inputMask,relativePosition):
-    """#planeAtMaskBorder(inputNifti,roiNum,relativePosition):
-    #creates a planar roi at the specified border of the specified ROI.
-    #
-    # INPUTS:
-    # -inputMask:  a nifti with ONLY 1 and 0 (int) as the content, a boolean mask, in essence
-    #
-    # -relativePosition: string input indicating which border to obtain planar roi at
-    # Valid inputs: 'superior','inferior','medial','lateral','anterior','posterior','rostral','caudal','left', or 'right'
-    #
-    # OUTPUTS:
-    # outPlaneNifti: planar ROI as Nifti at specified border
     """
+    creates a planar roi at the specified border of the specified ROI.
+
+    Parameters
+    ----------
+    inputMask : TYPE
+        a nifti with ONLY 1 and 0 (int) as the content, a boolean mask, in essence
+        The planes will be generated at the edge of the non-zero values
+    relativePosition : TYPE
+        String input indicating which border to obtain planar roi at
+        Valid inputs: 'superior','inferior','medial','lateral','anterior',
+        'posterior','rostral','caudal','left', or 'right'
+        
+    Raises
+    ------
+    Exception
+        Raises exeption of input term not recognized
+
+    Returns
+    -------
+    outPlaneNifti : TYPE
+        planar ROI as Nifti at specified border
+
+    """
+ 
     import numpy as np
     
     #establish valid positional terms
@@ -170,17 +191,41 @@ def planeAtMaskBorder(inputMask,relativePosition):
     return outPlaneNifti
 
 def createSphere(r, p, reference, supress=True):
-    """ create a sphere of given radius at some point p in the brain mask
-    Args:
-    r: radius of the sphere
-    p: point (in subject coordinates of the brain mask, i.e. not the image space) of the center of the
-    sphere)
-    reference:  The reference nifti whose space the sphere will be in
-    supress:  Bool indicating whether to supress the output print behavior
-    
-    modified version of nltools sphere function which outputs the sphere ROI in the
-    coordinate space of the input reference
     """
+    create a sphere of given radius at some point p in the brain mask
+    
+    modified version of nltools sphere function which outputs the sphere ROI
+    in the coordinate space of the input reference
+    
+    Parameters
+    ----------
+    r : TYPE
+        radius of the sphere IN MM SPACE/UNITS
+        (probably need to test to infer rounding behavior resulting from 
+         subjectSpaceMaskBoundaryCoords / dipy coord converion)
+    p : TYPE
+        point (in subject coordinates of the brain mask--i.e. NOT the image 
+        space--of the center of the sphere)
+    reference : TYPE
+        The reference nifti whose space the sphere will be in
+    supress : TYPE, optional
+        Bool indicating whether to supress the output print behavior.  Useful
+        if function is being used repeatedly.  At the same time, the method
+        used in streamlinesInWindowFromMapping may actually be more efficient
+        The default is True.
+
+    Raises
+    ------
+    ValueError
+        DESCRIPTION.
+
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+    
     import nibabel as nib
     import numpy as np
     
@@ -235,22 +280,39 @@ def createSphere(r, p, reference, supress=True):
     #not sure of robustness to strange input affines, but seems to work
     return nib.Nifti1Image(outSphereROI, affine=reference.affine, header=reference.header)
 
-def multiROIrequestToMask(atlas,roiNums):
-    """multiROIrequestToMask(atlas,roiNums):
-    #creates a nifti structure mask for the input atlas image of the specified labels
-    #
-    # INPUTS:
-    # -atlas:  an atlas nifti
-    #
-    # -roiNums: an 1d int array input indicating the labels that are to be extracted.  Singleton request (single int) will work fine.  Will throw warning if not present
-    #
-    # OUTPUTS:
-    # -outImg:  a mask with int(1) in those voxels where the associated labels were found.  If the label wasn't found, an empty nifti structure is output.
-    
-    ##NOTE REPLACE WITH nil.masking.intersect_masks when you get a chance
+def multiROIrequestToMask(atlas,roiNums,inflateIter=0):
     """
+    Creates a nifti structure ROI mask for the input atlas image of the 
+    specified labels.  Optionally inflates
+    
+    
+    NOTE" REPLACE WITH nil.masking.intersect_masks when you get a chance
+
+    Parameters
+    ----------
+    atlas : TYPE
+        an atlas nifti from which the selected labels will be extracted and
+        turned into a nifti ROI mask.
+    roiNums : TYPE
+        a 1d int array input indicating the labels that are to be extracted.
+        Singleton request (single int) will work fine.  Will throw warning 
+        if not present in input atlas
+    inflateIter : TYPE, optional
+        The number of inflate iterations you would like to perform. If no value
+        is passed, no inflation is performedThe default is 0.
+
+    Returns
+    -------
+    concatOutNifti : TYPE
+        a mask with int(1) in those voxels where the associated labels were
+        found.  If the label wasn't found, an empty nifti structure is output.
+        int is used because nibabel throws a fit with binary ROI files
+   
+    """
+    
     import numpy as np
     import nibabel as nib
+    from scipy import ndimage
     
     #force input roiNums to array, don't want to deal with lists and dicts
     roiNumsInArray=np.asarray(roiNums)
@@ -261,47 +323,72 @@ def multiROIrequestToMask(atlas,roiNums):
         
     #obtain coordiantes of all relevant label 
     #ATLASES ARE ACTING WEIRD THESE DAYS, gotta do round then int, not other way
+    #if you don't do it this way, somehow you get a reduced number of labels
     labelCoords=np.where(np.isin(np.round(atlas.get_fdata()).astype(int),roiNumsInArray))
 
     #create blank data structure
     concatData=np.zeros(atlas.shape)
     #set all appropriate values to true
     concatData[labelCoords]=True
-
-    #set all appropriate values to true
+    
+    #if the inflation parameter has been set
+    if inflateIter!=0:
+        concatData=ndimage.binary_dilation(concatData, iterations=inflateIter)
+   
+    #create the output nifti
     concatOutNifti=nib.nifti1.Nifti1Image(concatData, affine=atlas.affine, header=atlas.header)
     
     return concatOutNifti
 
-def multiROIrequestToMask_Inflate(atlas,roiNums,inflateIter):
-    """multiROIrequestToMask(atlas,roiNums):
-    #creates a nifti structure mask for the input atlas image of the specified labels
-    #
-    # INPUTS:
-    # -atlas:  an atlas nifti
-    #
-    # -roiNums: an 1d int array input indicating the labels that are to be extracted.  Singleton request (single int) will work fine.  Will throw warning if not present
-    #
-    # -inflateIter: the number of inflate iterations you would like to perform
-    #
-    # OUTPUTS:
-    # -outImg:  a mask with int(1) in those voxels where the associated labels were found.  If the label wasn't found, an empty nifti structure is output.
+# def multiROIrequestToMask_Inflate(atlas,roiNums,):
+#     """
     
-    ##NOTE REPLACE WITH nil.masking.intersect_masks when you get a chance
-    """
+#     maybe clean this up and merge with multiROIrequestToMask at some point
+    
 
-    import nibabel as nib
-    from scipy import ndimage
-    
-    #yes, this function is a glorified wrapper, why do you ask?
-    selectROINifti=multiROIrequestToMask(atlas,roiNums)
-    
-    inflatedArray=ndimage.binary_dilation(selectROINifti.get_fdata(), iterations=inflateIter)
+#     Parameters
+#     ----------
+#     atlas : TYPE
+        
+#     roiNums : TYPE
+#         DESCRIPTION.
+#     inflateIter : TYPE, optional
+#         DESCRIPTION. The default is 0.
 
-    #set all appropriate values to true
-    inflatedOutNifti=nib.nifti1.Nifti1Image(inflatedArray, affine=atlas.affine, header=atlas.header)
+#     Returns
+#     -------
+#     inflatedOutNifti : TYPE
+#         DESCRIPTION.
+
+#     """
+#     """multiROIrequestToMask(atlas,roiNums):
+#     #creates a nifti structure mask for the input atlas image of the specified labels
+#     #
+#     # INPUTS:
+#     # -atlas: 
+#     #
+#     # -roiNums: an 1d int array input indicating the labels that are to be extracted.  Singleton request (single int) will work fine.  Will throw warning if not present
+#     #
+#     # -inflateIter: the number of inflate iterations you would like to perform
+#     #
+#     # OUTPUTS:
+#     # -outImg:  a mask with int(1) in those voxels where the associated labels were found.  If the label wasn't found, an empty nifti structure is output.
     
-    return inflatedOutNifti
+#     ##NOTE REPLACE WITH nil.masking.intersect_masks when you get a chance
+#     """
+
+#     import nibabel as nib
+#     from scipy import ndimage
+    
+#     #yes, this function is a glorified wrapper, why do you ask?
+#     selectROINifti=multiROIrequestToMask(atlas,roiNums)
+    
+  
+    
+#     #set all appropriate values to true
+#     inflatedOutNifti=nib.nifti1.Nifti1Image(inflatedArray, affine=atlas.affine, header=atlas.header)
+    
+#     return inflatedOutNifti
 
 def planarROIFromAtlasLabelBorder(inputAtlas,roiNums, relativePosition):
     """#planarROIFromAtlasLabelBorder(referenceNifti, mmPlane, dimension):
@@ -334,17 +421,43 @@ def planarROIFromAtlasLabelBorder(inputAtlas,roiNums, relativePosition):
     return(planeOut)
     
 def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
-    #sliceROIwithPlane(inputROINifti,planarROI,relativePosition):
-    #slices input ROI Nifti using input planarROI and returns portion specified by relativePosition
-    #
-    # inputROINifti:  a (presumed ROI) nifti with ONLY 1 and 0 (int) as the content, a boolean mask, in essence
-    #
-    # planarROI: a planar roi (nifti) that is to be used to perform the slicing operation on the inputROINifti
-    # 
-    # relativePosition: which portion of the sliced ROI to return
-    # Valid inputs: 'superior','inferior','medial','lateral','anterior','posterior','rostral','caudal','left', or 'right'
-   
-    #test for intersection between the ROIS
+    """
+    Slices input ROI Nifti using input planarROI and returns portion specified
+    by relativePosition.  Useful for modifying anatomical ROI masks and other
+    derived ROIS
+    
+    Can probably be refactored to take advantage of dipy coord conversion 
+    mechanics
+    
+    PRESUMES ACPC ALIGNMENT
+    
+    Parameters
+    ----------
+    inputROINifti : TYPE
+        a (presumed ROI) nifti with ONLY 1 and 0 (int) 
+        as the content, a boolean mask, in essence
+    inputPlanarROI : TYPE
+        a planar roi (nifti) that is to be used to perform the slicing
+        operation on the inputROINifti.  If this doesn't intersect the input
+        ROI, an exception will be thrown
+    relativePosition : TYPE
+    which portion of the sliced ROI to return.
+    Valid inputs: 'superior','inferior','medial','lateral','anterior',
+    'posterior','rostral','caudal','left', or 'right'
+  
+    Raises
+    ------
+    ValueError
+        Will throw exceptions if input ROIs do not intersect, if input
+        slicer roi isn't planar, or if return portion value is not understood
+
+    Returns
+    -------
+    remainingROI : TYPE
+        A nifti wherein the voxels not meeting the criteria have been dropped/
+        set to zero
+
+    """
     import nibabel as nib
     import numpy as np
     
@@ -356,9 +469,8 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     intersectBool=np.any(np.logical_and(inputROINiftiData!=0,inputPlanarROIData!=0))
     if ~intersectBool:
         import warnings
-        warnings.warn("WMA.sliceROIwithPlane WARNING: input planar ROI does not intersect with input ROI.")
+        warnings.warn("sliceROIwithPlane WARNING: input planar ROI does not intersect with input ROI.")
 
-    
     #implement test to determine if input planar roi is indeed planar
     #get coordinates of mask voxels in image space
     planeVoxCoords=np.where(inputPlanarROI.get_fdata())
@@ -449,22 +561,34 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     return remainingROI
 
 def alignROItoReference(inputROI,reference):
-    """ extracts the coordinates of an ROI and reinstantites them as an ROI in the refernce space of the reference input
-    Helps avoid affine weirdness.
-    Args:
-    inputROI: an input ROI in nifti format
-    reference: the reference nifti that you would like the ROI moved to.
-        
-    Outputs:
-    outROI: output nifti ROI in the reference space of the input reference nifti
+    """
+    extracts the coordinates of an ROI and reinstantites them as an ROI
+    in the refernce space of the reference input.
+    Helps avoid affine weirdness.  Unclear if actually needed or used.
+    Likely redundant with functions in other packages
+    
 
-    """   
+    Parameters
+    ----------
+    inputROI : TYPE
+        an input ROI in nifti format, to be converted
+    reference : TYPE
+        the reference nifti that you would like the ROI moved into the space of.
+
+    Returns
+    -------
+    outROI : TYPE
+        Output nifti ROI in the reference space of the input reference nifti
+
+    """
     import numpy as np
     import nibabel as nib
     from dipy.tracking.utils import seeds_from_mask
     
+    #infer the sampling density
     densityKernel=np.asarray(reference.header.get_zooms())
     
+    #get the coordinates themselves
     roiCoords=seeds_from_mask(inputROI.get_fdata(), inputROI.affine, density=densityKernel)
     
     #use dipy functions to treat point cloud like one big streamline, and move it back to image space
@@ -484,17 +608,30 @@ def alignROItoReference(inputROI,reference):
     return outROI
 
 def subjectSpaceMaskBoundaryCoords(maskNifti):
-    """ convert the boundary voxel indexes into subject space coordinates using the provided affine
-    Args:
-        inputVoxelBounds: a mask nifti
-        affine: an affine matrix with which to transform the voxel bounds / image space coordinates
+    """
+    convert the boundary voxel indexes of non-zero entries into subject space
+    coordinates
+    
+    NOTE: first row is "lowest" (i.e. smallest value), second row is "highest"
+    as such, need to be careful about double - side coordinates
+    
+    Parameters
+    ----------
+    maskNifti : TYPE
+        a binarized mask nifti
 
-    Output:
-        subjectSpaceBounds:  a 2 x 3 dimensional array indicating the minimum and maximum bounds for each dimension
+    Returns
+    -------
+    subjectSpaceBounds : TYPE
+        a 2 x 3 dimensional array indicating the minimum and maximum bounds
+        for each dimension
+
     """
     
     import dipy.segment.mask as mask
     import numpy as np
+    
+    #get the bounding box in image space
     refDimBounds=np.asarray(mask.bounding_box(maskNifti.get_fdata()))
     
     #use itertools and cartesian product to generate vertex img space coordinates
@@ -518,63 +655,73 @@ def subjectSpaceMaskBoundaryCoords(maskNifti):
     
     return subjectSpaceBounds
 
-def dualCropNifti(nifti1,nifti2):
-    """dualCropNifti(nifti1,nifti2):
-    This function crops two niftis to the same size, using the largest of the
-    two post cropped niftis to establish the consensus dimensions of the output
-    nifti data blocks.
+# def dualCropNifti(nifti1,nifti2):
+#     """dualCropNifti(nifti1,nifti2):
+#     This function crops two niftis to the same size, using the largest of the
+#     two post cropped niftis to establish the consensus dimensions of the output
+#     nifti data blocks.
     
-    Note:  this won't do much if the background values of your images haven't
-    been masked / set to zero.
+#     Note:  this won't do much if the background values of your images haven't
+#     been masked / set to zero.
   
-    INPUTS
-    nifti1 / nifti2:  The niftis that you would like cropped to the same size
+#     INPUTS
+#     nifti1 / nifti2:  The niftis that you would like cropped to the same size
     
-    OUTPUTS
-    nifti1 / nifti2:  The cropped niftis
+#     OUTPUTS
+#     nifti1 / nifti2:  The cropped niftis
 
-    """
-    import nilearn
-    from nilearn.image import crop_img, resample_to_img 
-    import numpy as np
-    import nibabel as nib
+#     """
+#     import nilearn
+#     from nilearn.image import crop_img, resample_to_img 
+#     import numpy as np
+#     import nibabel as nib
     
-    inShape1=nifti1.shape
-    inShape2=nifti2.shape
+#     inShape1=nifti1.shape
+#     inShape2=nifti2.shape
 
-    #get 
-    #nilearn doesn't handle NAN gracefully, so we have to be inelegant
-    nifti1=nib.nifti1.Nifti1Image(np.nan_to_num(nifti1.get_fdata()), nifti1.affine, nifti1.header)
-    nifti2=nib.nifti1.Nifti1Image(np.nan_to_num(nifti2.get_fdata()), nifti2.affine, nifti2.header)
+#     #get 
+#     #nilearn doesn't handle NAN gracefully, so we have to be inelegant
+#     nifti1=nib.nifti1.Nifti1Image(np.nan_to_num(nifti1.get_fdata()), nifti1.affine, nifti1.header)
+#     nifti2=nib.nifti1.Nifti1Image(np.nan_to_num(nifti2.get_fdata()), nifti2.affine, nifti2.header)
     
-    cropped1=crop_img(nifti1)
-    cropped2=crop_img(nifti2)
+#     cropped1=crop_img(nifti1)
+#     cropped2=crop_img(nifti2)
     
-    # find max values in each dimension and create a dummy
-    maxDimShape=np.max(np.asarray([cropped1.shape,cropped2.shape]),axis=0)
-    dummyArray=np.zeros(maxDimShape)
-    #arbitrarily selecting the first nifit should be fine, they should be aligned
-    dummyNifti= nib.nifti1.Nifti1Image(dummyArray, nifti1.affine, nifti1.header)
+#     # find max values in each dimension and create a dummy
+#     maxDimShape=np.max(np.asarray([cropped1.shape,cropped2.shape]),axis=0)
+#     dummyArray=np.zeros(maxDimShape)
+#     #arbitrarily selecting the first nifit should be fine, they should be aligned
+#     dummyNifti= nib.nifti1.Nifti1Image(dummyArray, nifti1.affine, nifti1.header)
     
-    outNifti1=resample_to_img(cropped1,dummyNifti)
-    outNifti2=resample_to_img(cropped2,dummyNifti)
+#     outNifti1=resample_to_img(cropped1,dummyNifti)
+#     outNifti2=resample_to_img(cropped2,dummyNifti)
     
-    return outNifti1, outNifti2
+#     return outNifti1, outNifti2
 
 def removeIslandsFromAtlas(atlasNifti):
     """
+    Removes island label values from atlas iteratively across values present.
+    Important for when extracted atlas labels are being used as anatomical 
+    markers.
     
-
+    Potentially faster ways of doing this in other packages.
+    
     Parameters
     ----------
     atlasNifti : TYPE
-        DESCRIPTION.
+        A multi label atlas, with integer based labels.  Will load if string
+        is passed
 
     Returns
     -------
-    None.
+    atlasNiftiOut : TYPE
+        The input atlas nifti, but with islands removed
+    removalReport : TYPE
+        A pandas based table indicating which labels had voxels removed, and
+        how many
 
     """
+    
     import nibabel as nib
     import scipy
     import numpy as np
@@ -638,28 +785,40 @@ def removeIslandsFromAtlas(atlasNifti):
         #set those to background
         atlasData[np.logical_and(atlas.get_fdata()==iLabels,np.logical_not(islandRemoved))]=detectBackground
     
+        #make a nifti of it
+        atlasNiftiOut=nib.Nifti1Image(atlasData, atlas.affine, atlas.header)
         
-    return nib.Nifti1Image(atlasData, atlas.affine, atlas.header),removalReport 
+    return atlasNiftiOut, removalReport 
 
 def inflateAtlasIntoWMandBG(atlasNifti,iterations):
     """
+    Inflates label values of input atlas into (INFERRED, SEE IN CODE NOTES)
+    white matter labels, and background 0 labels.  Will perform island removal
+    first.
     
+    NOTE:  Ordering effects likely in inflation outcomes (i.e. lower labels
+    have higher priority)
+    
+    Potentially faster methods in other packages
 
     Parameters
     ----------
     atlasNifti : TYPE
-        DESCRIPTION.
+        An integer based, multi label nifti atlas.
+    iterations : TYPE
+        The number of iterations to perform the inflation.  Proceeds voxelwise.
 
     Returns
     -------
-    None.
+    atlasNiftiOut : TYPE
+        The input atlas nifti, but with islands removed and then inflated into
 
     """
     import nibabel as nib
     import numpy as np
-    from scipy.interpolate import NearestNDInterpolator
+    #from scipy.interpolate import NearestNDInterpolator
     import scipy
-    import dipy.tracking.utils as ut
+    #import dipy.tracking.utils as ut
     
     if isinstance(atlasNifti,str):
         atlas=nib.load(atlasNifti)
@@ -747,8 +906,9 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
             #because I dont trust iteration in 
             #print(str(iInflationTargetCoords))
             #set some while loop iteration values
+            #this is the voxel-wise radius of the expans you're considering
             window=1
-            #if you set the vector to longer than 2 by default, it will run until fixed
+            #if you set the vector to 2 or longer by default, it will run until fixed
             voteWinner=[0,0]
             while len(voteWinner)>1:
             #+2 because python is weird and doesn't include the top index
@@ -764,32 +924,60 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
         #return the data object to its regular size
         noIslandAtlasData=noIslandAtlasData[1:-1,1:-1,1:-1]
     
-    return nib.Nifti1Image(noIslandAtlasData, atlas.affine, atlas.header)
+    inflatedAtlas=nib.Nifti1Image(noIslandAtlasData, atlas.affine, atlas.header)
+    return inflatedAtlas
 
-def extendROIoneDirection(roi,direction,iterations):
+def extendROIinDirection(roiNifti,direction,iterations):
     """
+    Extends a binarized, volumetric nifti roi in the specified directions.
     
+    Potential midline issues
+    
+    ASSUMES ACPC ALIGNMENT
 
     Parameters
     ----------
-    roi : TYPE
-        DESCRIPTION.
+    roiNifti : TYPE
+       a binarized, volumetric nifti roi that is to be extended.
     direction : TYPE
-        DESCRIPTION.
+        The direction(s) to be extended in.
     iterations : TYPE
-        DESCRIPTION.
-
+        The number of iterations to perform the inflation.  Proceeds voxelwise.
+        
     Returns
     -------
     extendedROI : TYPE
-        DESCRIPTION.
-
+        The ROI nifti, after the extension has been performed
+        
     """
+    from scipy import ndimage
+    import nibabel as nib
     
     #first, get the planar bounding box of the input ROI
-    boundaryDictionary=boundaryROIPlanesFromMask(roi)
+    boundaryDictionary=boundaryROIPlanesFromMask(roiNifti)
     
+    #establish the appropriate pairings.  Kind of assumes the order from
+    #boundaryROIPlanesFromMask wherein complimentary borders are right next to one another
+    boundaryLabels=list(boundaryDictionary.keys())
+
     
+    #if a singleton direction, and thus a string, has been entered,
+    #convert it to a one item list for iteration purposes
+    if isinstance(direction,str):
+        direction=list(direction)
+        
+    #go ahead and do the inflation
+    concatData=ndimage.binary_dilation(roiNifti.get_fdata(), iterations=iterations)
+    
+    #convert that data array to a nifti
+    extendedROI=nib.Nifti1Image(concatData, roiNifti.affine, roiNifti.header)
+    
+    #now remove all of the undesired proportions
+    for iDirections in direction:
+        #if the current direction isn't one of the desired expansion directions
+        #go ahead and cut anything off that was expanded
+        if not any([x in direction for x in boundaryLabels]):
+            extendedROI=sliceROIwithPlane(extendedROI,boundaryDictionary[iDirections],iDirections)
     return extendedROI
 
 def boundaryROIPlanesFromMask(inputMask):
@@ -806,7 +994,7 @@ def boundaryROIPlanesFromMask(inputMask):
     Returns
     -------
     borderDict: dictionary
-        A dictionary with keys ['superior','inferior','medial','lateral','anterior','posterior']
+        A dictionary with keys ['medial','lateral','anterior','posterior','superior','inferior']
         corresponding to each of the planar borders of the input mask.
 
     """
