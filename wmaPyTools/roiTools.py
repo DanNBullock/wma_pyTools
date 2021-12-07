@@ -1021,3 +1021,47 @@ def boundaryROIPlanesFromMask(inputMask):
     
     #having generated those borders, return the dictionary
     return borderDict
+
+def findROISintersection(ROIs,inflateiter=0):
+    """
+    Finds the intersection of input rois (if any), also permits inflation 
+    should it be desired.  Potentially useful for finding the intersection/border
+    between WM and GM, for example.
+    
+    Largely, a glorified wrapper around nilearn.masking.intersect_masks
+
+    Parameters
+    ----------
+    ROIs : List of nifti objects
+        DESCRIPTION.
+    inflateiter : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    intersectionNifti: an output nifti, with the binarized intersection mask
+    of the provided niftis
+
+    """
+    from nilearn import masking
+    import numpy as np
+    
+    if len(ROIs)==1:
+        raise Exception("Only one nifti provided; intersection of 1 item not sensible")
+   
+    #perform the inflation, if necessary
+    for iROIs in range(len(ROIs)):
+        #is this a recursive, convoluted nightmare, yes
+        #is it efficient, also yes
+        #a mask is _kind_ of like a atlas, just with 1 label, right?
+        ROIs[iROIs]=multiROIrequestToMask(ROIs[iROIs],[1],inflateIter=inflateiter)   
+    
+    #perform the intersection operation
+    intersectionNifti=masking.intersect_masks(ROIs, threshold=1)
+    
+    #if it's empty throw a warning
+    if not (1 in np.unique(intersectionNifti.get_fdata)) or (True in np.unique(intersectionNifti.get_fdata)):
+        import warnings
+        warnings.warn("Empty mask for intersection returne; likely no mutual intersection between input " + str(len(ROIs)) + "ROIs")
+                      
+    return intersectionNifti

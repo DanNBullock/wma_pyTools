@@ -1384,3 +1384,74 @@ def orientTractUsingNeck_multi(streamlines):
                 streamlines[streamIndexes[iStreams]]= streamlines[streamIndexes[iStreams]][::-1]
                 
     return streamlines
+
+def trackStreamsInMask(targetMask,seed_density,dwi,bvecs,bvals):
+    """
+    
+
+    Returns
+    -------
+    streamlines : TYPE
+        DESCRIPTION.
+
+    """
+    from dipy.core.geometry import dist_to_corner
+    from dipy.core.gradients import gradient_table
+    from dipy.data import get_fnames, default_sphere
+    from dipy.io.gradients import read_bvals_bvecs
+    from dipy.io.image import load_nifti
+    from dipy.reconst.csdeconv import (auto_response_ssst,
+                                   mask_for_response_ssst,
+                                   response_from_mask_ssst)
+    import nibabel as nib
+    from dipy.reconst.csdeconv import ConstrainedSphericalDeconvModel
+    from dipy.data import default_sphere
+    from dipy.direction import ProbabilisticDirectionGetter
+    from dipy.tracking.local_tracking import LocalTracking
+    from dipy.tracking.stopping_criterion import ThresholdStoppingCriterion
+    from dipy.reconst.shm import CsaOdfModel
+    from dipy.tracking import utils
+    from dipy.tracking.streamline import Streamlines
+
+    
+    if isinstance(dwi,str):
+        dwi=nib.load(dwi)
+        
+    if isinstance(bvecs,str) or  isinstance(bvals,str) :
+        bvals, bvecs = read_bvals_bvecs(bvals, bvecs)
+
+
+    gtab = gradient_table(bvals, bvecs)
+
+    response, ratio = auto_response_ssst(gtab, dwi.get_fdata(), roi_radii=10, fa_thr=0.7)
+    
+    csd_model = ConstrainedSphericalDeconvModel(gtab, response)
+    
+    
+   
+    #no white matter mask for now?
+    csd_fit = csd_model.fit(dwi.get_fdata(), mask=white_matter)
+
+    prob_dg = ProbabilisticDirectionGetter.from_shcoeff(csd_fit.shm_coeff,
+                                                    max_angle=30.,
+                                                    sphere=default_sphere)
+    csa_model = CsaOdfModel(gtab, sh_order=6)
+    gfa = csa_model.fit(dwi.get_fdata(), mask=white_matter).gfa
+    stopping_criterion = ThresholdStoppingCriterion(gfa, .25)
+    seeds = utils.seeds_from_mask(seed_mask, affine, density=seed_density)
+    streamline_generator = LocalTracking(prob_dg, stopping_criterion, seeds,
+                                     affine, step_size=.5)
+    streamlines = Streamlines(streamline_generator)
+    tracking_method= "probabilistic"
+    use_binary_mask= False
+    stopping_thr= 0.2
+    seed_density= 1
+    #use the dtc to compute appropriate step size
+    step_size= dist_to_corner(maskNifti.affine)
+    pmf_threshold= 0.1
+    max_angle= 30.0
+    #peaks= #somefilepath
+    #stopping_files= #testdata/fa.nii.gz
+    #seeding_files= #testdata/mask.nii.gz
+  
+    return streamlines
