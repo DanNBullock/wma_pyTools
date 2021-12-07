@@ -539,7 +539,6 @@ def iteratedStreamsInWindow(streamlines,referenceNifti=None):
     streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
     streamMaskCoords=list(streamlineMapping.keys())
     
-    nfitiHolder=[]
     dataShape=list(referenceNifti.shape)
     blankNiftiData=np.zeros((dataShape.append(7)))
     for iIterations in range(1,8):
@@ -551,7 +550,7 @@ def iteratedStreamsInWindow(streamlines,referenceNifti=None):
         for iCoordinates in range(len(streamMaskCoords)):
             blankNiftiData[streamMaskCoords[iCoordinates][0],streamMaskCoords[iCoordinates][1],streamMaskCoords[iCoordinates][2],iIterations-1]=proportionInWindow[iCoordinates]
 
-    niftiOut=nib.nifti1.Nifti1Image(np.asarray(nfitiHolder), referenceNifti.affine, referenceNifti.header)
+    niftiOut=nib.nifti1.Nifti1Image(np.asarray(blankNiftiData), referenceNifti.affine, referenceNifti.header)
     
     return niftiOut
 
@@ -1385,7 +1384,7 @@ def orientTractUsingNeck_multi(streamlines):
                 
     return streamlines
 
-def trackStreamsInMask(targetMask,seed_density,dwi,bvecs,bvals):
+def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     """
     
 
@@ -1430,26 +1429,27 @@ def trackStreamsInMask(targetMask,seed_density,dwi,bvecs,bvals):
     
    
     #no white matter mask for now?
-    csd_fit = csd_model.fit(dwi.get_fdata(), mask=white_matter)
+    csd_fit = csd_model.fit(dwi.get_fdata(), mask=wmMask.get_fdata())
 
     prob_dg = ProbabilisticDirectionGetter.from_shcoeff(csd_fit.shm_coeff,
                                                     max_angle=30.,
                                                     sphere=default_sphere)
     csa_model = CsaOdfModel(gtab, sh_order=6)
-    gfa = csa_model.fit(dwi.get_fdata(), mask=white_matter).gfa
-    stopping_criterion = ThresholdStoppingCriterion(gfa, .25)
-    seeds = utils.seeds_from_mask(seed_mask, affine, density=seed_density)
-    streamline_generator = LocalTracking(prob_dg, stopping_criterion, seeds,
-                                     affine, step_size=.5)
-    streamlines = Streamlines(streamline_generator)
-    tracking_method= "probabilistic"
-    use_binary_mask= False
     stopping_thr= 0.2
-    seed_density= 1
-    #use the dtc to compute appropriate step size
-    step_size= dist_to_corner(maskNifti.affine)
-    pmf_threshold= 0.1
-    max_angle= 30.0
+    gfa = csa_model.fit(dwi.get_fdata(), mask=wmMask.get_fdata()).gfa
+    stopping_criterion = ThresholdStoppingCriterion(gfa, stopping_thr)
+    seeds = utils.seeds_from_mask(targetMask.get_fdata(), targetMask.affine, density=seed_density)
+    step_size= dist_to_corner(targetMask.affine)
+    streamline_generator = LocalTracking(prob_dg, stopping_criterion, seeds,
+                                     targetMask.affine, step_size=step_size)
+    streamlines = Streamlines(streamline_generator)
+    #tracking_method= "probabilistic"
+    #use_binary_mask= False
+    #stopping_thr= 0.2
+
+
+    #pmf_threshold= 0.1
+    #max_angle= 30.0
     #peaks= #somefilepath
     #stopping_files= #testdata/fa.nii.gz
     #seeding_files= #testdata/mask.nii.gz

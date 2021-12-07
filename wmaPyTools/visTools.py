@@ -399,7 +399,8 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
     """ 
     import os
     import matplotlib.pyplot as plt
-    [endpointsDF1, endpointsDF2]=quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable)
+    from wmaPyTools import analysisTools 
+    [endpointsDF1, endpointsDF2]=analysisTools.quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable)
     
     figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']))
     figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']))
@@ -667,7 +668,7 @@ def dipyPlotPrototypicality(streamlines,filename):
     
     import matplotlib
     from wmaPyTools import analysisTools
-    prototypeMeasure=analysis.streamlinePrototypicalityMeasure(streamlines,'mean')
+    prototypeMeasure=analysisTools.streamlinePrototypicalityMeasure(streamlines,'mean')
     
     cmap = matplotlib.cm.get_cmap('jet')
     

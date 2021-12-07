@@ -567,6 +567,8 @@ def alignROItoReference(inputROI,reference):
     Helps avoid affine weirdness.  Unclear if actually needed or used.
     Likely redundant with functions in other packages
     
+    replace with either dipy affinemap or nilearn resample
+    
 
     Parameters
     ----------
@@ -606,6 +608,65 @@ def alignROItoReference(inputROI,reference):
     outROI=nib.nifti1.Nifti1Image(outData, reference.affine, header=reference.header)
 
     return outROI
+
+def alignNiftis(nifti1,nifti2):
+    
+    from nilearn.image import crop_img, resample_img 
+    from dipy.core.geometry import dist_to_corner
+    from dipy.align.imaffine import AffineMap
+    import numpy as np
+    import nibabel as nib
+    
+    if   dist_to_corner(nifti1.affine)>dist_to_corner(nifti2.affine):
+        print('resampling nifti1 to nifti2')
+        nifti1=resample_img(nifti1,target_affine=nifti2.affine[0:3,0:3])
+    elif dist_to_corner(nifti2.affine)>dist_to_corner(nifti1.affine):
+        print('resampling nifti2 to nifti1')
+        nifti2=resample_img(nifti2,target_affine=nifti1.affine[0:3,0:3])
+    #if they are the same resolution you don't do anything
+    
+    #roundabout hack: spoof a full mask to get the subject space boundary coords
+    fullMask1 = nib.nifti1.Nifti1Image(np.ones(nifti1.get_fdata().shape), nifti1.affine, nifti1.header)
+    fullMask2 = nib.nifti1.Nifti1Image(np.ones(nifti2.get_fdata().shape), nifti2.affine, nifti2.header)
+    #pass full mask to subject space boundary function
+    convertedBoundCoords1=subjectSpaceMaskBoundaryCoords(fullMask1)
+    convertedBoundCoords2=subjectSpaceMaskBoundaryCoords(fullMask2)
+    
+    #get the subject space min and max values for these boundaries
+    minVals=np.min(np.asarray([convertedBoundCoords1[0,:],convertedBoundCoords2[0,:]]),axis=0)
+    maxVals=np.max(np.asarray([convertedBoundCoords1[1,:],convertedBoundCoords2[1,:]]),axis=0)
+    #so now we have the dimension spans for each axis
+    #do i need to pad somewhere arround here?
+    spans=maxVals-minVals
+    dummyDataBlock=np.zeros(np.ceil(spans).astype(int))
+    #we can create a dummy nifti that encompases this entire volume?
+    #we can spoof a blank nifti here, and then resample it to one of the above as needed.
+    #maybe don't throw it a header and see what happens
+    dummyAffine=np.eye(4)
+    dummyAffine[0,0:3]=maxVals
+    dummyNifti=nib.nifti1.Nifti1Image(dummyDataBlock, dummyAffine)
+    
+    #now resample it to a nifti from above
+    #note that when we arbitrarily created it above, we assumed it was orthogonal
+    #this _probably_ takes care of that assumption
+    dummyNifti=resample_img(dummyNifti,target_affine=nifti1.affine[0:3,0:3])
+    
+    #now use dipy affineMAp to ensure the volume overlap
+    affine_map1 = AffineMap(np.eye(4),
+                       dummyNifti.shape, dummyNifti.affine,
+                       nifti1.shape, nifti1.affine)
+    resampled1 = affine_map1.transform(nifti1)
+    
+    affine_map2 = AffineMap(np.eye(4),
+                       dummyNifti.shape, dummyNifti.affine,
+                       nifti2.shape, nifti2.affine)
+    resampled2 = affine_map2.transform(nifti2)
+    
+    #now create out niftis
+    nifti1=nib.nifti1.Nifti1Image(resampled1, dummyNifti.affine, nifti1.header)
+    nifti2=nib.nifti1.Nifti1Image(resampled2, dummyNifti.affine, nifti2.header)
+    
+    return nifti1, nifti2
 
 def subjectSpaceMaskBoundaryCoords(maskNifti):
     """
@@ -934,6 +995,10 @@ def extendROIinDirection(roiNifti,direction,iterations):
     Potential midline issues
     
     ASSUMES ACPC ALIGNMENT
+    
+    NOTE: THIS CURRENTLY DOESN'T WORK RIGHT NOW., IT WOULD RESULT IN A WEIRD,
+    BOX-CONSTRAINED INFLATION, DESIRED FUNCTIONALITY WOULD BE MORE LIKE
+    ORTHOGONAL TRANSLATION
 
     Parameters
     ----------
