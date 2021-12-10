@@ -822,7 +822,7 @@ def orientTractUsingNeck(streamlines,refAnatT1=None,surpressReport=False):
     import numpy as np
     from scipy.spatial.distance import cdist
     import copy
-    from wmaPyTools import analysisTools
+    import wmaPyTools.analysisTools  
     
     #this has to be run a couple times to ensure that streamlines that are initially 
     #flipped aren't throwing off the group average too bad
@@ -890,7 +890,7 @@ def orientTractUsingNeck(streamlines,refAnatT1=None,surpressReport=False):
     aheadCoords=[ streamlines[iStreamlines][behindNodes[iStreamlines]] for iStreamlines in range(len(streamlines))]
     behindCoords=[ streamlines[iStreamlines][aheadNodes[iStreamlines]] for iStreamlines in range(len(streamlines))]
     
-    streamTraversals=[analysisTools.cumulativeTraversalStream(istreamlines) for istreamlines in streamlines]
+    streamTraversals=[wmaPyTools.analysisTools.cumulativeTraversalStream(istreamlines) for istreamlines in streamlines]
     avgTraversals=np.mean(streamTraversals,axis=0)
     
     if not surpressReport:
@@ -1227,7 +1227,7 @@ def flipStreamstoAB_OrientOnce(streamlines, aheadNodes, behindNodes,surpressRepo
     import numpy as np
     from scipy.spatial.distance import cdist
     import copy
-    from wmaPyTools import analysisTools
+    import wmaPyTools.analysisTools  
     
     flipCount=0
     #compute the coordinates
@@ -1253,7 +1253,7 @@ def flipStreamstoAB_OrientOnce(streamlines, aheadNodes, behindNodes,surpressRepo
     orientationGuideAheadCoord=aheadCoords[np.where(np.min(aheadDistances)==aheadDistances)[0][0]].flatten()
     orientationGuideBehindCoord=behindCoords[np.where(np.min(behindDistances)==behindDistances)[0][0]].flatten()
     
-    streamTraversals=[analysisTools.cumulativeTraversalStream(istreamlines) for istreamlines in streamlines]
+    streamTraversals=[wmaPyTools.analysisTools.cumulativeTraversalStream(istreamlines) for istreamlines in streamlines]
     avgTraversals=np.mean(streamTraversals,axis=0)
     
     
@@ -1319,14 +1319,14 @@ def orientAllStreamlines(streamlines):
     """
     import numpy as np
     import tqdm
-    from wmaPyTools import analysisTools
+    import wmaPyTools.analysisTools
     
     #create a counter, for fun
     flipCount=0
     for iStreamlines in tqdm.tqdm(range(len(streamlines))):
         
         #compute traversals for streamline
-        traversals=analysisTools.cumulativeTraversalStream(streamlines[iStreamlines])
+        traversals=wmaPyTools.analysisTools.cumulativeTraversalStream(streamlines[iStreamlines])
         #find which dimension has max traversal
         maxTraversalDim=np.where(np.max(traversals)==traversals)[0][0]
         #get the current endpoints

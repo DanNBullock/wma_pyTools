@@ -373,7 +373,7 @@ def subsetStreamsByROIboundingBox(streamlines, maskNifti):
     #compute distance tolerance
     from dipy.core.geometry import dist_to_corner
     import time
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools 
     
     #begin timing
     t1_start=time.process_time()
@@ -382,7 +382,7 @@ def subsetStreamsByROIboundingBox(streamlines, maskNifti):
     dtc = dist_to_corner(maskNifti.affine)
     
     #convert them to subject space
-    subjectSpaceBounds=roiTools.subjectSpaceMaskBoundaryCoords(maskNifti)
+    subjectSpaceBounds=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(maskNifti)
     #expand to accomidate tolerance
     subjectSpaceBounds[0,:]=subjectSpaceBounds[0,:]-dtc
     subjectSpaceBounds[1,:]=subjectSpaceBounds[1,:]+dtc
@@ -418,7 +418,7 @@ def subsetStreamsNodesByROIboundingBox(streamlines, maskNifti):
     from dipy.tracking.streamline import Streamlines
     import numpy as np
     import time
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools  
     
     #begin timing
     t1_start=time.process_time()
@@ -427,7 +427,7 @@ def subsetStreamsNodesByROIboundingBox(streamlines, maskNifti):
     dtc = dist_to_corner(maskNifti.affine)
     
     #convert them to subject space
-    subjectSpaceBounds=roiTools.subjectSpaceMaskBoundaryCoords(maskNifti)
+    subjectSpaceBounds=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(maskNifti)
     #expand to accomidate tolerance
     subjectSpaceBounds[0,:]=subjectSpaceBounds[0,:]-dtc
     subjectSpaceBounds[1,:]=subjectSpaceBounds[1,:]+dtc
@@ -495,11 +495,11 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     """
     import numpy as np
     import nibabel as nib
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools 
     
     fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_fdata().shape), planarROI.affine, planarROI.header)
     #obtain boundary coords in subject space in order set max min values for interactive visualization
-    convertedBoundCoords=roiTools.subjectSpaceMaskBoundaryCoords(fullMask)
+    convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(fullMask)
 
     #implement test to determine if input planar roi is indeed planar
     #get coordinates of mask voxels in image space
@@ -586,11 +586,11 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     """
     import numpy as np
     import nibabel as nib
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools  
     
     fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_fdata().shape), planarROI.affine, planarROI.header)
     #obtain boundary coords in subject space in order set max min values for interactive visualization
-    convertedBoundCoords=roiTools.subjectSpaceMaskBoundaryCoords(fullMask)
+    convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(fullMask)
 
     #implement test to determine if input planar roi is indeed planar
     #get coordinates of mask voxels in image space
@@ -698,7 +698,7 @@ def subsetStreamsNodesByROIboundingBox_test(streamlines, maskNifti):
     from dipy.core.geometry import dist_to_corner
     from dipy.tracking.streamline import Streamlines
     import numpy as np
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools  
     
     import time
     
@@ -709,7 +709,7 @@ def subsetStreamsNodesByROIboundingBox_test(streamlines, maskNifti):
     dtc = dist_to_corner(maskNifti.affine)
     
     #convert them to subject space
-    subjectSpaceBounds=roiTools.subjectSpaceMaskBoundaryCoords(maskNifti)
+    subjectSpaceBounds=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(maskNifti)
     #expand to accomidate tolerance
     subjectSpaceBounds[0,:]=subjectSpaceBounds[0,:]-dtc
     subjectSpaceBounds[1,:]=subjectSpaceBounds[1,:]+dtc
@@ -816,7 +816,7 @@ def segmentTractUsingTractMask(streamlines,singleTractMask):
         DESCRIPTION.
 
     """
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools
     
     tractProbabilityMap2SegCriteria(singleTractMask)
     
@@ -845,7 +845,7 @@ def tractProbabilityMap2SegCriteria(singleTractProbMap):
     """
     import nibabel as nib
     import numpy as np
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools  
     
     if isinstance(singleTractProbMap,str):
         singleTractProbMap=nib.load(singleTractProbMap)
@@ -856,7 +856,7 @@ def tractProbabilityMap2SegCriteria(singleTractProbMap):
     #nothing from the tract can traverse them.  Theoretically we could require
     #that all streamlines contain all nodes within the mask, but this is (1)
     #probably overly constrictive and (2) computationally intensive    
-    boundaryPlanes=roiTools.boundaryROIPlanesFromMask(singleTractProbMap)
+    boundaryPlanes=wmaPyTools.roiTools.boundaryROIPlanesFromMask(singleTractProbMap)
   
     
     #go ahead and get the boundaries in subject space as well
@@ -865,7 +865,7 @@ def tractProbabilityMap2SegCriteria(singleTractProbMap):
     #entrity of the mask, one at each end of the thresheld density, and one in the middle
     # but this presumes a bit about the morphology of the tract
     # the arcuate is going to be a real test case for this method
-    maskBoundaries=roiTools.subjectSpaceMaskBoundaryCoords(singleTractProbMap)
+    maskBoundaries=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(singleTractProbMap)
     #compute the span of values for each of these
     dimSpans=np.abs(maskBoundaries[:,0]-maskBoundaries[:,1])
     primaryDim=np.where(dimSpans==np.max(dimSpans))[0][0]
@@ -904,7 +904,7 @@ def tractProbabilityMap2SegCriteria(singleTractProbMap):
     #lets get to making the planar coordinates
     planarInclusionROIs=[]
     for iROIcords in planeCoords[1:-1]:
-        planarInclusionROIs.append(roiTools.makePlanarROI(singleTractProbMap, iROIcords, letterDim))
+        planarInclusionROIs.append(wmaPyTools.roiTools.makePlanarROI(singleTractProbMap, iROIcords, letterDim))
         
     criteriaDict={}
     criteriaDict['any']['include']=planarInclusionROIs

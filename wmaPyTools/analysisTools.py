@@ -91,7 +91,7 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
     from dipy.tracking.vox2track import streamline_mapping
     import itertools
     from dipy.segment.clustering import QuickBundles
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools 
     
     
     # get a streamline index dict of the whole brain tract
@@ -106,7 +106,7 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
     #probably a more elegant way to do this
     for iCoords in range(len(subjectSpaceTractCoords)):
         #make a sphere
-        currentSphere=roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
+        currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
         currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
@@ -188,13 +188,13 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     import time
     from functools import partial
     import tqdm
-    from wmaPyTools import streamTools
+    import wmaPyTools.streamTools 
     
     #create a dummy nifti if necessary in order to get a get an affine?
     if referenceNifti==None:
-        referenceNifti=streamTools.dummyNiftiForStreamlines(streamlines)
+        referenceNifti=wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines)
     
-    streamlines=streamTools.orientAllStreamlines(streamlines)
+    streamlines=wmaPyTools.streamTools.orientAllStreamlines(streamlines)
     
     #this is probably faster than geting the density map, turning that into a mask,
     #and then getting the voxel indexes for that
@@ -423,7 +423,7 @@ def computeStreamsDispersion_bootstrap(streamlines,bootstrapProportion=.5,bootst
     """
     import numpy as np
     from scipy.spatial.distance import cdist
-    from wmaPyTools import streamTools
+    import wmaPyTools.streamTools 
     
     #check to see if theinput is singleton
     if type(streamlines) == np.ndarray:
@@ -434,9 +434,9 @@ def computeStreamsDispersion_bootstrap(streamlines,bootstrapProportion=.5,bootst
     #know that we are selecting these streamlines by their neck, at least insofar
     #as our (spatially defined) collection of streamlines is concerned
     if refAnatT1==None:
-        orientedStreams=streamTools.orientTractUsingNeck_Robust(streamlines,surpressReport=True)
+        orientedStreams=wmaPyTools.streamTools.orientTractUsingNeck_Robust(streamlines,surpressReport=True)
     else:
-        orientedStreams=streamTools.orientTractUsingNeck_Robust(streamlines,refAnatT1, surpressReport=True)
+        orientedStreams=wmaPyTools.streamTools.orientTractUsingNeck_Robust(streamlines,refAnatT1, surpressReport=True)
         
     #set number of streamlines to subsample
     subSampleNum=np.floor(len(streamlines)/2).astype(int)
@@ -534,7 +534,7 @@ def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParam
     from dipy.tracking.vox2track import streamline_mapping
     import itertools
     from dipy.segment.clustering import QuickBundles
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools  
     
     # get a streamline index dict of the whole brain tract
     streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
@@ -552,7 +552,7 @@ def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParam
     #probably a more elegant way to do this
     for iCoords in range(len(subjectSpaceTractCoords)):
         #make a sphere
-        currentSphere=roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
+        currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
         currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
@@ -726,7 +726,7 @@ def endpointDispersionAsymmetryMapping_Bootstrap(streamlines,referenceNifti,dist
     from dipy.tracking.vox2track import streamline_mapping
     import itertools
     from dipy.segment.clustering import QuickBundles
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools  
     
     # get a streamline index dict of the whole brain tract
     streamlineMapping=streamline_mapping(streamlines, referenceNifti.affine)
@@ -750,7 +750,7 @@ def endpointDispersionAsymmetryMapping_Bootstrap(streamlines,referenceNifti,dist
     #probably a more elegant way to do this
     for iCoords in range(len(subjectSpaceTractCoords)):
         #make a sphere
-        currentSphere=roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
+        currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
         currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
@@ -912,7 +912,7 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
     from dipy.segment.metric import MinimumAverageDirectFlipMetric
     import itertools
-    from wmaPyTools import streamTools
+    import wmaPyTools.streamTools  
     
     #use dipy function to reduce labels to contiguous values
     if isinstance(atlas,str):
@@ -930,13 +930,13 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
         tractStreamlines=tractStreamlines.streamlines
     
     #obtains quantifications of neck properties for this collection of streamlines
-    neckQuantifications=streamTools.bundleTest(tractStreamlines)
+    neckQuantifications=wmaPyTools.streamTools.bundleTest(tractStreamlines)
     if neckQuantifications['mean'] <5:
         print('submitted streamlines appear to be coherent bundle via neck criterion')
-        tractStreamlines=streamTools.orientTractUsingNeck(tractStreamlines)
+        tractStreamlines=wmaPyTools.streamTools.orientTractUsingNeck(tractStreamlines)
     else:
         print('submitted streamlines DO NOT appear to be coherent bundle via neck criterion')
-        tractStreamlines=streamTools.dipyOrientStreamlines(tractStreamlines)
+        tractStreamlines=wmaPyTools.streamTools.dipyOrientStreamlines(tractStreamlines)
     
     #segment tractome into connectivity matrix from parcellation
     M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_fdata().astype(int),
@@ -1017,9 +1017,9 @@ def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
     import numpy as np
     import dipy.tracking.utils as ut
     from dipy.tracking.vox2track import streamline_mapping
-    from wmaPyTools import streamTools
+    import wmaPyTools.streamTools
     
-    dummyNifti=streamTools.dummyNiftiForStreamlines(streamlines)
+    dummyNifti= wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines)
     streamlineMapping=streamline_mapping(streamlines, dummyNifti.affine)
     imgSpaceTractVoxels = list(streamlineMapping.keys())
     #probably a terribly inefficient way to do this
@@ -1040,3 +1040,26 @@ def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
     #normalize it
     measuresVec=np.divide(perStreamSums,np.max(perStreamSums))
     return measuresVec
+
+def quantifyOverlapBetweenNiftis(ROI1,ROI2):
+    
+    
+    
+    from wmaPyTools import roiTools
+    from dipy.core.geometry import dist_to_corner
+    import numpy as np
+    
+    #determine the distance to center, and use this as a proxy for resolution
+    roi1dtc=dist_to_corner(ROI1.affine)
+    roi2dtc=dist_to_corner(ROI2.affine)
+
+    #find the minimum of these
+    #if 
+    np.where(np.min([roi1dtc,roi2dtc])==[roi1dtc,roi2dtc])[0][0]
+    
+    roiTools.alignROItoReference
+    
+    # for iROIs in range(len(ROIs)):
+    #     if isinstance(direction,str):
+    #         direction=list(direction)
+    #         ROIs[iROIs]=multiROIrequestToMask(ROIs[iROIs],[1],inflateIter=inflateiter) 
