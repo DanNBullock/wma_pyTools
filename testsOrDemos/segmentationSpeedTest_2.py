@@ -14,6 +14,11 @@ import pandas as pd
 import dipy.tracking.utils as ut
 import random
 
+#you'll need to be in the right directory for this to work
+import wmaPyTools.roiTools
+import wmaPyTools.segmentationTools
+
+
 # esablish path to tractogram
 pathToTestTractogram = '/media/dan/storage/data/exploreTractography/test_1M_1.tck'
 testTractogram = nib.streamlines.load(pathToTestTractogram)
@@ -52,7 +57,7 @@ for iTests in list(range(1,20)):
         # NOTE: This could be on the edge or deep in the tractogram
         testCentroid = subjectSpaceTractCoords[np.random.randint(0,len(subjectSpaceTractCoords))]
         # obtain that data array as bool
-        sphereNifti=createSphere(testRadius, testCentroid, testT1)
+        sphereNifti=wmaPyTools.roiTools.createSphere(testRadius, testCentroid, testT1)
         # add that and a True to the list vector for each
         roisData.append(sphereNifti.get_fdata().astype(bool))
         roisNifti.append(sphereNifti)
@@ -77,7 +82,7 @@ for iTests in list(range(1,20)):
     #restart time
     t1_start=time.process_time()
     #perform segmentation again, but with the modified version
-    modifiedSegmented=segmentTractMultiROI(testTractogram.streamlines, roisNifti, include, operations)
+    modifiedSegmented=wmaPyTools.segmentationTools.segmentTractMultiROI(testTractogram.streamlines, roisNifti, include, operations)
     # stop time
     t1_stop=time.process_time()
     # get the elapsed time

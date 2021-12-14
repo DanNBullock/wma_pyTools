@@ -23,8 +23,11 @@ import pandas as pd
 import dipy.tracking.utils as ut
 import random
 
+
 #you'll need to be in the right directory for this to work
-import WMA_pyFuncs
+import wmaPyTools.roiTools
+import wmaPyTools.segmentationTools
+
 
 # esablish path to tractogram
 pathToTestTractogram = '/media/dan/storage/data/exploreTractography/test_1M_1.tck'
@@ -60,9 +63,9 @@ for iTests in list(range(1,20)):
     for iRois in list(range(roiNumToTest)):
         # randomly select a centroid coordinate within the tract mask
         # NOTE: This could be on the edge or deep in the tractogram
-        testCentroid = subjectSpaceTractCoords[np.random.randint(0,len(subjectSpaceTractCoords))]
+        testCentroid = wmaPyTools.roiTools.subjectSpaceTractCoords[np.random.randint(0,len(subjectSpaceTractCoords))]
         # obtain that data array as bool
-        sphereNifti=WMA_pyFuncs.createSphere(testRadius, testCentroid, testT1)
+        sphereNifti=wmaPyTools.roiTools.createSphere(testRadius, testCentroid, testT1)
         # add that and a True to the list vector for each
         roisData.append(sphereNifti.get_fdata().astype(bool))
         roisNifti.append(sphereNifti)
@@ -73,7 +76,7 @@ for iTests in list(range(1,20)):
     # start timing
     t1_start=time.process_time()
     # specify segmentation
-    dipySegmented=select_by_rois(testTractogram.streamlines, testT1.affine, roisData, include, mode='any')
+    dipySegmented=wmaPyTools.roiTools.select_by_rois(testTractogram.streamlines, testT1.affine, roisData, include, mode='any')
     # actually perform segmentation and get count (cant do indexes here for whatever reason)
     dipyCount=len(list(dipySegmented))
     # stop time
@@ -87,8 +90,8 @@ for iTests in list(range(1,20)):
     #for a valid comparison between these methods we have to split into two operations
     #since select_by_rois implicitly treats multiple operations in a fairly
     #specific modal fashion (https://github.com/dipy/dipy/blob/8898fc962d5aaf7f7cdbf82b027054070fcef49d/dipy/tracking/streamline.py#L240-L243)
-    modifiedSegmented1=WMA_pyFuncs.segmentTractMultiROI(testTractogram.streamlines, [roisNifti[0]], [include[0]], [operations[0]])
-    modifiedSegmented2=WMA_pyFuncs.segmentTractMultiROI(testTractogram.streamlines, [roisNifti[1]], [include[1]], [operations[1]])
+    modifiedSegmented1=wmaPyTools.segmentationTools.segmentTractMultiROI(testTractogram.streamlines, [roisNifti[0]], [include[0]], [operations[0]])
+    modifiedSegmented2=wmaPyTools.segmentationTools.segmentTractMultiROI(testTractogram.streamlines, [roisNifti[1]], [include[1]], [operations[1]])
     #now we have to manually match the implicit logic of select_by_rois
     if np.all(include):
         netmodifiedSegmented=np.logical_or(modifiedSegmented1,modifiedSegmented2)
