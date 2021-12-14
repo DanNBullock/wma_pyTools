@@ -446,7 +446,8 @@ def subsetStreamsNodesByROIboundingBox(streamlines, maskNifti):
     return outIndexes, outStreams
 
 def streamlineWithinBounds(streamline,bounds):
-    """ determine whether **any** node of the input streamline is within the specified bounds
+    """ determine whether **any** node of the input streamline is within the specified bounds.
+    Returns a single bool
     Args:
         -streamline: an n by d shaped array where n=the number of nodes and d = the dimensionality of the streamline
         
@@ -465,7 +466,8 @@ def streamlineWithinBounds(streamline,bounds):
     return np.any(np.all(nodeCriteria,axis=0))
 
 def streamlineNodesWithinBounds(streamline,bounds):
-    """ determine whether **any** node of the input streamline is within the specified bounds
+    """ determine whether **any** node of the input streamline is within the specified bounds.
+    Returns the nodes within the bounds.
     Args:
         streamline: an n by d shaped array where n=the number of nodes and d = the dimensionality of the streamline
         bounds: a 2 x d array specifying the coordinate boundaries (in the pertinant space of the streamline) for assesment

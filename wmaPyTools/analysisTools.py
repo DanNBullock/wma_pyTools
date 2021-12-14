@@ -1045,19 +1045,13 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
     
     
     
-    from wmaPyTools import roiTools
+    import wmaPyTools.roiTools
     from dipy.core.geometry import dist_to_corner
     import numpy as np
     
-    #determine the distance to center, and use this as a proxy for resolution
-    roi1dtc=dist_to_corner(ROI1.affine)
-    roi2dtc=dist_to_corner(ROI2.affine)
-
-    #find the minimum of these
-    #if 
-    np.where(np.min([roi1dtc,roi2dtc])==[roi1dtc,roi2dtc])[0][0]
+    #identify their types
     
-    roiTools.alignROItoReference
+    alignNiftis(nifti1,nifti2)
     
     # for iROIs in range(len(ROIs)):
     #     if isinstance(direction,str):

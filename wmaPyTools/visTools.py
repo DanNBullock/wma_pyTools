@@ -4,69 +4,74 @@ Created on Sun Dec  5 16:03:14 2021
 
 @author: Daniel
 """
-def crossSectionGIFsFromTract(streamlines,refAnatT1,saveDir):
-    import nibabel as nib
-    #use dipy to create the density mask
-    from dipy.tracking import utils
-    import numpy as np
+# def crossSectionGIFsFromTract(streamlines,refAnatT1,saveDir):
     
-    import wmaPyTools.roiTools 
+    #DEPRICATED IN FAVOR OF densityGifsOfTract, which utilizes the existing crossSectionGIFsFromNifti
     
-    from nilearn.image import crop_img 
-    #nilearn.image.resample_img ? to resample output
+#     import nibabel as nib
+#     #use dipy to create the density mask
+#     from dipy.tracking import utils
+#     import numpy as np
     
-    croppedReference=crop_img(refAnatT1)
+#     import wmaPyTools.roiTools 
     
-    densityMap=utils.density_map(streamlines, croppedReference.affine, croppedReference.shape)
-    densityNifti=nib.nifti1.Nifti1Image(densityMap,croppedReference.affine, croppedReference.header)
+#     from nilearn.image import crop_img 
+#     #nilearn.image.resample_img ? to resample output
     
-    #refuses to plot single slice, single image
-    #from nilearn.plotting import plot_stat_map
-    #outImg=plot_stat_map(stat_map_img=densityNifti,bg_img=refAnatT1, cut_coords= 1,display_mode='x',cmap='viridis')
+#     croppedReference=crop_img(refAnatT1)
+    
+#     densityMap=utils.density_map(streamlines, croppedReference.affine, croppedReference.shape)
+#     densityNifti=nib.nifti1.Nifti1Image(densityMap,croppedReference.affine, croppedReference.header)
+    
+#     #refuses to plot single slice, single image
+#     #from nilearn.plotting import plot_stat_map
+#     #outImg=plot_stat_map(stat_map_img=densityNifti,bg_img=refAnatT1, cut_coords= 1,display_mode='x',cmap='viridis')
    
     
-    #obtain boundary coords in subject space in order to
-    #use plane generation function
-    convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(croppedReference)
-    
-    dimsList=['x','y','z']
-    #brute force with matplotlib
-    import matplotlib.pyplot as plt
-    for iDims in list(range(len(croppedReference.shape))):
-        #this assumes that get_zooms returns zooms in subject space and not image space orientation
-        # which may not be a good assumption if the orientation is weird
-        subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1.header.get_zooms()[iDims])
-        #get the desired broadcast shape and delete current dim value
-        broadcastShape=list(croppedReference.shape)
-        del broadcastShape[iDims]
+#     #obtain boundary coords in subject space in order to
+#     #use plane generation function
+#     convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(croppedReference)
+#     #crossSectionGIFsFromNifti
+#     dimsList=['x','y','z']
+#     #brute force with matplotlib
+#     import matplotlib.pyplot as plt
+#     for iDims in list(range(len(croppedReference.shape))):
+#         #this assumes that get_zooms returns zooms in subject space and not image space orientation
+#         # which may not be a good assumption if the orientation is weird
+#         subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1.header.get_zooms()[iDims])
+#         #get the desired broadcast shape and delete current dim value
+#         broadcastShape=list(croppedReference.shape)
+#         del broadcastShape[iDims]
         
-        #iterate across slices
-        for iSlices in list(range(len(subjectSpaceSlices))):
-            #set the slice list entry to the appropriate singular value
-            currentSlice=wmaPyTools.roiTools.makePlanarROI(croppedReference, subjectSpaceSlices[iSlices], dimsList[iDims])
+#         #iterate across slices
+#         for iSlices in list(range(len(subjectSpaceSlices))):
+#             #set the slice list entry to the appropriate singular value
+#             currentSlice=wmaPyTools.roiTools.makePlanarROI(croppedReference, subjectSpaceSlices[iSlices], dimsList[iDims])
 
-            #set up the figure
-            fig,ax = plt.subplots()
-            ax.axis('off')
-            #kind of overwhelming to do this in one line
-            refData=np.rot90(np.reshape(croppedReference.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
-            plt.imshow(refData, cmap='gray', interpolation='nearest')
-            #kind of overwhelming to do this in one line
-            densityData=np.rot90(np.reshape(densityNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
-            plt.imshow(np.ma.masked_where(densityData<1,densityData), cmap='viridis', alpha=.5, interpolation='nearest')
-            figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)
-            plt.savefig(figName,bbox_inches='tight')
-            plt.clf()
+#             #set up the figure
+#             fig,ax = plt.subplots()
+#             ax.axis('off')
+#             #kind of overwhelming to do this in one line
+#             refData=np.rot90(np.reshape(croppedReference.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+#             plt.imshow(refData, cmap='gray', interpolation='nearest')
+#             #kind of overwhelming to do this in one line
+#             densityData=np.rot90(np.reshape(densityNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+#             plt.imshow(np.ma.masked_where(densityData<1,densityData), cmap='viridis', alpha=.5, interpolation='nearest')
+#             figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)
+#             plt.savefig(figName,bbox_inches='tight')
+#             plt.clf()
     
-    import os        
-    from PIL import Image
-    import glob
-    for iDims in list(range(len(croppedReference.shape))):
-        dimStem='dim_' + str(iDims)
-        img, *imgs = [Image.open(f) for f in sorted(glob.glob(dimStem+'*.png'))]
-        img.save(os.path.join(saveDir,dimStem+'.gif'), format='GIF', append_images=imgs,
-                 save_all=True, duration=len(imgs)*2, loop=0)
-        os.remove(sorted(glob.glob(dimStem+'*.png')))
+#     import os        
+#     from PIL import Image
+#     import glob
+#     for iDims in list(range(len(croppedReference.shape))):
+#         dimStem='dim_' + str(iDims)
+#         img, *imgs = [Image.open(f) for f in sorted(glob.glob(dimStem+'*.png'))]
+#         img.save(os.path.join(saveDir,dimStem+'.gif'), format='GIF', append_images=imgs,
+#                  save_all=True, duration=len(imgs)*2, loop=0)
+#         #this worked for a time, not sure why it doesn't take lists now
+#         [os.remove(iImgFiles) for iImgFiles in sorted(glob.glob(dimStem+'*.png'))]
+#         #os.remove()
         
 def plotMultiGifsFrom4DNifti(fourDNifti,referenceAnatomy,saveDir):
     
@@ -205,6 +210,180 @@ def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
 
         
         # get a streamline index dict of the whole brain tract
+        
+def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
+    """
+    
+
+    Parameters
+    ----------
+    overlayNifti : TYPE
+        DESCRIPTION.
+    refAnatT1 : TYPE
+        DESCRIPTION.
+    saveDir : TYPE
+        DESCRIPTION.
+    noEmpties : TYPE, optional
+        DESCRIPTION. The default is True.
+
+    Returns
+    -------
+    None.
+
+    """
+    import nibabel as nib
+    #use dipy to create the density mask
+    from dipy.tracking import utils
+    import numpy as np
+    from glob import glob
+    import os
+    from nilearn.image import reorder_img  
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    from matplotlib import figure
+    from nilearn.image import crop_img, resample_img 
+    import matplotlib.pyplot as plt
+    import dipy.tracking.utils as ut
+    import wmaPyTools.roiTools  
+    
+    #get tract density nifti
+    tractDensityNifti=ut.density_map(streamlines, refAnatT1.affine, refAnatT1.shape)
+    densityNifti = nib.nifti1.Nifti1Image(tractDensityNifti, refAnatT1.affine, refAnatT1.header)
+    
+    #RAS reoreintation
+    refAnatT1=reorder_img(refAnatT1)
+    overlayNifti=reorder_img(densityNifti)
+
+    #obtain boundary coords in subject space in order to
+    #use plane generation function
+    convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(refAnatT1)
+    #overlayBoundCoords=subjectSpaceMaskBoundaryCoords(overlayNifti)
+    
+    #find which input has the highest resolution
+    refAnatT1Resolution=refAnatT1.header.get_zooms()
+    overlayResolution=overlayNifti.header.get_zooms()
+    
+    #not necessary with density mask
+    # #change datatype so that nilearn doesn't mess up
+    # #it doesn't like bool so we have to do something about that
+    # #somehow the data can be set to nifti, but can't be extracted as nifti, so...
+    # overlayNifti=nib.nifti1.Nifti1Image(overlayNifti.get_fdata(),overlayNifti.affine,overlayNifti.header)
+    # overlayNifti.set_data_dtype(overlayNifti.get_fdata().dtype)
+    
+    #resample to the best resolution
+    #but also assuming that the refernce anatomy is ultimately the shape that we want
+    #this is going to cause huge problems if the user passes in a super cropped overlay
+    if np.prod(refAnatT1Resolution)>np.prod(overlayResolution):
+        print('resampling reference anatomy to overlay')
+        refAnatT1=resample_img(refAnatT1,target_affine=overlayNifti.affine[0:3,0:3])
+        overlayNifti=resample_img(overlayNifti,target_affine=overlayNifti.affine[0:3,0:3])
+    else:
+        print('resampling overlay to reference anatomy')
+        refAnatT1=resample_img(refAnatT1,target_affine=refAnatT1.affine[0:3,0:3])
+        overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine[0:3,0:3])
+    
+    #crop the anatomy back down in case it has gotten overly widened
+    refAnatT1=crop_img(refAnatT1)
+    
+    #now crop the overlay to the dimensions of the reference anatomy
+    overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine, target_shape=refAnatT1.shape)
+    
+    #compute the bounds of the actual density data   
+    streamDensityBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(overlayNifti)
+    
+    dimsList=['x','y','z']
+    #brute force with matplotlib
+    
+    for iDims in list(range(len(refAnatT1.shape))):
+        #this assumes that get_zooms returns zooms in subject space and not image space orientation
+        # which may not be a good assumption if the orientation is weird
+        if noEmpties:
+            # + and - 1 in odrer to provide a pad
+            if refAnatT1Resolution[iDims]<=overlayResolution[iDims]:
+                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims]-refAnatT1Resolution[iDims],streamDensityBoundCoords[1,iDims]+refAnatT1Resolution[iDims],refAnatT1Resolution[iDims])
+            else:
+                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims]-overlayResolution[iDims],streamDensityBoundCoords[1,iDims]+overlayResolution[iDims],overlayResolution[iDims])
+     
+            
+        #pick whichever input has the best resolution in this dimension
+        else:
+                if refAnatT1Resolution[iDims]<=overlayResolution[iDims]:
+                    subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1Resolution[iDims])
+                else:
+                    subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],overlayResolution[iDims])
+                #get the desired broadcast shape and delete current dim value
+        broadcastShape=list(refAnatT1.shape)
+        del broadcastShape[iDims]
+            
+            #iterate across slices
+        for iSlices in list(range(len(subjectSpaceSlices))):
+            #set the slice list entry to the appropriate singular value
+            #THE SOLUTION WAS SO OBVIOUS. DONT USE A SINGLE SLICE FOR BOTH THE
+            #REFERNCE AND THE OVERLAY.  DUH!
+            #actually this doesn't matter if we resample
+            currentRefSlice=wmaPyTools.roiTools.makePlanarROI(refAnatT1, subjectSpaceSlices[iSlices], dimsList[iDims])
+            #could be an issue if overlay nifti is signifigantly smaller
+            currentOverlaySlice=wmaPyTools.roiTools.makePlanarROI(overlayNifti, subjectSpaceSlices[iSlices], dimsList[iDims])
+    
+            #set up the figure
+            fig,ax = plt.subplots()
+            ax.axis('off')
+            #kind of overwhelming to do this in one line
+            refData=np.rot90(np.reshape(refAnatT1.get_fdata()[currentRefSlice.get_fdata().astype(bool)],broadcastShape),1)
+            plt.imshow(refData, cmap='gray', interpolation='gaussian')
+            #kind of overwhelming to do this in one line
+            overlayData=np.rot90(np.reshape(overlayNifti.get_fdata()[currentOverlaySlice.get_fdata().astype(bool)],broadcastShape),1)
+            #lets mask out the background
+            [unique, counts] = np.unique(overlayData, return_counts=True)
+            backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
+            
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_fdata()))
+            curFig=plt.gcf()
+            cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
+            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_fdata())], orientation='vertical')
+            curFig.gca().yaxis.set_ticks_position('left')
+            curFig.gca().tick_params( colors='white')
+            # we use *2 in order to afford room for the subsequent blended images
+            figName='dim_' + str(iDims) +'_'+  str(iSlices*2).zfill(3)+'.png'
+            plt.savefig(figName,bbox_inches='tight',pad_inches=0.0)
+            plt.clf()
+                
+    import os        
+    from PIL import Image
+    from glob import glob
+    #create blened images to smooth transitions between slices
+  
+    for iDims in list(range(len(refAnatT1.shape))):
+        dimStem='dim_' + str(iDims)
+        #open the images
+        img, *imgs = [Image.open(f) for f in sorted(glob(dimStem+'*.png'))]
+        #find the number you'll be working with
+        numImagesToTile=len(sorted(glob(dimStem+'*.png')))
+        #find the lenght of the aggregated sides
+        squareSide=np.ceil(np.sqrt(numImagesToTile)).astype(int)
+        #get the dimensions of the images in this dimension
+        imgPix=img.size
+        #create a blank output array
+        tileOut=np.zeros([imgPix[0]*squareSide,imgPix[1]*squareSide,np.asarray(img).shape[2]-1]).astype(np.uint8)
+        #create the iterated bounds
+        colBounds=np.arange(0,tileOut.shape[0],imgPix[0])
+        rowBounds=np.arange(0,tileOut.shape[1],imgPix[1])
+        #get the appropriate number of these to iterate across all imgs
+        y, x=np.meshgrid(colBounds,rowBounds,indexing='ij')
+        #turn into 1d vectors
+        yBoundVec=np.ravel(y)
+        xBoundVec=np.ravel(x)
+        for iImgs in range(len(imgs)):
+            #tileOut[yBoundVec[iImgs]:yBoundVec[iImgs]+imgPix[1],xBoundVec[iImgs]:xBoundVec[iImgs]+imgPix[0],:]=np.transpose(np.asarray(imgs[iImgs]),[1,0,2]).astype(np.uint8)[:,:,0:3]
+            tileOut[yBoundVec[iImgs]:yBoundVec[iImgs]+imgPix[0],xBoundVec[iImgs]:xBoundVec[iImgs]+imgPix[1],:]=np.transpose(np.asarray(imgs[iImgs]),[1,0,2]).astype(np.uint8)[:,:,0:3]
+
+        im=Image.fromarray(np.fliplr(np.rot90(tileOut,3)))
+        
+        im.save(os.path.join(saveDir,tractName+'_'+dimStem+'.png'), format='png')
+        plt.close('all')
+
+        [os.remove(ipaths) for ipaths in sorted(glob(dimStem+'*.png'))]
+    
+    
         
         
 def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False):
