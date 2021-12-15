@@ -939,3 +939,78 @@ def densityMaskToSegCriteria(densityMask):
     
     
     return criteriaDict
+
+def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+    atlasNifti : TYPE
+        DESCRIPTION.
+    mask : TYPE, optional
+        DESCRIPTION. The default is None.
+
+    Returns
+    -------
+    voxelAtlasConnectivityArray : TYPE
+        DESCRIPTION.
+
+    """
+    import numpy as np
+    from dipy.tracking import utils
+    import wmaPyTools.streamlineTools
+    from dipy.tracking.vox2track import streamline_mapping
+    
+    #napkin math to predict size of output array:
+    #16 bit * 200 labels * 2000000 streamlines =~ 800 megabytes, not too bad
+
+    
+    #NOTE astype(int) is causing all sorts of problems, BE WARNED
+    #using round as a workaround
+    [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(atlasNifti.get_fdata()).astype(int))
+    
+    #I guess we can go ahead and create this output structure
+    voxelAtlasConnectivityArray=np.zeros([len(streamlines),len(np.unique(relabeledAtlasData))]).astype(np.uintc)
+    
+    #if an input mask is actually provided
+    if not mask==None:
+        streamsInMaskBool=applyNiftiCriteriaToTract_DIPY_Test(streamlines, mask, True, 'either_end')
+        #we don't care about the label identity of *endpoints* in these img-space
+        #voxels
+        WithinMaskVoxels=np.nonzero(mask)
+        #may need to manipulate this to make it a list of lists
+    else:
+        #I guess we're doing it for all of them!
+        streamsInMaskBool=np.ones(len(streamlines))
+        #there are no voxels that we aren't considering in this case
+        WithinMaskVoxels=[]
+    
+    #perform dipy connectivity analysis.  Don't need to downsample to endpoints
+    #yet because dipy only computes on endpoints anyways
+    M, grouping=utils.connectivity_matrix(streamlines[streamsInMaskBool], atlasNifti.affine, label_volume=relabeledAtlasData,
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    
+    #get just the endpoints
+    streamEndpoints=wmaPyTools.streamlineTools.downsampleToEndpoints(streamlines[streamsInMaskBool])
+    #perform the mapping of these endpoints
+    streamlineMapping=streamline_mapping(streamEndpoints, atlasNifti.affine)
+    #extract the dictionary keys as coordinates
+    imgSpaceTractVoxels = list(streamlineMapping.keys())
+    
+    
+    for iGroupings in list(grouping):
+        currentStreams=grouping[iGroupings]
+        
+        
+        
+        
+        
+        
+
+    
+    
+    return voxelAtlasConnectivityArray

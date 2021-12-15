@@ -1344,7 +1344,43 @@ def orientAllStreamlines(streamlines):
     print( str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
 
     return  streamlines
-        
+
+def downsampleToEndpoints(streamlines):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    endpointsAsStreams : TYPE
+        DESCRIPTION.
+
+    """      
+    import numpy as np
+    from dipy.tracking.streamline import Streamlines
+    
+    #create blank structure for endpoints
+    endpoints=np.zeros((len(streamlines),6))
+    #get the endpoints, taken from
+    #https://github.com/dipy/dipy/blob/f149c756e09f172c3b77a9e6c5b5390cc08af6ea/dipy/tracking/utils.py#L708
+    for iStreamline in range(len(streamlines)):
+        #remember, first 3 = endpoint 1, last 3 = endpoint 2    
+        endpoints[iStreamline,:]= np.concatenate([streamlines[iStreamline][0,:], streamlines[iStreamline][-1,:]])
+    
+    
+    endpoints1=endpoints[:,0:3]
+    endpoints2=endpoints[:,3:7]
+    #horzcat or vertcat?
+    #i'm asuming it's 3xn
+    twoPointStreams=[np.hstack(endpoints1[iStreams],endpoints2[iStreams]) for iStreams in range(len(streamlines)) ]
+    
+    endpointsAsStreams=Streamlines(twoPointStreams)
+
+    return endpointsAsStreams 
 
 def orientTractUsingNeck_multi(streamlines):
     """

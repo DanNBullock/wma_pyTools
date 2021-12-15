@@ -610,6 +610,24 @@ def alignROItoReference(inputROI,reference):
     return outROI
 
 def alignNiftis(nifti1,nifti2):
+    """
+    
+
+    Parameters
+    ----------
+    nifti1 : TYPE
+        DESCRIPTION.
+    nifti2 : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    nifti1 : TYPE
+        DESCRIPTION.
+    nifti2 : TYPE
+        DESCRIPTION.
+
+    """
     
     from nilearn.image import crop_img, resample_img 
     from dipy.core.geometry import dist_to_corner

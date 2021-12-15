@@ -1042,18 +1042,69 @@ def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
     return measuresVec
 
 def quantifyOverlapBetweenNiftis(ROI1,ROI2):
+    """
+    
+
+    Parameters
+    ----------
+    ROI1 : TYPE
+        DESCRIPTION.
+    ROI2 : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    None.
+
+    """
     
     
     
     import wmaPyTools.roiTools
     from dipy.core.geometry import dist_to_corner
     import numpy as np
+    import scipy.spatial.distance
+    
+    #start by aligning the ROIs
+    [ROI1,ROI2]=wmaPyTools.roiTools.alignNiftis(ROI1,ROI2)
     
     #identify their types
+    #kind of involves an assumption, in that we are inferring that a 2 unique 
+    #value ROI is binary, and thus 0 and 1 or some equivalent
+    if len(np.unique(ROI1.get_fdata()))<=2:
+           ROI1type=bool
+    else:
+        ROI1type=ROI1.get_fdata().dtype
+        
+    if len(np.unique(ROI2.get_fdata()))<=2:
+           ROI2type=bool
+    else:
+        ROI2type=ROI2.get_fdata().dtype
     
-    alignNiftis(nifti1,nifti2)
+    #if either of these are bool, you've got to force them both to boolean
+    #so that you can perform dice coefficient
+    if ROI1type==bool or ROI2type==bool:
+        #looks like we are doing bool
+        #convert both to 1D boolean vectors.
+        #I'm assuming ravel ravels in a standard fashion and that this is safe.
+        #also, we can use ravel given that these ROIs are presumably the same size
+        #thanks to wmaPyTools.roiTools.alignNiftis
+        ROI1DataVec=np.ravel(ROI1.get_fdata().astype(bool))
+        ROI2DataVec=np.ravel(ROI2.get_fdata().astype(bool))
+        #now compute the dice coefficient as the distance measure
+        print('Computing dice coefficient')
+        distanceMeasure=scipy.spatial.distance.dice(ROI1DataVec,ROI2DataVec)
+    else: 
+        #I'm assuming ravel ravels in a standard fashion and that this is safe.
+        #also, we can use ravel given that these ROIs are presumably the same size
+        #thanks to wmaPyTools.roiTools.alignNiftis
+        #no need to modify datatype as before, though maybe an issue if different 
+        #types, i.e. int vs float.
+        ROI1DataVec=np.ravel(ROI1.get_fdata())
+        ROI2DataVec=np.ravel(ROI2.get_fdata())
+        #now compute the dice coefficient as the distance measure
+        print('Computing cosine distance')
+        distanceMeasure=scipy.spatial.distance.cosine(ROI1DataVec,ROI2DataVec)
     
-    # for iROIs in range(len(ROIs)):
-    #     if isinstance(direction,str):
-    #         direction=list(direction)
-    #         ROIs[iROIs]=multiROIrequestToMask(ROIs[iROIs],[1],inflateIter=inflateiter) 
+    #return the quantification
+    return distanceMeasure
