@@ -39,13 +39,10 @@ def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
     #for each of the input ROIs compute the number of voxels that will be checked
     volumesToCheck=np.zeros(len(criteriaROIs))
     for iROIs in range(len(criteriaROIs)):
-        #if this is an inclusion criterion
-        if inclusionCriteria[iROIs]:
-            volumesToCheck[iROIs]=np.sum(criteriaROIs[iROIs].get_fdata())
-        #if it is an exclusion, get the number of streamlines that are left out
-        else:
-            volumesToCheck[iROIs]=np.sum(np.logical_not(criteriaROIs[iROIs].get_fdata()))
-    
+        #compute the volume that needs to be checked
+        volumesToCheck[iROIs]=np.sum(criteriaROIs[iROIs].get_fdata())
+
+    print("volumes of input ROIs to check " + str(volumesToCheck))
     #find the criteria that only involve endpoints (you don't have to check all the nodes
     #for these, only the endpoints, so it's way faster to do cdist)
     endpointCriteria=['end' in x for x in operations]
@@ -67,18 +64,23 @@ def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
     #find the index of where we should begin filling these in
     remainFillIndex=len(allNodeCriteriaIndexes)
     #fill in the remaining values
-    for iRemainIndexes in range(remainFillIndex,len(outOrder)):
-        outOrder[iRemainIndexes]=sortOrder[iRemainIndexes-remainFillIndex]
+    for iRemainIndexes in range(len(outOrder)-remainFillIndex,len(outOrder)):
+        outOrder[iRemainIndexes]=sortOrder[iRemainIndexes-(len(outOrder)-remainFillIndex)]
     
     #initialize output objects
     sortedCriteriaROIs=[]
     sortedInclusionCriteria=[]
     sortedOperations=[]
     #resort the inputs in accordance with predicted stringency
+    volumesToCheckOut=np.zeros(len(outOrder)).astype(int)
     for iOutputs in range(len(outOrder)):
         sortedCriteriaROIs.append(criteriaROIs[outOrder[iOutputs]])
         sortedInclusionCriteria.append(inclusionCriteria[outOrder[iOutputs]])
         sortedOperations.append(operations[outOrder[iOutputs]])
+        
+        volumesToCheckOut[iOutputs]=np.sum(sortedCriteriaROIs[iOutputs].get_fdata()).astype(int)
+        #if it is an exclusion, get the number of streamlines that are left out
+    print("volumes of output ROIs to check " + str(volumesToCheckOut))
     
     return sortedCriteriaROIs,sortedInclusionCriteria, sortedOperations
     
@@ -279,6 +281,7 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
     import nibabel as nib
     from nilearn import masking 
     import scipy
+    import time
     
     #perform some input checks
     validOperations=["any","all","either_end","both_end"]
@@ -334,13 +337,24 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
     #ok, but you can probably do this differently if you're just doing the endpoints
     if 'end' in operationSpec:
         #or [[streamline[0,:],streamline[-1,:]] for streamline in streamlines]
-        boundedIndexes=subsetStreamsNodesByROIboundingBox([np.asarray([streamline[0,:],streamline[-1,:]]) for streamline in streamlines], tractMaskROIIntersection)[0]
+        [outIndexes, outStreams]   =subsetStreamsNodesByROIboundingBox([np.asarray([streamline[0,:],streamline[-1,:]]) for streamline in streamlines], tractMaskROIIntersection)
     else:
-        boundedIndexes=subsetStreamsNodesByROIboundingBox(streamlines, tractMaskROIIntersection)[0]
+        [outIndexes, outStreams]   =subsetStreamsNodesByROIboundingBox(streamlines, tractMaskROIIntersection)
     #use dipy's near roi function to generate bool
-    criteriaStreamsBool=near_roi(streamlines[boundedIndexes], tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata().astype(bool), mode=operationSpec)
+    #start timing
+    t1_start=time.process_time()
+    criteriaStreamsBool=near_roi(outStreams, tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata().astype(bool), mode=operationSpec)
+    #stop timing
+    t1_stop=time.process_time()
+    # get the elapsed time
+    modifiedTime=t1_stop-t1_start
+    if includeBool:
+        print('Tractogram segmentation complete in ' +str(modifiedTime) +', '+str(np.sum(criteriaStreamsBool)) + ' of ' + str(len(streamlines)) + ' met INCLUSION criterion')
+    else:
+        print('Tractogram segmentation complete in ' +str(modifiedTime) +', '+str(np.sum(criteriaStreamsBool)) + ' of ' + str(len(streamlines)) + ' met EXCLUSION criterion')
+   
 
-    originalIndexes=boundedIndexes[np.where(criteriaStreamsBool)[0]]
+    originalIndexes=outIndexes[np.where(criteriaStreamsBool)[0]]
     
     if includeBool==True:
         #initalize an out bool vec
@@ -725,6 +739,13 @@ def subsetStreamsNodesByROIboundingBox_test(streamlines, maskNifti):
     outIndexes=np.where(list(map(lambda x: x.size>0, nodeArray)))[0]
     outStreams=Streamlines(nodeArray)
     
+        
+    #map and lambda function to extract the nodes within the bounds
+    #criteriaVec=list(map(lambda streamline: streamlineNodesWithinBounds(streamline,subjectSpaceBounds), streamlines))
+    #outIndexes=np.where(list(map(lambda x: x.size>0, criteriaVec)))[0]
+    #outStreams=Streamlines(criteriaVec)
+    
+    
     #stop timing
     t1_stop=time.process_time()
     # get the elapsed time
@@ -829,7 +850,8 @@ def segmentTractUsingTractMask(streamlines,singleTractMask):
 def tractProbabilityMap2SegCriteria(singleTractProbMap):
     """
     This function converts a nifti-based probablity map (presumably of an atlas
-    maping of a tract) to a series of segmentation criteria
+    maping of a tract) to a series of segmentation critersegmentedTract = StatefulTractogram(testStreamlines.streamlines[comboROIBool], testAnatomy, Space.RASMM)
+save_tractogram( segmentedTract,'testSegmentedTract.trk')ia
     
     You know what would make this process a lot easier?
     If atlases included endpoint masks, and not just allNode masks

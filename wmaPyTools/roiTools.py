@@ -1100,7 +1100,7 @@ def boundaryROIPlanesFromMask(inputMask):
     for iBorders in range(len(bordersList)):
         #generate plane for current border of interest 
         currentBorderROI=planeAtMaskBorder(binarizedMask,bordersList[iBorders])
-        borderDict[bordersList]=currentBorderROI
+        borderDict[bordersList[iBorders]]=currentBorderROI
     
     #having generated those borders, return the dictionary
     return borderDict
