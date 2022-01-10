@@ -997,6 +997,7 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     from dipy.tracking import utils
     import wmaPyTools.streamlineTools
     from dipy.tracking.vox2track import streamline_mapping
+    import itertools
     
     #napkin math to predict size of output array:
     #16 bit * 200 labels * 2000000 streamlines =~ 800 megabytes, not too bad
@@ -1006,9 +1007,7 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     #using round as a workaround
     [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(atlasNifti.get_fdata()).astype(int))
     
-    #I guess we can go ahead and create this output structure
-    voxelAtlasConnectivityArray=np.zeros([len(streamlines),len(np.unique(relabeledAtlasData))]).astype(np.uintc)
-    
+   
     #if an input mask is actually provided
     if not mask==None:
         streamsInMaskBool=applyNiftiCriteriaToTract_DIPY_Test(streamlines, mask, True, 'either_end')
@@ -1018,7 +1017,7 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
         #may need to manipulate this to make it a list of lists
     else:
         #I guess we're doing it for all of them!
-        streamsInMaskBool=np.ones(len(streamlines))
+        streamsInMaskBool=np.ones(len(streamlines),dtype=bool)
         #there are no voxels that we aren't considering in this case
         WithinMaskVoxels=[]
     
@@ -1034,14 +1033,35 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     #maybe we need the flipped version of this
     streamlineEndpointMapping=streamline_mapping(streamEndpoints, atlasNifti.affine)
     #extract the dictionary keys as coordinates
-    imgSpaceEndpointVoxels = list(streamlineEndpointMapping.keys())
     
-    for iGroupings in list(grouping):
-        currentStreams=grouping[iGroupings]
-        if not 
-        voxelAtlasConnectivityArray
+    #I guess we can go ahead and create this output structure
+    voxelAtlasConnectivityArray=np.zeros([len(list(streamlineEndpointMapping.keys())),len(np.unique(relabeledAtlasData))]).astype(np.uintc)
+    
+    
+    # for iGroupings in list(grouping):
+    #     currentStreams=grouping[iGroupings]
+    #     if not 
+    #     voxelAtlasConnectivityArray
+    allEndpointMappings=list(streamlineEndpointMapping.keys())
+    allGroups=list(grouping.keys())
+    for iEndpointVoxels in range(len(allEndpointMappings)):
         
+        currentVoxLabelValue=relabeledAtlasData[allEndpointMappings[iEndpointVoxels]]
+        currentVoxStreams=streamlineEndpointMapping[allEndpointMappings[iEndpointVoxels]]
         
+        groupKeysWithLabelBool=np.asarray([ currentVoxLabelValue in currentGrouping for currentGrouping in allGroups])
+        
+        currentGroupings=list(itertools.compress(allGroups,groupKeysWithLabelBool))
+        
+        for iGroupings in range(len(currentGroupings)):
+            #if the first group label is the current voxel value, go with the
+            #other label value.  Essentially, ignores ordering and deals with same
+            #label mappings adequately
+            if currentGroupings[iGroupings][0]==currentVoxLabelValue:
+                voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][1]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
+            else:
+                voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][0]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
+          
         
         
         

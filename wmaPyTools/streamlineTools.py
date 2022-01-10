@@ -1376,7 +1376,7 @@ def downsampleToEndpoints(streamlines):
     endpoints2=endpoints[:,3:7]
     #horzcat or vertcat?
     #i'm asuming it's 3xn
-    twoPointStreams=[np.hstack(endpoints1[iStreams],endpoints2[iStreams]) for iStreams in range(len(streamlines)) ]
+    twoPointStreams=[np.vstack((endpoints1[iStreams],endpoints2[iStreams])) for iStreams in range(len(streamlines)) ]
     
     endpointsAsStreams=Streamlines(twoPointStreams)
 
@@ -1447,6 +1447,7 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     from dipy.reconst.shm import CsaOdfModel
     from dipy.tracking import utils
     from dipy.tracking.streamline import Streamlines
+    from nilearn import image
 
     
     if isinstance(dwi,str):
@@ -1465,7 +1466,9 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     
    
     #no white matter mask for now?
-    csd_fit = csd_model.fit(dwi.get_fdata(), mask=wmMask.get_fdata())
+    wmOnDwi=image.resample_to_img(wmMask,dwi,interpolation='nearest')
+    
+    csd_fit = csd_model.fit(dwi.get_fdata(), mask=wmOnDwi.get_fdata())
 
     prob_dg = ProbabilisticDirectionGetter.from_shcoeff(csd_fit.shm_coeff,
                                                     max_angle=30.,
