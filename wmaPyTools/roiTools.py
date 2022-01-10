@@ -1145,6 +1145,6 @@ def findROISintersection(ROIs,inflateiter=0):
     #if it's empty throw a warning
     if not (1 in np.unique(intersectionNifti.get_fdata)) or (True in np.unique(intersectionNifti.get_fdata)):
         import warnings
-        warnings.warn("Empty mask for intersection returne; likely no mutual intersection between input " + str(len(ROIs)) + "ROIs")
+        warnings.warn("Empty mask for intersection returned; likely no mutual intersection between input " + str(len(ROIs)) + "ROIs")
                       
     return intersectionNifti

@@ -5,23 +5,24 @@ Created on Sun Dec  5 16:03:22 2021
 @author: Daniel
 """
 def streamGeomQuantifications(tractogram):
-    #streamGeomQuantifications(tractogram)
-    #
-    #This function quantifies a number of streamline-based quantities
-    #in the same fashion as wma_tools's  ConnectomeTestQ
-    #
-    # INPUTS
-    #
-    # tractogram: an input stateful tractogram
-    #
-    # OUTPUTS
-    # 
-    # quantificationTable: a pandas table documenting the streamline based
-    #                      quantificaton.  
-    # see https://github.com/DanNBullock/wma_tools#connectometestq
-    # for more details.
-    #
-    # begin code
+    """
+    This function quantifies a number of streamline-based quantities
+    in the same fashion as wma_tools's  ConnectomeTestQ
+    
+    see https://github.com/DanNBullock/wma_tools#connectometestq
+    for more details.
+
+    Parameters
+    ----------
+    tractogram : TYPE
+        An input stateful tractogram
+
+    Returns
+    -------
+    quantificationTable : TYPE
+        A pandas table documenting the streamline based quantificaton. 
+
+    """
     import pandas as pd
     import numpy as np
     #establish the dataframe
@@ -1000,17 +1001,25 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
 
 def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
     """
+    Generate a per-streamline measure of how 'typical' each streamline is for this
+    collection of input streamlines, as indicated by the relative density of
+    streamlines in the traversal of those streamlines.
     
-
     Parameters
     ----------
     streamlines : TYPE
-        DESCRIPTION.
+        Theoretically, any collection of streamlines.  However, this computation
+    probably only makes sense for coherent "tracts"
+
+    sumOrMean : string
+        Either "sum" or "mean".  Indicates what the final aggregate quantifiaction
+    will be.  Presumably, "mean" takes care of length-related confounds better.
 
     Returns
     -------
     measuresVec : TYPE
-        DESCRIPTION.
+        A vector containing a normalized measure of the density values traversed
+    by each straemline 
 
     """
     
@@ -1019,17 +1028,29 @@ def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
     from dipy.tracking.vox2track import streamline_mapping
     import wmaPyTools.streamTools
     
+    #create a dummy referencec nifti for the input straemlines
     dummyNifti= wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines)
+    #compute the voxelwise mapping for the streamlines
     streamlineMapping=streamline_mapping(streamlines, dummyNifti.affine)
+    #find the voxels occupied by streamlines and get a list of these
     imgSpaceTractVoxels = list(streamlineMapping.keys())
     #probably a terribly inefficient way to do this
+    #initalize a blank list of lists
     traversalValues=[[] for i in range(len(streamlines))]
     #get the density map
     densityMap=ut.density_map(streamlines, dummyNifti.affine, dummyNifti.shape)
+    #iterate across the voxels with streamlines in them
     for iVoxels in imgSpaceTractVoxels:
+        #get the indexes of the streams that traverse this voxel
         currentStreams=streamlineMapping[iVoxels]
+        #get the density for this voxel
         currentValue=densityMap[iVoxels]
+        #iterate across the streamline indexes for this voxel, and add
+        #this voxels density value to the list of lists 
+        #(because we're just going to sum and mean, the ordering doesn't matter)
         for iStreams in currentStreams:
+            #append the current value to the list of lists for the relevant
+            #streamlines
             traversalValues[iStreams].append(currentValue)
     
     #sum it all up
@@ -1037,13 +1058,15 @@ def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
         perStreamSums=[np.sum(iStreams) for iStreams in traversalValues]
     elif sumOrMean=='mean':
         perStreamSums=[np.mean(iStreams) for iStreams in traversalValues]
-    #normalize it
+    #normalize it, divide by the highest number for this collection of streamlines
     measuresVec=np.divide(perStreamSums,np.max(perStreamSums))
     return measuresVec
 
 def quantifyOverlapBetweenNiftis(ROI1,ROI2):
     """
-    
+    Computes either the dice coefficient or cosine distance for two input niftis
+    based on whether the inputs are bool or float.  Pair with DIPY's 
+    ut.density_map to perform this analysis for tractograms.
 
     Parameters
     ----------
@@ -1054,11 +1077,10 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
 
     Returns
     -------
-    None.
+    distanceMeasure:  float
+        The single value quantification associated with the overlap measure
 
     """
-    
-    
     
     import wmaPyTools.roiTools
     from dipy.core.geometry import dist_to_corner
@@ -1108,3 +1130,102 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
     
     #return the quantification
     return distanceMeasure
+
+def quantifyTractsOverlap(streamlines1, streamlines2):
+    """
+    Computes the overlap between two collections of streamlines, presumably
+    representing distinct tracts.
+
+    Parameters
+    ----------
+    streamlines1 : TYPE
+        Collection of streamlines presumably representing a tract of interest
+    streamlines2 : TYPE
+        Collection of streamlines presumably representing a tract of interest
+
+    Returns
+    -------
+    overlapMeasure : Float
+        The single value quantification associated with the overlap measure
+
+    """
+    
+    import dipy.tracking.utils as ut
+    from dipy.tracking.vox2track import streamline_mapping
+    import wmaPyTools.streamTools
+    
+    #create a dummy referencec nifti for the input streamlines
+    dummyNifti1= wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines1)
+    #use that dummy nifti as an input for the density computation
+    densityMap1=ut.density_map(streamlines1, dummyNifti1.affine, dummyNifti1.shape)
+    
+    dummyNifti2= wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines2)
+    densityMap2=ut.density_map(streamlines2, dummyNifti2.affine, dummyNifti2.shape)
+    
+    overlapMeasure=quantifyOverlapBetweenNiftis(densityMap1,densityMap2)
+    
+    return overlapMeasure
+
+def multiTractOverlapAnalysis(streamlinesList, namesList=None):
+    """
+    Comprehensively and iteratively asses the overlap between 
+    collections of streammlines.  Will load tracts if paths provided.  Recomend
+    efficient indexing practices if passing streamlines.
+
+    Parameters
+    ----------
+    streamlinesList : List
+        A list of either paths to tracts of interest or a list of streamline
+    collections thesmselves presumably representing tracts
+    namesList : TYPE, optional
+        A list of strings indicating the name of the tracts. The default is None.
+    Used in the creation of the output table.  The ordering in the names 
+    is presumed to match the ordering of the input structures.
+
+    Returns
+    -------
+    overlapTable : Pandas table
+        A N x N pandas table, where N is the number of input tracts/paths.
+    Each I,J entry indicates the overlap measure for those tracts/structures.
+
+    """
+    import pandas as pd
+    import numpy as np
+    import nibabel as nib
+    
+    #use meshgrid to create indexing array
+    x, y = np.meshgrid(range(len(streamlinesList)), range(len(streamlinesList))  ,indexing='i')
+    #create a list for iteration
+    pairingList=[[x[iPairings],y[iPairings]] for iPairings in range(len(x)) ]
+    
+    #create blank outut array
+    overlapArray=np.zeros ([len(streamlinesList),len(streamlinesList)])
+    
+    if namesList==None:
+        namesList=['Tract_'+str(iTract) for iTract in range (streamlinesList)]
+    
+    #iterate across the structure pairings
+    for iPairs in pairingList:
+        
+        #get objects from input list
+        currStreams1=streamlinesList[iPairs[0]]
+        currStreams2=streamlinesList[iPairs[1]]
+    
+        #load them and extract streamlines if input
+        if isinstance(currStreams1,str):
+            sftHolder1=nib.streamlines.load(currStreams1)
+            currStreams1=sftHolder1.streamlines
+        
+        if isinstance(currStreams2,str):
+            sftHolder2=nib.streamlines.load(currStreams2)
+            currStreams2=sftHolder2.streamlines
+        
+        #perform overlap analysis
+        currentOverlap=quantifyTractsOverlap(currStreams1, currStreams2)
+        #place value into the array
+        overlapArray[iPairs[0],iPairs[1]]=currentOverlap
+        
+    #make a table out of it
+    overlapTable=pd.DataFrame(data=overlapArray, columns=namesList)      
+    
+    return overlapTable

@@ -6,25 +6,37 @@ Created on Sun Dec  5 16:03:51 2021
 """
 def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
     """
-    
+    Sorts segmentation criteria in order to minimize segmentation time.
+    Acheives this by sorting criteria by how fast/harsh they are.  Endpoint
+    criteria applied first, because they are only computed on endpoints.  Then
+    for standard traversal ROIS, smallest are placed before larger.  This is 
+    because (1) fewer streamlines are likely to pass through smaller ROIs,
+    and so this is expected to be fast and (2), when paired with a bounding
+    box implementation, greatly reduces the numbr of vreticies that are
+    computed against.
+
+    The ordering of the input vectors is presumed to be locked to one another.
 
     Parameters
     ----------
     criteriaROIs : TYPE
-        DESCRIPTION.
+        A list of nifti ROI criteria
     inclusionCriteria : TYPE
-        DESCRIPTION.
+        The boolean vector indicating whether these rois will operate as
+    exclusion or inclusion ROIs
     operations : TYPE
-        DESCRIPTION.
+        The vector of strings indicating which operations will be performed
 
     Returns
     -------
     sortedCriteriaROIs : TYPE
-        DESCRIPTION.
+        A sorted list of nifti ROI criteria
     sortedInclusionCriteria : TYPE
-        DESCRIPTION.
+        The sorted boolean vector indicating whether these rois will operate as
+    exclusion or inclusion ROIs
     sortedOperations : TYPE
-        DESCRIPTION.
+        The sorted vector of strings indicating which operations will be 
+    performed
 
     """
     #also remember all = [some criteria] == any != [some criteria]
@@ -851,7 +863,7 @@ def tractProbabilityMap2SegCriteria(singleTractProbMap):
     """
     This function converts a nifti-based probablity map (presumably of an atlas
     maping of a tract) to a series of segmentation critersegmentedTract = StatefulTractogram(testStreamlines.streamlines[comboROIBool], testAnatomy, Space.RASMM)
-save_tractogram( segmentedTract,'testSegmentedTract.trk')ia
+    save_tractogram( segmentedTract,'testSegmentedTract.trk')ia
     
     You know what would make this process a lot easier?
     If atlases included endpoint masks, and not just allNode masks
@@ -1019,13 +1031,15 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     #get just the endpoints
     streamEndpoints=wmaPyTools.streamlineTools.downsampleToEndpoints(streamlines[streamsInMaskBool])
     #perform the mapping of these endpoints
-    streamlineMapping=streamline_mapping(streamEndpoints, atlasNifti.affine)
+    #maybe we need the flipped version of this
+    streamlineEndpointMapping=streamline_mapping(streamEndpoints, atlasNifti.affine)
     #extract the dictionary keys as coordinates
-    imgSpaceTractVoxels = list(streamlineMapping.keys())
-    
+    imgSpaceEndpointVoxels = list(streamlineEndpointMapping.keys())
     
     for iGroupings in list(grouping):
         currentStreams=grouping[iGroupings]
+        if not 
+        voxelAtlasConnectivityArray
         
         
         
