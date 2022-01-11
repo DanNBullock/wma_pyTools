@@ -1229,3 +1229,152 @@ def multiTractOverlapAnalysis(streamlinesList, namesList=None):
     overlapTable=pd.DataFrame(data=overlapArray, columns=namesList)      
     
     return overlapTable
+
+def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+    atlasNifti : TYPE
+        DESCRIPTION.
+    mask : TYPE, optional
+        DESCRIPTION. The default is None.
+
+    Returns
+    -------
+    voxelAtlasConnectivityArray : TYPE
+        DESCRIPTION.
+
+    """
+    import numpy as np
+    from dipy.tracking import utils
+    import wmaPyTools.streamlineTools
+    import wmaPyTools.segmentationTools
+    from dipy.tracking.vox2track import streamline_mapping
+    import itertools
+    import pandas as pd
+    import tqdm
+    
+    #napkin math to predict size of output array:
+    #16 bit * 200 labels * 300000 voxels =~ 120 MB, not too bad
+
+    
+    #NOTE astype(int) is causing all sorts of problems, BE WARNED
+    #using round as a workaround
+    [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(atlasNifti.get_fdata()).astype(int))
+    
+   
+    #if an input mask is actually provided
+    if not mask==None:
+        streamsInMaskBool=wmaPyTools.segmentationTools.applyNiftiCriteriaToTract_DIPY_Test(streamlines, mask, True, 'either_end')
+        #we don't care about the label identity of *endpoints* in these img-space
+        #voxels
+        #WithinMaskVoxels=np.nonzero(mask)
+        #may need to manipulate this to make it a list of lists
+    else:
+        #I guess we're doing it for all of them!
+        streamsInMaskBool=np.ones(len(streamlines),dtype=bool)
+        #there are no voxels that we aren't considering in this case
+        #WithinMaskVoxels=[]
+    
+    #perform dipy connectivity analysis.  Don't need to downsample to endpoints
+    #yet because dipy only computes on endpoints anyways
+    print('computing voxel-label profiles for ' + str(np.sum(streamsInMaskBool)) + ' streamlines')
+    
+    M, grouping=utils.connectivity_matrix(streamlines[streamsInMaskBool], atlasNifti.affine, label_volume=relabeledAtlasData,
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    
+    #get just the endpoints
+    streamEndpoints=wmaPyTools.streamlineTools.downsampleToEndpoints(streamlines[streamsInMaskBool])
+    #perform the mapping of these endpoints
+    #maybe we need the flipped version of this
+    streamlineEndpointMapping=streamline_mapping(streamEndpoints, atlasNifti.affine)
+    #extract the dictionary keys as coordinates
+    
+    #I guess we can go ahead and create this output structure
+    voxelAtlasConnectivityArray=np.zeros([len(list(streamlineEndpointMapping.keys())),len(np.unique(relabeledAtlasData))]).astype(np.uintc)
+    
+    
+    # for iGroupings in list(grouping):
+    #     currentStreams=grouping[iGroupings]
+    #     if not 
+    #     voxelAtlasConnectivityArray
+    allEndpointMappings=list(streamlineEndpointMapping.keys())
+    allGroups=list(grouping.keys())
+    for iEndpointVoxels in  tqdm.tqdm(range(len(allEndpointMappings))):
+        
+        currentVoxLabelValue=relabeledAtlasData[allEndpointMappings[iEndpointVoxels]]
+        currentVoxStreams=streamlineEndpointMapping[allEndpointMappings[iEndpointVoxels]]
+        
+        groupKeysWithLabelBool=np.asarray([ currentVoxLabelValue in currentGrouping for currentGrouping in allGroups])
+        
+        currentGroupings=list(itertools.compress(allGroups,groupKeysWithLabelBool))
+        
+        for iGroupings in range(len(currentGroupings)):
+            #if the first group label is the current voxel value, go with the
+            #other label value.  Essentially, ignores ordering and deals with same
+            #label mappings adequately
+            if currentGroupings[iGroupings][0]==currentVoxLabelValue:
+                voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][1]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
+            else:
+                voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][0]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
+    
+    #set up the pandas output
+    
+    columnLabels=['Label_' + str(iLabel) for iLabel in range(M.shape[0])]
+    rowLabels=allEndpointMappings
+    voxelAtlasConnectivityTable=pd.DataFrame(data=voxelAtlasConnectivityArray,index=rowLabels,columns=columnLabels)
+    
+    return voxelAtlasConnectivityTable
+
+def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
+    
+    import pandas as pd
+    import numpy as np
+    import os
+    from scipy.spatial.distance import cdist
+    import tqdm
+    
+    #get the indexes, which also serve as the voxel labels
+    voxelIndexes=voxelAtlasConnectivityTable.index
+    #determine if the output has been normalized
+    #if you did the tracking using trackStreamsInMask then each voxel should
+    #have the same number of streamlines
+    # if you didn't, each voxel could have distinct numbers of streamlines
+    # this controls for this
+    # could probably be tripped up if the first voxel only has one streamline in it
+    firstRowSum=np.sum(voxelAtlasConnectivityTable.iloc[0])
+    if not firstRowSum==1 :
+        normalizedVoxelAtlasConnectivityTable=voxelAtlasConnectivityTable.apply(lambda x: np.divide(x,np.sum(x)),axis=1)
+    else:
+        normalizedVoxelAtlasConnectivityTable=voxelAtlasConnectivityTable
+        
+    # do some math to determine if the output size on this is sensible
+    # Getting all memory using os.popen()
+    total_memory, used_memory, free_memory = map(int, os.popen('free -t -m').readlines()[-1].split()[1:])
+    #expected memory usage
+    #THERE'S A PROBABLY A WAY TO DO THIS WITH A SPARSE MATRIX
+    #the above method returns MB it looks like
+    expectedMemUsage=np.divide(np.multiply(len(voxelIndexes)^2,32), 1024^2)
+    #use 1.3 for a bit of extra buffer
+    if expectedMemUsage*1.3>=free_memory:
+        raise Exception('Expected memory usage for float 32 square array of size ' + str(len(voxelIndexes)) + ' exceeds available RAM of ' + str(free_memory) + 'MB')
+    
+    #otherwise go ahead
+    #create output array
+    cosineDistanceMatrix=np.zeros([len(voxelIndexes),len(voxelIndexes)])
+    #may actually be pretty fast/efficient using cdist
+    #it's not, it's extremely slow
+    #maybe we can parallelize it
+    #at the very least we can only compute this on the upper or lower diagonal.
+    for iVoxelIndexesRow in tqdm.tqdm(range(len(voxelIndexes))):
+        for iVoxelIndexesCol in range(len(voxelIndexes)):
+            cosineDistanceMatrix[iVoxelIndexesRow,iVoxelIndexesCol]=cdist(np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesRow]),np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesCol]),metric='cosine')[0][0]
+            
+    #I guess we're done
+    return voxelIndexes, cosineDistanceMatrix
+    
