@@ -1459,7 +1459,7 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
 
     gtab = gradient_table(bvals, bvecs)
 
-    response, ratio = auto_response_ssst(gtab, dwi.get_fdata(), roi_radii=10, fa_thr=0.7)
+    response, ratio = auto_response_ssst(gtab, dwi.get_data(), roi_radii=10, fa_thr=0.7)
     
     csd_model = ConstrainedSphericalDeconvModel(gtab, response)
     
@@ -1468,16 +1468,16 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     #no white matter mask for now?
     wmOnDwi=image.resample_to_img(wmMask,dwi,interpolation='nearest')
     
-    csd_fit = csd_model.fit(dwi.get_fdata(), mask=wmOnDwi.get_fdata())
+    csd_fit = csd_model.fit(dwi.get_data(), mask=wmOnDwi.get_data())
 
     prob_dg = ProbabilisticDirectionGetter.from_shcoeff(csd_fit.shm_coeff,
                                                     max_angle=30.,
                                                     sphere=default_sphere)
     csa_model = CsaOdfModel(gtab, sh_order=6)
     stopping_thr= 0.2
-    gfa = csa_model.fit(dwi.get_fdata(), mask=wmMask.get_fdata()).gfa
+    gfa = csa_model.fit(dwi.get_data(), mask=wmMask.get_data()).gfa
     stopping_criterion = ThresholdStoppingCriterion(gfa, stopping_thr)
-    seeds = utils.seeds_from_mask(targetMask.get_fdata(), targetMask.affine, density=seed_density)
+    seeds = utils.seeds_from_mask(targetMask.get_data(), targetMask.affine, density=seed_density)
     step_size= dist_to_corner(targetMask.affine)
     streamline_generator = LocalTracking(prob_dg, stopping_criterion, seeds,
                                      targetMask.affine, step_size=step_size)

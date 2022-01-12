@@ -52,10 +52,10 @@ Created on Sun Dec  5 16:03:14 2021
 #             fig,ax = plt.subplots()
 #             ax.axis('off')
 #             #kind of overwhelming to do this in one line
-#             refData=np.rot90(np.reshape(croppedReference.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+#             refData=np.rot90(np.reshape(croppedReference.get_data()[currentSlice.get_data().astype(bool)],broadcastShape),3)
 #             plt.imshow(refData, cmap='gray', interpolation='nearest')
 #             #kind of overwhelming to do this in one line
-#             densityData=np.rot90(np.reshape(densityNifti.get_fdata()[currentSlice.get_fdata().astype(bool)],broadcastShape),3)
+#             densityData=np.rot90(np.reshape(densityNifti.get_data()[currentSlice.get_data().astype(bool)],broadcastShape),3)
 #             plt.imshow(np.ma.masked_where(densityData<1,densityData), cmap='viridis', alpha=.5, interpolation='nearest')
 #             figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)
 #             plt.savefig(figName,bbox_inches='tight')
@@ -85,7 +85,7 @@ def plotMultiGifsFrom4DNifti(fourDNifti,referenceAnatomy,saveDir):
         if not os.path.exists(outPath):
             os.makedirs(outPath)
         #just try it, maybe it will work
-        densityNifti=nib.nifti1.Nifti1Image(fourDNifti.get_fdata()[:,:,:,iSlices],referenceAnatomy.affine,referenceAnatomy.header)
+        densityNifti=nib.nifti1.Nifti1Image(fourDNifti.get_data()[:,:,:,iSlices],referenceAnatomy.affine,referenceAnatomy.header)
         crossSectionGIFsFromNifti(densityNifti,referenceAnatomy,outPath) 
         
 def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
@@ -165,7 +165,7 @@ def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
         if not os.path.exists(outPath):
             os.makedirs(outPath)
         
-        currentData=outDict[iOutFiles].get_fdata()
+        currentData=outDict[iOutFiles].get_data()
         smallestNotZero=np.unique(currentData)[1]
         crossSectionGIFsFromNifti(outDict[iOutFiles],refAnatT1,outPath, blendOption=False)
         #lets mask out the background
@@ -266,8 +266,8 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
     # #change datatype so that nilearn doesn't mess up
     # #it doesn't like bool so we have to do something about that
     # #somehow the data can be set to nifti, but can't be extracted as nifti, so...
-    # overlayNifti=nib.nifti1.Nifti1Image(overlayNifti.get_fdata(),overlayNifti.affine,overlayNifti.header)
-    # overlayNifti.set_data_dtype(overlayNifti.get_fdata().dtype)
+    # overlayNifti=nib.nifti1.Nifti1Image(overlayNifti.get_data(),overlayNifti.affine,overlayNifti.header)
+    # overlayNifti.set_data_dtype(overlayNifti.get_data().dtype)
     
     #resample to the best resolution
     #but also assuming that the refernce anatomy is ultimately the shape that we want
@@ -328,18 +328,18 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
             fig,ax = plt.subplots()
             ax.axis('off')
             #kind of overwhelming to do this in one line
-            refData=np.rot90(np.reshape(refAnatT1.get_fdata()[currentRefSlice.get_fdata().astype(bool)],broadcastShape),1)
+            refData=np.rot90(np.reshape(refAnatT1.get_data()[currentRefSlice.get_data().astype(bool)],broadcastShape),1)
             plt.imshow(refData, cmap='gray', interpolation='gaussian')
             #kind of overwhelming to do this in one line
-            overlayData=np.rot90(np.reshape(overlayNifti.get_fdata()[currentOverlaySlice.get_fdata().astype(bool)],broadcastShape),1)
+            overlayData=np.rot90(np.reshape(overlayNifti.get_data()[currentOverlaySlice.get_data().astype(bool)],broadcastShape),1)
             #lets mask out the background
             [unique, counts] = np.unique(overlayData, return_counts=True)
             backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
             
-            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_fdata()))
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
             curFig=plt.gcf()
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
-            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_fdata())], orientation='vertical')
+            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
             curFig.gca().yaxis.set_ticks_position('left')
             curFig.gca().tick_params( colors='white')
             # we use *2 in order to afford room for the subsequent blended images
@@ -407,7 +407,7 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     #reference, we can crop the overlay safely and work adaptively.  Why would
     #you even have overlay **outside** of the refernce
     #nilearn doesn't handle NAN gracefully, so we have to be inelegant
-    #overlayNifti=nib.nifti1.Nifti1Image(np.nan_to_num(overlayNifti.get_fdata()), overlayNifti.affine, overlayNifti.header)
+    #overlayNifti=nib.nifti1.Nifti1Image(np.nan_to_num(overlayNifti.get_data()), overlayNifti.affine, overlayNifti.header)
     #croppedOverlayNifti=crop_img(overlayNifti)
     
     #RAS reoreintation
@@ -432,8 +432,8 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     #change datatype so that nilearn doesn't mess up
     #it doesn't like bool so we have to do something about that
     #somehow the data can be set to nifti, but can't be extracted as nifti, so...
-    overlayNifti=nib.nifti1.Nifti1Image(overlayNifti.get_fdata(),overlayNifti.affine,overlayNifti.header)
-    overlayNifti.set_data_dtype(overlayNifti.get_fdata().dtype)
+    overlayNifti=nib.nifti1.Nifti1Image(overlayNifti.get_data(),overlayNifti.affine,overlayNifti.header)
+    overlayNifti.set_data_dtype(overlayNifti.get_data().dtype)
     
     #resample to the best resolution
     #but also assuming that the refernce anatomy is ultimately the shape that we want
@@ -484,18 +484,18 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
             fig,ax = plt.subplots()
             ax.axis('off')
             #kind of overwhelming to do this in one line
-            refData=np.rot90(np.reshape(refAnatT1.get_fdata()[currentRefSlice.get_fdata().astype(bool)],broadcastShape),1)
+            refData=np.rot90(np.reshape(refAnatT1.get_data()[currentRefSlice.get_data().astype(bool)],broadcastShape),1)
             plt.imshow(refData, cmap='gray', interpolation='gaussian')
             #kind of overwhelming to do this in one line
-            overlayData=np.rot90(np.reshape(overlayNifti.get_fdata()[currentOverlaySlice.get_fdata().astype(bool)],broadcastShape),1)
+            overlayData=np.rot90(np.reshape(overlayNifti.get_data()[currentOverlaySlice.get_data().astype(bool)],broadcastShape),1)
             #lets mask out the background
             [unique, counts] = np.unique(overlayData, return_counts=True)
             backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
             
-            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_fdata()))
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
             curFig=plt.gcf()
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
-            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_fdata())], orientation='vertical')
+            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
             curFig.gca().yaxis.set_ticks_position('left')
             curFig.gca().tick_params( colors='white')
             # we use *2 in order to afford room for the subsequent blended images
@@ -701,27 +701,40 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     figure2.savefig(os.path.join(saveDir,tractName+'_group_LPI_commonEndpointMap.svg'))
     plt.close()
     
+    
     #Plot the UNcommon endpoints
-    figure1=basicRadarPlot(list(firstRASDFFUnCommon['labelNames']),list(firstRASDFFUnCommon['meanProportion']),metaValues=list(firstRASDFFUnCommon['proportionSTD']))
-    figure2=basicRadarPlot(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['meanProportion']),metaValues=list(firstLPIDFUnCommon['proportionSTD']))
+    #but use try except
     
-    figure1.get_axes()[0].set_title(tractName+' RAS\n *UN*common endpoints')
-    figure1.get_axes()[0].set_facecolor([0,0,1,.15])
-    figure1.get_axes()[0].text(0, np.max(firstRASDFFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
-        ha="center", va="center", size=12, zorder=12)
-
-    figure2.get_axes()[0].set_title(tractName+' LPI\n *UN*common endpoints')
-    figure2.get_axes()[0].set_facecolor([1,0,0,.15])
-    figure2.get_axes()[0].text(0, np.max(firstLPIDFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
-        ha="center", va="center", size=12, zorder=12)
-
+    try: 
     
-    if saveDir==None:
-        saveDir=os.getcwd()
+        figure1=basicRadarPlot(list(firstRASDFFUnCommon['labelNames']),list(firstRASDFFUnCommon['meanProportion']),metaValues=list(firstRASDFFUnCommon['proportionSTD']))
+       
+        figure1.get_axes()[0].set_title(tractName+' RAS\n *UN*common endpoints')
+        figure1.get_axes()[0].set_facecolor([0,0,1,.15])
+        figure1.get_axes()[0].text(0, np.max(firstRASDFFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
+            ha="center", va="center", size=12, zorder=12)
         
-    figure1.savefig(os.path.join(saveDir,tractName+'_group_RAS_UNcommonEndpointMap.svg'))
-    figure2.savefig(os.path.join(saveDir,tractName+'_group_LPI_UNcommonEndpointMap.svg'))
-    plt.close()
+        figure1.savefig(os.path.join(saveDir,tractName+'_group_RAS_UNcommonEndpointMap.svg'))
+        plt.close()
+    except:
+        print('no uncommon for RAS')
+    
+    try:
+        figure2=basicRadarPlot(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['meanProportion']),metaValues=list(firstLPIDFUnCommon['proportionSTD']))
+       
+        figure2.get_axes()[0].set_title(tractName+' LPI\n *UN*common endpoints')
+        figure2.get_axes()[0].set_facecolor([1,0,0,.15])
+        figure2.get_axes()[0].text(0, np.max(firstLPIDFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
+            ha="center", va="center", size=12, zorder=12)
+        figure2.savefig(os.path.join(saveDir,tractName+'_group_LPI_UNcommonEndpointMap.svg'))
+        plt.close() 
+    except:
+        print('no uncommon for LPI')
+        
+            
+    
+    
+    
     
 def basicRadarPlot(labels,values, metaValues=None):
     """
@@ -789,7 +802,7 @@ def basicRadarPlot(labels,values, metaValues=None):
 
     ax.set_theta_offset(1.2 * np.pi / 2)
     #find adaptive way to set min value
-    if metaValues==None:
+    if np.logical_or(metaValues==None, not metaValues):
         ax.set_ylim(np.min(values)*-1.3, np.max(values)*1.3)
     else:
         ax.set_ylim((np.min(values)+np.max(metaValues))*-1.3, (np.max(values)+np.max(metaValues))*1.3)
@@ -937,7 +950,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     
     #fix this later
     if refAnatT1!=None:
-       # vol_actor = actor.slicer(refAnatT1.get_fdata())
+       # vol_actor = actor.slicer(refAnatT1.get_data())
        # vol_actor.display(x=0)
        # scene.add(vol_actor)
        print('skipping')
@@ -996,11 +1009,13 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     #densityNifti=nib.nifti1.Nifti1Image(summedDensityMap.astype(int), refAnatT1.affine, refAnatT1.header)
     #nib.save(densityNifti,'summeddensityNifti100206.nii.gz')
     #create a default sphere kernel to use in the filter.
-    kernelNifti=wmaPyTools.roiTools.createSphere(endpointColorDensityKernel, [0,0,0], refAnatT1)
-    kernelNifti=nib.nifti1.Nifti1Image(kernelNifti.get_fdata().astype(int), kernelNifti.affine, kernelNifti.header)
+    #no longer hard coding 0,0,0, now using the average endpoint.  Theoretically
+    #has to be somewhere in the middle, right?
+    kernelNifti=wmaPyTools.roiTools.createSphere(endpointColorDensityKernel, np.mean(allEndpoints,axis=0), refAnatT1)
+    kernelNifti=nib.nifti1.Nifti1Image(kernelNifti.get_data().astype(int), kernelNifti.affine, kernelNifti.header)
     croppedKernel=crop_img(kernelNifti)
    
-    summedDensityMap=ndimage.generic_filter(densityMap,function=np.sum,footprint=croppedKernel.get_fdata().astype(bool))
+    summedDensityMap=ndimage.generic_filter(densityMap,function=np.sum,footprint=croppedKernel.get_data().astype(bool))
 
     for iStreamlines in range(len(streamlines)):
         #A check to make sure you've got room to do this indexing on both sides

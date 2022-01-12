@@ -110,7 +110,7 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -189,13 +189,13 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     import time
     from functools import partial
     import tqdm
-    import wmaPyTools.streamTools 
+    import wmaPyTools.streamlineTools 
     
     #create a dummy nifti if necessary in order to get a get an affine?
     if referenceNifti==None:
-        referenceNifti=wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines)
+        referenceNifti=wmaPyTools.streamlineTools.dummyNiftiForStreamlines(streamlines)
     
-    streamlines=wmaPyTools.streamTools.orientAllStreamlines(streamlines)
+    streamlines=wmaPyTools.streamlineTools.orientAllStreamlines(streamlines)
     
     #this is probably faster than geting the density map, turning that into a mask,
     #and then getting the voxel indexes for that
@@ -424,7 +424,7 @@ def computeStreamsDispersion_bootstrap(streamlines,bootstrapProportion=.5,bootst
     """
     import numpy as np
     from scipy.spatial.distance import cdist
-    import wmaPyTools.streamTools 
+    import wmaPyTools.streamlineTools 
     
     #check to see if theinput is singleton
     if type(streamlines) == np.ndarray:
@@ -435,9 +435,9 @@ def computeStreamsDispersion_bootstrap(streamlines,bootstrapProportion=.5,bootst
     #know that we are selecting these streamlines by their neck, at least insofar
     #as our (spatially defined) collection of streamlines is concerned
     if refAnatT1==None:
-        orientedStreams=wmaPyTools.streamTools.orientTractUsingNeck_Robust(streamlines,surpressReport=True)
+        orientedStreams=wmaPyTools.streamlineTools._Robust(streamlines,surpressReport=True)
     else:
-        orientedStreams=wmaPyTools.streamTools.orientTractUsingNeck_Robust(streamlines,refAnatT1, surpressReport=True)
+        orientedStreams=wmaPyTools.streamlineTools.orientTractUsingNeck_Robust(streamlines,refAnatT1, surpressReport=True)
         
     #set number of streamlines to subsample
     subSampleNum=np.floor(len(streamlines)/2).astype(int)
@@ -556,7 +556,7 @@ def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParam
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -754,7 +754,7 @@ def endpointDispersionAsymmetryMapping_Bootstrap(streamlines,referenceNifti,dist
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -913,13 +913,13 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
     from dipy.segment.metric import MinimumAverageDirectFlipMetric
     import itertools
-    import wmaPyTools.streamTools  
+    import wmaPyTools.streamlineTools  
     
     #use dipy function to reduce labels to contiguous values
     if isinstance(atlas,str):
         atlas=nib.load(atlas)
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
-    [relabeledAtlasData, labelMappings]=reduce_labels(atlas.get_fdata())
+    [relabeledAtlasData, labelMappings]=reduce_labels(atlas.get_data())
     #create new nifti object
     renumberedAtlasNifti=nib.Nifti1Image(relabeledAtlasData, atlas.affine, atlas.header)
     
@@ -931,16 +931,17 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
         tractStreamlines=tractStreamlines.streamlines
     
     #obtains quantifications of neck properties for this collection of streamlines
-    neckQuantifications=wmaPyTools.streamTools.bundleTest(tractStreamlines)
+    neckQuantifications=wmaPyTools.streamlineTools.bundleTest(tractStreamlines)
     if neckQuantifications['mean'] <5:
         print('submitted streamlines appear to be coherent bundle via neck criterion')
-        tractStreamlines=wmaPyTools.streamTools.orientTractUsingNeck(tractStreamlines)
+        #tractStreamlines=wmaPyTools.streamlineTools.orientTractUsingNeck(tractStreamlines)
+        tractStreamlines=wmaPyTools.streamlineTools.orientAllStreamlines(tractStreamlines)
     else:
         print('submitted streamlines DO NOT appear to be coherent bundle via neck criterion')
-        tractStreamlines=wmaPyTools.streamTools.dipyOrientStreamlines(tractStreamlines)
+        tractStreamlines=wmaPyTools.streamlineTools.dipyOrientStreamlines(tractStreamlines)
     
     #segment tractome into connectivity matrix from parcellation
-    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_fdata().astype(int),
+    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_data().astype(int),
                             return_mapping=True,
                             mapping_as_streamlines=False)
     #get the keys so that you can iterate through them later
@@ -959,7 +960,7 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     if len(atlasLookupTable)>len(labelMappings):
         #infer which column contains the original identities
         #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
-        matchingLabelsCount=[len(list(set(atlasLookupTable[iColumns]).intersection(set(np.unique(atlas.get_fdata()))))) for iColumns in atlasLookupTable.columns.to_list()]
+        matchingLabelsCount=[len(list(set(atlasLookupTable[iColumns]).intersection(set(np.unique(atlas.get_data()))))) for iColumns in atlasLookupTable.columns.to_list()]
         #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
         #worry about that later
         columnBestGuess=atlasLookupTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
@@ -1026,10 +1027,10 @@ def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
     import numpy as np
     import dipy.tracking.utils as ut
     from dipy.tracking.vox2track import streamline_mapping
-    import wmaPyTools.streamTools
+    import wmaPyTools.streamlineTools
     
     #create a dummy referencec nifti for the input straemlines
-    dummyNifti= wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines)
+    dummyNifti= wmaPyTools.streamlineTools.dummyNiftiForStreamlines(streamlines)
     #compute the voxelwise mapping for the streamlines
     streamlineMapping=streamline_mapping(streamlines, dummyNifti.affine)
     #find the voxels occupied by streamlines and get a list of these
@@ -1093,15 +1094,15 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
     #identify their types
     #kind of involves an assumption, in that we are inferring that a 2 unique 
     #value ROI is binary, and thus 0 and 1 or some equivalent
-    if len(np.unique(ROI1.get_fdata()))<=2:
+    if len(np.unique(ROI1.get_data()))<=2:
            ROI1type=bool
     else:
-        ROI1type=ROI1.get_fdata().dtype
+        ROI1type=ROI1.get_data().dtype
         
-    if len(np.unique(ROI2.get_fdata()))<=2:
+    if len(np.unique(ROI2.get_data()))<=2:
            ROI2type=bool
     else:
-        ROI2type=ROI2.get_fdata().dtype
+        ROI2type=ROI2.get_data().dtype
     
     #if either of these are bool, you've got to force them both to boolean
     #so that you can perform dice coefficient
@@ -1111,8 +1112,8 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
         #I'm assuming ravel ravels in a standard fashion and that this is safe.
         #also, we can use ravel given that these ROIs are presumably the same size
         #thanks to wmaPyTools.roiTools.alignNiftis
-        ROI1DataVec=np.ravel(ROI1.get_fdata().astype(bool))
-        ROI2DataVec=np.ravel(ROI2.get_fdata().astype(bool))
+        ROI1DataVec=np.ravel(ROI1.get_data().astype(bool))
+        ROI2DataVec=np.ravel(ROI2.get_data().astype(bool))
         #now compute the dice coefficient as the distance measure
         print('Computing dice coefficient')
         distanceMeasure=scipy.spatial.distance.dice(ROI1DataVec,ROI2DataVec)
@@ -1122,8 +1123,8 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
         #thanks to wmaPyTools.roiTools.alignNiftis
         #no need to modify datatype as before, though maybe an issue if different 
         #types, i.e. int vs float.
-        ROI1DataVec=np.ravel(ROI1.get_fdata())
-        ROI2DataVec=np.ravel(ROI2.get_fdata())
+        ROI1DataVec=np.ravel(ROI1.get_data())
+        ROI2DataVec=np.ravel(ROI2.get_data())
         #now compute the dice coefficient as the distance measure
         print('Computing cosine distance')
         distanceMeasure=scipy.spatial.distance.cosine(ROI1DataVec,ROI2DataVec)
@@ -1152,14 +1153,14 @@ def quantifyTractsOverlap(streamlines1, streamlines2):
     
     import dipy.tracking.utils as ut
     from dipy.tracking.vox2track import streamline_mapping
-    import wmaPyTools.streamTools
+    import wmaPyTools.streamlineTools
     
     #create a dummy referencec nifti for the input streamlines
-    dummyNifti1= wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines1)
+    dummyNifti1= wmaPyTools.streamlineTools.dummyNiftiForStreamlines(streamlines1)
     #use that dummy nifti as an input for the density computation
     densityMap1=ut.density_map(streamlines1, dummyNifti1.affine, dummyNifti1.shape)
     
-    dummyNifti2= wmaPyTools.streamTools.dummyNiftiForStreamlines(streamlines2)
+    dummyNifti2= wmaPyTools.streamlineTools.dummyNiftiForStreamlines(streamlines2)
     densityMap2=ut.density_map(streamlines2, dummyNifti2.affine, dummyNifti2.shape)
     
     overlapMeasure=quantifyOverlapBetweenNiftis(densityMap1,densityMap2)
@@ -1264,7 +1265,7 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #using round as a workaround
-    [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(atlasNifti.get_fdata()).astype(int))
+    [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(atlasNifti.get_data()).astype(int))
     
    
     #if an input mask is actually provided

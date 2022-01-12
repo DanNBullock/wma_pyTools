@@ -40,7 +40,7 @@ def makePlanarROI(reference, mmPlane, dimension):
     import numpy as np
     import dipy.tracking.utils as ut
     
-    fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_fdata().shape), reference.affine, reference.header)
+    fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_data().shape), reference.affine, reference.header)
     #pass full mask to subject space boundary function
     convertedBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
     
@@ -108,7 +108,7 @@ def makePlanarROI(reference, mmPlane, dimension):
 #     import nibabel as nib
 #     outHeader = atlas.header.copy()
 #     #numpy and other stuff has been acting weird with ints lately
-#     atlasData = np.round(atlas.get_fdata()).astype(int)
+#     atlasData = np.round(atlas.get_data()).astype(int)
 #     outData = np.zeros((atlasData.shape)).astype(int)
 #     #check to make sure it is in the atlas
 #     #not entirely sure how boolean array behavior works here
@@ -232,7 +232,7 @@ def createSphere(r, p, reference, supress=True):
     if not supress:
         print('Creating '+ str(r) +' mm radius spherical roi at '+str(p))
     
-    fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_fdata().shape), reference.affine, reference.header)
+    fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_data().shape), reference.affine, reference.header)
     #obtain boundary coords in subject space in order set max min values for interactive visualization
     convertedBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
     
@@ -317,14 +317,14 @@ def multiROIrequestToMask(atlas,roiNums,inflateIter=0):
     #force input roiNums to array, don't want to deal with lists and dicts
     roiNumsInArray=np.asarray(roiNums)
     
-    if  np.logical_not(np.all(np.isin(roiNumsInArray,np.unique(np.round(atlas.get_fdata()).astype(int))))):
+    if  np.logical_not(np.all(np.isin(roiNumsInArray,np.unique(np.round(atlas.get_data()).astype(int))))):
         import warnings
-        warnings.warn("WMA.multiROIrequestToMask WARNING: ROI label " + str(list(roiNumsInArray[np.logical_not(np.isin(roiNumsInArray,np.unique(np.round(atlas.get_fdata()).astype(int))))])) + " not found in input Nifti structure.")
+        warnings.warn("WMA.multiROIrequestToMask WARNING: ROI label " + str(list(roiNumsInArray[np.logical_not(np.isin(roiNumsInArray,np.unique(np.round(atlas.get_data()).astype(int))))])) + " not found in input Nifti structure.")
         
     #obtain coordiantes of all relevant label 
     #ATLASES ARE ACTING WEIRD THESE DAYS, gotta do round then int, not other way
     #if you don't do it this way, somehow you get a reduced number of labels
-    labelCoords=np.where(np.isin(np.round(atlas.get_fdata()).astype(int),roiNumsInArray))
+    labelCoords=np.where(np.isin(np.round(atlas.get_data()).astype(int),roiNumsInArray))
 
     #create blank data structure
     concatData=np.zeros(atlas.shape)
@@ -462,8 +462,8 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     import numpy as np
     
     #get the data
-    inputROINiftiData=inputROINifti.get_fdata()
-    inputPlanarROIData=inputPlanarROI.get_fdata()
+    inputROINiftiData=inputROINifti.get_data()
+    inputPlanarROIData=inputPlanarROI.get_data()
     
     #boolean to check if intersection
     intersectBool=np.any(np.logical_and(inputROINiftiData!=0,inputPlanarROIData!=0))
@@ -473,14 +473,14 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
 
     #implement test to determine if input planar roi is indeed planar
     #get coordinates of mask voxels in image space
-    planeVoxCoords=np.where(inputPlanarROI.get_fdata())
+    planeVoxCoords=np.where(inputPlanarROI.get_data())
     #find the unique values of img space coordinates for each dimension
     uniqueCoordCounts=[len(np.unique(iCoords)) for iCoords in planeVoxCoords]
     #one of them should be singular in the case of a planar roi, throw an error if not
     if ~np.any(np.isin(uniqueCoordCounts,1)):
         raise ValueError('input cut ROI not planar (i.e. single voxel thick for True values)')
     
-    fullMask = nib.nifti1.Nifti1Image(np.ones(inputROINifti.get_fdata().shape), inputROINifti.affine, inputROINifti.header)
+    fullMask = nib.nifti1.Nifti1Image(np.ones(inputROINifti.get_data().shape), inputROINifti.affine, inputROINifti.header)
     #pass full mask to subject space boundary function
     fullVolumeBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
     #get boundary mask coords for mask
@@ -591,7 +591,7 @@ def alignROItoReference(inputROI,reference):
     densityKernel=np.asarray(reference.header.get_zooms())
     
     #get the coordinates themselves
-    roiCoords=seeds_from_mask(inputROI.get_fdata(), inputROI.affine, density=densityKernel)
+    roiCoords=seeds_from_mask(inputROI.get_data(), inputROI.affine, density=densityKernel)
     
     #use dipy functions to treat point cloud like one big streamline, and move it back to image space
     import dipy.tracking.utils as ut
@@ -644,8 +644,8 @@ def alignNiftis(nifti1,nifti2):
     #if they are the same resolution you don't do anything
     
     #roundabout hack: spoof a full mask to get the subject space boundary coords
-    fullMask1 = nib.nifti1.Nifti1Image(np.ones(nifti1.get_fdata().shape), nifti1.affine, nifti1.header)
-    fullMask2 = nib.nifti1.Nifti1Image(np.ones(nifti2.get_fdata().shape), nifti2.affine, nifti2.header)
+    fullMask1 = nib.nifti1.Nifti1Image(np.ones(nifti1.get_data().shape), nifti1.affine, nifti1.header)
+    fullMask2 = nib.nifti1.Nifti1Image(np.ones(nifti2.get_data().shape), nifti2.affine, nifti2.header)
     #pass full mask to subject space boundary function
     convertedBoundCoords1=subjectSpaceMaskBoundaryCoords(fullMask1)
     convertedBoundCoords2=subjectSpaceMaskBoundaryCoords(fullMask2)
@@ -711,7 +711,7 @@ def subjectSpaceMaskBoundaryCoords(maskNifti):
     import numpy as np
     
     #get the bounding box in image space
-    refDimBounds=np.asarray(mask.bounding_box(maskNifti.get_fdata()))
+    refDimBounds=np.asarray(mask.bounding_box(maskNifti.get_data()))
     
     #use itertools and cartesian product to generate vertex img space coordinates
     import itertools
@@ -760,8 +760,8 @@ def subjectSpaceMaskBoundaryCoords(maskNifti):
 
 #     #get 
 #     #nilearn doesn't handle NAN gracefully, so we have to be inelegant
-#     nifti1=nib.nifti1.Nifti1Image(np.nan_to_num(nifti1.get_fdata()), nifti1.affine, nifti1.header)
-#     nifti2=nib.nifti1.Nifti1Image(np.nan_to_num(nifti2.get_fdata()), nifti2.affine, nifti2.header)
+#     nifti1=nib.nifti1.Nifti1Image(np.nan_to_num(nifti1.get_data()), nifti1.affine, nifti1.header)
+#     nifti2=nib.nifti1.Nifti1Image(np.nan_to_num(nifti2.get_data()), nifti2.affine, nifti2.header)
     
 #     cropped1=crop_img(nifti1)
 #     cropped2=crop_img(nifti2)
@@ -814,13 +814,13 @@ def removeIslandsFromAtlas(atlasNifti):
         
     #count the label instances, and make an inference as to the background value
     #it's almost certianly the most common value, eg. 0
-    (labels,counts)=np.unique(atlas.get_fdata(), return_counts=True)
+    (labels,counts)=np.unique(atlas.get_data(), return_counts=True)
     detectBackground=int(labels[np.where(np.max(counts)==counts)[0]])
     
     #get the list of labels without the background
     atlasLabels=labels.astype(int)[labels.astype(int)!=detectBackground]
     
-    atlasData=atlas.get_fdata()
+    atlasData=atlas.get_data()
     removalReport=pd.DataFrame(columns=['label','max_erosion','islands_removed'])
     #remove the background values
     for iLabels in atlasLabels:
@@ -832,7 +832,7 @@ def removeIslandsFromAtlas(atlasNifti):
         #the default max iterations, will be reduced in cases where implementation
         #results in complete loss
         forcedMaxIterations=3
-        currentErosion=atlas.get_fdata()==iLabels
+        currentErosion=atlas.get_data()==iLabels
         #I guess we can use this to set something like minimum island size?
         #a 3x3 block (last before singleton point) would have 27 voxels in it
         #using strcit less than allows for escape in cases where forcedMaxIterations
@@ -844,25 +844,25 @@ def removeIslandsFromAtlas(atlasNifti):
             if np.sum(currentErosion) ==0:
                 forcedMaxIterations=forcedMaxIterations-1
                 erosionIterations=0
-                currentErosion=atlas.get_fdata()==iLabels
+                currentErosion=atlas.get_data()==iLabels
         #print how much was eroded
-        print(str(np.abs(np.sum(currentErosion) - (np.sum(atlas.get_fdata()==iLabels))))+ ' of ' + str(np.sum(atlas.get_fdata()==iLabels)) + ' voxels eroded label ' + str(iLabels) )
+        print(str(np.abs(np.sum(currentErosion) - (np.sum(atlas.get_data()==iLabels))))+ ' of ' + str(np.sum(atlas.get_data()==iLabels)) + ' voxels eroded label ' + str(iLabels) )
         #add that value to the report list for this label
-        reportRow.append(np.abs(np.sum(currentErosion) - (np.sum(atlas.get_fdata()==iLabels))))
+        reportRow.append(np.abs(np.sum(currentErosion) - (np.sum(atlas.get_data()==iLabels))))
         #perform the propigation function, wherein the eroded label is inflated back
-        #islandRemoved=scipy.ndimage.binary_propagation(currentErosion, structure=np.ones([3,3,3]).astype(int), mask=atlas.get_fdata()==iLabels)
-        islandRemoved=scipy.ndimage.binary_propagation(currentErosion, mask=atlas.get_fdata()==iLabels)
+        #islandRemoved=scipy.ndimage.binary_propagation(currentErosion, structure=np.ones([3,3,3]).astype(int), mask=atlas.get_data()==iLabels)
+        islandRemoved=scipy.ndimage.binary_propagation(currentErosion, mask=atlas.get_data()==iLabels)
         #print the resulting difference between the intitial label and this eroded+inflated one
-        print(str(np.abs(np.sum(islandRemoved) - (np.sum(atlas.get_fdata()==iLabels))))+ ' of ' + str(np.sum(atlas.get_fdata()==iLabels)) + ' voxels removed for label ' + str(iLabels) )
+        print(str(np.abs(np.sum(islandRemoved) - (np.sum(atlas.get_data()==iLabels))))+ ' of ' + str(np.sum(atlas.get_data()==iLabels)) + ' voxels removed for label ' + str(iLabels) )
         #add that value to the report list for this label
-        reportRow.append(np.abs(np.sum(islandRemoved) - (np.sum(atlas.get_fdata()==iLabels))))
+        reportRow.append(np.abs(np.sum(islandRemoved) - (np.sum(atlas.get_data()==iLabels))))
         #add the row to the output report
         removalReport.loc[len(removalReport)]=reportRow
 
         #now actually modify the data
         #what you want are the areas that are true in the origional atlas but false in the eroded+inflated version
         #set those to background
-        atlasData[np.logical_and(atlas.get_fdata()==iLabels,np.logical_not(islandRemoved))]=detectBackground
+        atlasData[np.logical_and(atlas.get_data()==iLabels,np.logical_not(islandRemoved))]=detectBackground
     
         #make a nifti of it
         atlasNiftiOut=nib.Nifti1Image(atlasData, atlas.affine, atlas.header)
@@ -897,6 +897,7 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
     import numpy as np
     #from scipy.interpolate import NearestNDInterpolator
     import scipy
+    import tqdm
     #import dipy.tracking.utils as ut
     
     if isinstance(atlasNifti,str):
@@ -913,7 +914,7 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
         
     #count the label instances, and make an inference as to the background value
     #it's almost certianly the most common value, eg. 0
-    (labels,counts)=np.unique(atlas.get_fdata(), return_counts=True)
+    (labels,counts)=np.unique(atlas.get_data(), return_counts=True)
     detectBackground=int(labels[np.where(np.max(counts)==counts)[0]])
     
     #now comes a tougher part, how do we detect WM labels, if any (because they might not be there)
@@ -961,10 +962,13 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
     #now iteratively perform the inflation
     
     #so long as nothing is on the edge this will probably work, due to coord weirdness
+    #This was forshadowing, code updated on 1/12/22 to take care of this
     #get the image data
-    noIslandAtlasData=noIslandAtlas.get_fdata()
+    noIslandAtlasData=noIslandAtlas.get_data()
+    noIslandAtlasData=np.round(noIslandAtlasData).astype(int)
     
     for iInflations in range(iterations):
+        print('inflation iteration ' + str(iInflations+1))
         #pad the data to avoid indexing issues
         noIslandAtlasData=np.pad(noIslandAtlasData,[1,1])
         #create a mask of the non target data
@@ -981,7 +985,7 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
         #this manuver is going to cost us .gif
         #NOTE, sequencing of coordinates may influence votes
         #create a dummy array for each inflation iteration to avoid this
-        for iInflationTargetCoords in inflationTargetCoords:
+        for iInflationTargetCoords in tqdm.tqdm(inflationTargetCoords):
             #because I dont trust iteration in 
             #print(str(iInflationTargetCoords))
             #set some while loop iteration values
@@ -991,7 +995,24 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
             voteWinner=[0,0]
             while len(voteWinner)>1:
             #+2 because python is weird and doesn't include the top index
-                voxelVotes=noIslandAtlasData[(iInflationTargetCoords[0])-window:(iInflationTargetCoords[0]+1+window),(iInflationTargetCoords[1]-window):(iInflationTargetCoords[1]+1+window),(iInflationTargetCoords[2]-window):(iInflationTargetCoords[2]+1+window)]
+                #we need to consider those cases in which the voxels are adjacent to the edge of the volume
+                xRange=np.asarray(range((iInflationTargetCoords[0]-window),(iInflationTargetCoords[0]+1+window)))
+                yRange=np.asarray(range((iInflationTargetCoords[1]-window),(iInflationTargetCoords[1]+1+window)))
+                zRange=np.asarray(range((iInflationTargetCoords[2]-window),(iInflationTargetCoords[2]+1+window)))
+                #remove invalid indexes
+                #-1, right?
+                xRange=xRange[np.all([xRange<noIslandAtlasData.shape[0]-1,  xRange>=0],axis=0)]
+                yRange=yRange[np.all([yRange<noIslandAtlasData.shape[1]-1,  yRange>=0],axis=0)]
+                zRange=zRange[np.all([zRange<noIslandAtlasData.shape[2]-1,  zRange>=0],axis=0)]
+                
+                x, y, z = np.meshgrid(xRange, yRange, zRange,indexing='ij')
+                #squeeze the output (maybe not necessary)          
+                windowBlock= np.squeeze([x, y, z])
+                #convert to array of coordinates
+                windowIndexes=np.vstack(windowBlock).reshape(3,-1).T
+ 
+                #probably dumb and inefficient, but here we are
+                voxelVotes=np.asarray([noIslandAtlasData[iVoxel[0],iVoxel[1],iVoxel[2]] for iVoxel in list(windowIndexes)])
                 #get the vote counts
                 (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
                 voteWinner=labels[np.where(np.max(counts)==counts)[0]]
@@ -1050,7 +1071,7 @@ def extendROIinDirection(roiNifti,direction,iterations):
         direction=list(direction)
         
     #go ahead and do the inflation
-    concatData=ndimage.binary_dilation(roiNifti.get_fdata(), iterations=iterations)
+    concatData=ndimage.binary_dilation(roiNifti.get_data(), iterations=iterations)
     
     #convert that data array to a nifti
     extendedROI=nib.Nifti1Image(concatData, roiNifti.affine, roiNifti.header)
@@ -1087,7 +1108,7 @@ def boundaryROIPlanesFromMask(inputMask):
         inputMask=nib.load(inputMask)
         
     #create a binarized copy of the mask
-    binarizedMask=nib.Nifti1Image(inputMask.get_fdata()>0, inputMask.affine, inputMask.header)
+    binarizedMask=nib.Nifti1Image(inputMask.get_data()>0, inputMask.affine, inputMask.header)
     
     #initialize the output directory
     borderDict={}
@@ -1143,7 +1164,7 @@ def findROISintersection(ROIs,inflateiter=0):
     intersectionNifti=masking.intersect_masks(ROIs, threshold=1)
     
     #if it's empty throw a warning
-    if not (1 in np.unique(intersectionNifti.get_fdata)) or (True in np.unique(intersectionNifti.get_fdata)):
+    if not (1 in np.unique(intersectionNifti.get_data)) or (True in np.unique(intersectionNifti.get_data)):
         import warnings
         warnings.warn("Empty mask for intersection returned; likely no mutual intersection between input " + str(len(ROIs)) + "ROIs")
                       
