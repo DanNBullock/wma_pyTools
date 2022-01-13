@@ -14,7 +14,8 @@ import wmaPyTools
 import nibabel as nib
 import pandas as pd
 import wmaPyTools.roiTools
-import wmaPyTools.streamlineTools 
+import wmaPyTools.streamlineTools
+import wmaPyTools.analysisTools 
 import numpy as np
 
 seed_density=200
@@ -22,7 +23,8 @@ seed_density=200
 atlas=nib.load('/media/dan/storage/data/proj-5ffc884d2ba0fba7a7e89132/sub-100307/dt-neuro-freesurfer.tag-acpc_aligned.id-6074dd05daf98925f029a156/output/mri/aparc.a2009s+aseg.nii.gz')
 wmLabels=[2,41]
 #parietal 3 number loactions
-targetMaskLabels=[11157, 11127, 11168, 11136, 11126, 11125, 12157, 12127, 12168, 12136, 12126, 12125]
+#targetMaskLabels=[11157, 11127, 11168, 11136, 11126, 11125, 12157, 12127, 12168, 12136, 12126, 12125]
+targetMaskLabels=[11157, 11127, 11168, 11136, 11126, 11125]
 
 targetMask=wmaPyTools.roiTools.multiROIrequestToMask(atlas,targetMaskLabels,inflateIter=0)
 wmMask=wmaPyTools.roiTools.multiROIrequestToMask(atlas,wmLabels,inflateIter=0)
@@ -36,4 +38,8 @@ bvecs=np.asarray(bvecsfile)
 bvals=np.squeeze(np.asarray(bvalsfile))
 
 
-testOutput=wmaPyTools.streamlineTools.trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals)
+#streamlines=wmaPyTools.streamlineTools.trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals)
+streamlinesLoad=nib.streamlines.load('/media/dan/storage/data/proj-5ffc884d2ba0fba7a7e89132/sub-100307/dt-neuro-track-tck.id-602ee00ddfe50eee8d2cc4c7/track.tck')
+streamlines=streamlinesLoad.streamlines
+outputTable=wmaPyTools.analysisTools.voxelwiseAtlasConnectivity(streamlines,atlas,mask=targetMask)
+voxelIndexes, cosineDistanceMatrix=wmaPyTools.analysisTools.voxelAtlasDistanceMatrix(outputTable)
