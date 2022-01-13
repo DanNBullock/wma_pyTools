@@ -943,7 +943,7 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
         #when the tract contains an extremely small number of streamlines?
         #in any case, we can use a generalized version for this
         #this kind of makes the above if statement/check redundant, but 
-        #hopefully in the future we might have a more robust orientation method
+        #hopefully in the future we might have a more robust orientation method.
         tractStreamlines=wmaPyTools.streamlineTools.orientAllStreamlines(tractStreamlines)
     
     #segment tractome into connectivity matrix from parcellation
@@ -1345,6 +1345,8 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
     import os
     from scipy.spatial.distance import cdist
     import tqdm
+    from sklearn.metrics.pairwise import cosine_similarity
+    import sklearn.preprocessing as preprocess
     
     #get the indexes, which also serve as the voxel labels
     voxelIndexes=voxelAtlasConnectivityTable.index
@@ -1354,12 +1356,14 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
     # if you didn't, each voxel could have distinct numbers of streamlines
     # this controls for this
     # could probably be tripped up if the first voxel only has one streamline in it
-    firstRowSum=np.sum(voxelAtlasConnectivityTable.iloc[0])
-    if not firstRowSum==1 :
-        normalizedVoxelAtlasConnectivityTable=voxelAtlasConnectivityTable.apply(lambda x: np.divide(x,np.sum(x)),axis=1)
-    else:
-        normalizedVoxelAtlasConnectivityTable=voxelAtlasConnectivityTable
+    # firstRowSum=np.sum(voxelAtlasConnectivityTable.iloc[0])
+    # if not firstRowSum==1 :
+    #     normalizedVoxelAtlasConnectivityTable=voxelAtlasConnectivityTable.apply(lambda x: np.divide(x,np.sum(x)),axis=1)
+    # else:
+    #     normalizedVoxelAtlasConnectivityTable=voxelAtlasConnectivityTable
         
+    normalizedVoxelAtlasConnectivityTable=preprocess.normalize(voxelAtlasConnectivityTable.to_numpy(),axis=1)
+    
     # do some math to determine if the output size on this is sensible
     # Getting all memory using os.popen()
     total_memory, used_memory, free_memory = map(int, os.popen('free -t -m').readlines()[-1].split()[1:])
@@ -1371,16 +1375,19 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
     if expectedMemUsage*1.3>=free_memory:
         raise Exception('Expected memory usage for float 32 square array of size ' + str(len(voxelIndexes)) + ' exceeds available RAM of ' + str(free_memory) + 'MB')
     
+    #here we go...
+    cosineDistanceMatrix = cosine_similarity(normalizedVoxelAtlasConnectivityTable)
+    
     #otherwise go ahead
     #create output array
-    cosineDistanceMatrix=np.zeros([len(voxelIndexes),len(voxelIndexes)])
+    #cosineDistanceMatrix=np.zeros([len(voxelIndexes),len(voxelIndexes)])
     #may actually be pretty fast/efficient using cdist
     #it's not, it's extremely slow
     #maybe we can parallelize it
     #at the very least we can only compute this on the upper or lower diagonal.
-    for iVoxelIndexesRow in tqdm.tqdm(range(len(voxelIndexes))):
-        for iVoxelIndexesCol in range(len(voxelIndexes)):
-            cosineDistanceMatrix[iVoxelIndexesRow,iVoxelIndexesCol]=cdist(np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesRow]),np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesCol]),metric='cosine')[0][0]
+    #for iVoxelIndexesRow in tqdm.tqdm(range(len(voxelIndexes))):
+    #    for iVoxelIndexesCol in range(len(voxelIndexes)):
+    #        cosineDistanceMatrix[iVoxelIndexesRow,iVoxelIndexesCol]=cdist(np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesRow]),np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesCol]),metric='cosine')[0][0]
             
     #I guess we're done
     return voxelIndexes, cosineDistanceMatrix
