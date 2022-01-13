@@ -648,8 +648,8 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     firstLPIDF=firstLPIDF.fillna(0)
     
     #compute means and variances
-    firstLPIDF[['meanProportion','proportionSTD']]=pd.DataFrame(np.squeeze(np.asarray([np.mean(firstLPIDF.iloc[:,1:-1],axis=1),np.std(firstLPIDF.iloc[:,1:-1],axis=1)])).T, index=firstLPIDF.index)
-    firstRASDF[['meanProportion','proportionSTD']]=pd.DataFrame(np.squeeze(np.asarray([np.mean(firstRASDF.iloc[:,1:-1],axis=1),np.std(firstRASDF.iloc[:,1:-1],axis=1)])).T, index=firstRASDF.index)
+    firstLPIDF[['meanProportion','proportionSTD']]=pd.DataFrame(np.atleast_2d(np.squeeze(np.asarray([np.mean(firstLPIDF.iloc[:,1:-1],axis=1),np.std(firstLPIDF.iloc[:,1:-1],axis=1)])).T), index=firstLPIDF.index)
+    firstRASDF[['meanProportion','proportionSTD']]=pd.DataFrame(np.atleast_2d(np.squeeze(np.asarray([np.mean(firstRASDF.iloc[:,1:-1],axis=1),np.std(firstRASDF.iloc[:,1:-1],axis=1)])).T), index=firstRASDF.index)
     
     #arbitrary criteria for mean proportion
     minThresh=.01

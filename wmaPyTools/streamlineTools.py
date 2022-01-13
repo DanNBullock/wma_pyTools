@@ -1298,7 +1298,7 @@ def flipStreamstoAB_OrientOnce(streamlines, aheadNodes, behindNodes,surpressRepo
             flipCount=flipCount+1
     return streamlines, aheadNodes, behindNodes, flipCount
 
-def orientAllStreamlines(streamlines):
+def orientAllStreamlines(tractStreamlines):
     """
     Ok, so here's a philosophical quandry:  do you actually need a specific
     tract in order to orient a streamline.  That is, do you need the reference
@@ -1306,6 +1306,9 @@ def orientAllStreamlines(streamlines):
     of all constituent streamlines.  I'd suggest no.  For any given streamline
     there can be a computation for traversals, and thus an oppriate orientation
     for THAT particular streamline, relative to he maximal dimension of traversal
+
+    Jan 13 2022 Note:  Apparently the use of the variable name "streamlines"
+    was causing kernel crashes, but it is unclear why this was.
 
     Parameters
     ----------
@@ -1323,27 +1326,27 @@ def orientAllStreamlines(streamlines):
     
     #create a counter, for fun
     flipCount=0
-    for iStreamlines in tqdm.tqdm(range(len(streamlines))):
+    for iStreamlines in tqdm.tqdm(range(len(tractStreamlines))):
         
         #compute traversals for streamline
-        traversals=wmaPyTools.analysisTools.cumulativeTraversalStream(streamlines[iStreamlines])
+        traversals=wmaPyTools.analysisTools.cumulativeTraversalStream(tractStreamlines[iStreamlines])
         #find which dimension has max traversal
         maxTraversalDim=np.where(np.max(traversals)==traversals)[0][0]
         #get the current endpoints
-        endpoint1=streamlines[iStreamlines][0,:]
-        endpoint2=streamlines[iStreamlines][-1,:]
+        endpoint1=tractStreamlines[iStreamlines][0,:]
+        endpoint2=tractStreamlines[iStreamlines][-1,:]
     
         #if the coordinate of endpoint1 in the max traversal dimension
         #is less than the coordinate of endpoint1 in the max traversal dimension
         #flip it
         if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
-            streamlines[iStreamlines]= streamlines[iStreamlines][::-1]
+            tractStreamlines[iStreamlines]= tractStreamlines[iStreamlines][::-1]
             flipCount=flipCount+1
     
     #add a report        
-    print( str(flipCount) + ' of ' + str(len(streamlines)) + ' streamlines flipped')
+    print( str(flipCount) + ' of ' + str(len(tractStreamlines)) + ' streamlines flipped')
 
-    return  streamlines
+    return  tractStreamlines
 
 def downsampleToEndpoints(streamlines):
     """

@@ -938,7 +938,13 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
         tractStreamlines=wmaPyTools.streamlineTools.orientAllStreamlines(tractStreamlines)
     else:
         print('submitted streamlines DO NOT appear to be coherent bundle via neck criterion')
-        tractStreamlines=wmaPyTools.streamlineTools.dipyOrientStreamlines(tractStreamlines)
+        #tractStreamlines=wmaPyTools.streamlineTools.dipyOrientStreamlines(tractStreamlines)
+        #the above line appears to be unstable and can lead to crashes, perhaps
+        #when the tract contains an extremely small number of streamlines?
+        #in any case, we can use a generalized version for this
+        #this kind of makes the above if statement/check redundant, but 
+        #hopefully in the future we might have a more robust orientation method
+        tractStreamlines=wmaPyTools.streamlineTools.orientAllStreamlines(tractStreamlines)
     
     #segment tractome into connectivity matrix from parcellation
     M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_data().astype(int),
