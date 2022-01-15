@@ -1347,6 +1347,8 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
     import tqdm
     from sklearn.metrics.pairwise import cosine_similarity
     import sklearn.preprocessing as preprocess
+    from sklearn.metrics import pairwise_distances
+    from scipy import sparse
     
     #get the indexes, which also serve as the voxel labels
     voxelIndexes=voxelAtlasConnectivityTable.index
@@ -1376,7 +1378,10 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
         raise Exception('Expected memory usage for float 32 square array of size ' + str(len(voxelIndexes)) + ' exceeds available RAM of ' + str(free_memory) + 'MB')
     
     #here we go...
-    cosineDistanceMatrix = cosine_similarity(normalizedVoxelAtlasConnectivityTable)
+    #cosineDistanceMatrix = cosine_similarity(normalizedVoxelAtlasConnectivityTable)
+    
+    #given that these are pretty sparse matricies (~1.5%), seems we can convert to sparse matrix
+    sparseNormalizedVoxelAtlasConnectivityTable=sparse.csr_matrix(normalizedVoxelAtlasConnectivityTable.astype(np.float16))
     
     #otherwise go ahead
     #create output array
@@ -1388,7 +1393,7 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
     #for iVoxelIndexesRow in tqdm.tqdm(range(len(voxelIndexes))):
     #    for iVoxelIndexesCol in range(len(voxelIndexes)):
     #        cosineDistanceMatrix[iVoxelIndexesRow,iVoxelIndexesCol]=cdist(np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesRow]),np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesCol]),metric='cosine')[0][0]
-            
+    cosineDistanceMatrix=pairwise_distances(sparseNormalizedVoxelAtlasConnectivityTable,metric='cosine', n_jobs=1)
     #I guess we're done
     return voxelIndexes, cosineDistanceMatrix
     

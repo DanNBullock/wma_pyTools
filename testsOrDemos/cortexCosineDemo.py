@@ -40,6 +40,10 @@ bvals=np.squeeze(np.asarray(bvalsfile))
 
 #streamlines=wmaPyTools.streamlineTools.trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals)
 streamlinesLoad=nib.streamlines.load('/media/dan/storage/data/proj-5ffc884d2ba0fba7a7e89132/sub-100307/dt-neuro-track-tck.id-602ee00ddfe50eee8d2cc4c7/track.tck')
+#target stream number = 30000 -> 30000/(224154 streams / 3000000 stream tractome)= ~400000
+#streamlines=streamlinesLoad.streamlines[0:400000]
 streamlines=streamlinesLoad.streamlines
 outputTable=wmaPyTools.analysisTools.voxelwiseAtlasConnectivity(streamlines,atlas,mask=targetMask)
+#sparsity=np.divide(np.count_nonzero(outputTable.to_numpy()),np.product(outputTable.shape))
+#sparsity = ~ 1.5%
 voxelIndexes, cosineDistanceMatrix=wmaPyTools.analysisTools.voxelAtlasDistanceMatrix(outputTable)
