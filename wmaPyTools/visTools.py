@@ -549,10 +549,10 @@ def densityGifsOfTract(tractStreamlines,referenceAnatomy,saveDir,tractName):
         [path, file]=os.path.split(iFiles)
         os.rename(iFiles,os.path.join(path,tractName+'_'+file))
         
-def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',saveDir=None):
+def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',forcePlotLabels=None,saveDir=None):
     """radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName=None,saveDir=None)
     A function used to generate radial fingerprint plots for input tracts, as 
-    found in Folloni 2021
+    found in Folloni 2021.  Plots absolute streamline count
 
     Parameters
     ----------
@@ -567,6 +567,11 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
     tractName : string, optional
         The name of the tract to be used as a label in the output figure. No 
         input will result in there being no corresponding label. The default is None.
+    forcePlotLabels: array-like / list of int, optional
+        A list or array of integer values corresponding to labels in the input
+        atlas / atlasLookupTable that will be included in the output plot 
+        REGARDLESS of whether streamlines connect to this region or not (e.g.
+        this option will force the plotting of 0 values for specificed labels)
     saveDir : TYPE, optional
         The directory in which to save the resultant radial plot. No input
         will result in no save. The default is None.
@@ -578,8 +583,32 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
     """ 
     import os
     import matplotlib.pyplot as plt
-    import wmaPyTools.analysisTools   
+    import wmaPyTools.analysisTools
+    import pandas as pd
+    
+    #just use this to get the column names, you can't be sure that all the names
+    #are there
+    [renumberedAtlasNifti,reducedLookUpTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(atlas,atlasLookupTable,removeAbsentLabels=False)
+    columnNames=reducedLookUpTable.columns
+    
+    #don't pass the output of this to the next part, because the label numbers no longer match the atlas
     [endpointsDF1, endpointsDF2]=wmaPyTools.analysisTools.quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable)
+    
+    #get the requested labels, if any
+    if not forcePlotLabels==None:
+        #get the sub table for the requeseted labels
+        forceTable=atlasLookupTable[atlasLookupTable[columnNames[0]].isin(forcePlotLabels)]
+        #find the labels that aren't already there
+        missingLabels1=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(endpointsDF1['labelNames'])]
+        missingLabels2=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(endpointsDF2['labelNames'])]
+        
+        #now append them to the tables
+        endpointsDF1=endpointsDF1.append(pd.DataFrame(missingLabels1,columns=['labelNames']),ignore_index=True)
+        endpointsDF2=endpointsDF2.append(pd.DataFrame(missingLabels2,columns=['labelNames']),ignore_index=True)
+        
+        #now set the nans to zero
+        endpointsDF1['endpointCounts']= endpointsDF1['endpointCounts'].fillna(0)
+        endpointsDF2['endpointCounts']= endpointsDF2['endpointCounts'].fillna(0)
     
     figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']))
     figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']))
@@ -597,22 +626,37 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
     figure1.savefig(os.path.join(saveDir,tractName+'_RAS_endpointMap.eps'))
     figure2.savefig(os.path.join(saveDir,tractName+'_LPI_endpointMap.eps'))
     
-def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,atlasLookupTable,tractName='tract',saveDir=None):
+def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,atlasLookupTable,tractName='tract',forcePlotLabels=None,saveDir=None):
     """
+    A function used to generate radial fingerprint plots for input tracts, as 
+    found in Folloni 2021.  Plots proportional streamline count, averaged
+    across input variants, with error bars.  Secret Trick:  if you input two
+    instances of the same tract/atlas (as opposed to inputs for different
+    subjects), will simply plot the proportion for that single subject.
     
 
     Parameters
     ----------
-    tractTractogramList : TYPE
-        DESCRIPTION.
-    atlasList : TYPE
-        DESCRIPTION.
-    atlasLookupTable : TYPE
-        DESCRIPTION.
-    tractName : TYPE, optional
-        DESCRIPTION. The default is 'tract'.
+    tractTractogramList : list of streamlines type
+        Streamlines corresponding to the tract of interest
+    atlasList: list of  Nifti, int based
+        A nifti atlas that will be used to determine the endpoint connectivity
+    atlasLookupTable : pandas dataframe or file loadable to pandas dataframe
+        A dataframe of the atlas lookup table which includes the labels featured
+        in the atlas and their identities.  These identities will be used
+        to label the periphery of the radial plot.
+    tractName : string, optional
+        The name of the tract to be used as a label in the output figure. No 
+        input will result in there being no corresponding label. The default is None.
+    forcePlotLabels: array-like / list of int, optional
+        A list or array of integer values corresponding to labels in the input
+        atlas / atlasLookupTable that will be included in the output plot 
+        REGARDLESS of whether streamlines connect to this region or not (e.g.
+        this option will force the plotting of 0 values for specificed labels)
     saveDir : TYPE, optional
-        DESCRIPTION. The default is None.
+        The directory in which to save the resultant radial plot. No input
+        will result in no save. The default is None.
+    
 
     Returns
     -------
@@ -624,6 +668,12 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     import os
     from matplotlib import pyplot as plt
     import wmaPyTools.analysisTools  
+    
+    #just use this to get the column names, you can't be sure that all the names
+    #are there
+    [renumberedAtlasNifti,reducedLookUpTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(atlasList[0],atlasLookupTable,removeAbsentLabels=False)
+    columnNames=reducedLookUpTable.columns
+
     
     RASendpointData=[]
     LPIendpointData=[]
@@ -657,8 +707,29 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     firstLPIDFCommon= firstLPIDF[firstLPIDF['meanProportion'] >= minThresh]
     firstLPIDFUnCommon= firstLPIDF[firstLPIDF['meanProportion'] <= minThresh]
     firstRASDFCommon= firstRASDF[firstRASDF['meanProportion'] >= minThresh]
-    firstRASDFFUnCommon= firstRASDF[firstRASDF['meanProportion'] <= minThresh]
+    firstRASDFUnCommon= firstRASDF[firstRASDF['meanProportion'] <= minThresh]
     
+    #here we enforce the required labels by switching them over or filling them in
+    #get the requested labels, if any
+    if not forcePlotLabels==None:
+        #get the sub table for the requeseted labels
+        forceTable=atlasLookupTable[atlasLookupTable[columnNames[0]].isin(forcePlotLabels)]
+        #check to see if they are in BOTH tables
+        missingLabels1=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(firstLPIDF['labelNames'])]
+        missingLabels2=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(firstRASDF['labelNames'])]
+        
+        #now append them to the uncommon tables
+        firstLPIDFUnCommon=firstLPIDFUnCommon.append(pd.DataFrame(data=missingLabels1.tolist(),columns=['labelNames']),ignore_index=True)
+        firstRASDFUnCommon=firstRASDFUnCommon.append(pd.DataFrame(data=missingLabels2.tolist(),columns=['labelNames']),ignore_index=True)
+        
+        #now set the nans to zero
+        firstLPIDFUnCommon= firstLPIDFUnCommon.fillna(0)
+        firstRASDFUnCommon= firstRASDFUnCommon.fillna(0)
+        
+        #then move over the relevant rows to the common table, a clever move
+        firstLPIDFCommon=firstLPIDFCommon.append(firstLPIDFUnCommon[firstLPIDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
+        firstRASDFCommon=firstRASDFCommon.append(firstRASDFUnCommon[firstRASDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
+        
     #Plot the common endpoints
     figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['meanProportion']),metaValues=list(firstRASDFCommon['proportionSTD']))
     figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['meanProportion']),metaValues=list(firstLPIDFCommon['proportionSTD']))
@@ -707,11 +778,11 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     
     try: 
     
-        figure1=basicRadarPlot(list(firstRASDFFUnCommon['labelNames']),list(firstRASDFFUnCommon['meanProportion']),metaValues=list(firstRASDFFUnCommon['proportionSTD']))
+        figure1=basicRadarPlot(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['meanProportion']),metaValues=list(firstRASDFUnCommon['proportionSTD']))
        
         figure1.get_axes()[0].set_title(tractName+' RAS\n *UN*common endpoints')
         figure1.get_axes()[0].set_facecolor([0,0,1,.15])
-        figure1.get_axes()[0].text(0, np.max(firstRASDFFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
+        figure1.get_axes()[0].text(0, np.max(firstRASDFUnCommon['meanProportion']), "avg proportion\n of streamlines", rotation=-69, 
             ha="center", va="center", size=12, zorder=12)
         
         figure1.savefig(os.path.join(saveDir,tractName+'_group_RAS_UNcommonEndpointMap.svg'))
@@ -1212,3 +1283,53 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     if np.logical_not(refAnatT1==None):
         print('creating cross section density gifs')
         densityGifsOfTract(streamlines,refAnatT1,saveDir=outdir,tractName=tractName)
+        
+def plotFullyConnectedRelations(squareformDistTable):
+    """
+    Plots a circular connectivity map 
+
+    Parameters
+    ----------
+    squareformDistTable : pandas table
+        A squareform pandas table (i.e. N x N) with data indicating the
+    or distances between each item/entity i,j
+
+    Raises
+    ------
+    ValueError
+        In the event that a non-square table is detected, will throw error
+
+    Returns
+    -------
+    fig : TYPE
+        Figure handle for the output figure
+    axes : TYPE
+        axes handle for the output figure
+
+    """
+    
+    
+    from mne.viz import plot_connectivity_circle
+    import numpy as np
+    import matplotlib
+    import warnings
+    
+    #test to ensure input table is squareform
+    if not squareformDistTable.shape[0]==squareformDistTable.shape[1]:
+        raise ValueError('input distance table does not appear to be squareform')
+        
+    if squareformDistTable.shape[0]>8:
+        warnings.warning('Input data table features more than 8 items.  Output plot may be cluttered or uninterpretable')
+        
+    #get the column names, presumably this is the name of the pertinent entity
+    #as is the case in multiTractOverlapAnalysis
+    nodeNames=list(squareformDistTable.columns)
+    nodeColorMap = matplotlib.cm.get_cmap('winter')
+    
+    #connectionColorMap= matplotlib.cm.get_cmap('autumn')
+    
+    fig, axes = plot_connectivity_circle(squareformDistTable.to_numpy(), nodeNames, colormap='autumn',
+    node_colors=nodeColorMap(range(len(nodeNames))), facecolor='white', textcolor='black', colorbar_size=20, colorbar=True,
+    linewidth=10,fontsize_names=15)
+    
+    return fig,axes

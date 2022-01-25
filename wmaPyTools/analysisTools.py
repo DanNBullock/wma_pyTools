@@ -918,10 +918,13 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     #use dipy function to reduce labels to contiguous values
     if isinstance(atlas,str):
         atlas=nib.load(atlas)
-    #NOTE astype(int) is causing all sorts of problems, BE WARNED
-    [relabeledAtlasData, labelMappings]=reduce_labels(atlas.get_data())
-    #create new nifti object
-    renumberedAtlasNifti=nib.Nifti1Image(relabeledAtlasData, atlas.affine, atlas.header)
+
+    [renumberedAtlasNifti,reducedLookupTable]=reduceAtlasAndLookupTable(atlas,atlasLookupTable,removeAbsentLabels=True)
+    #still have to guess the column for the string name
+    #we could standardize the output of reduceAtlasAndLookupTable later
+    entryLengths=reducedLookupTable.applymap(str).applymap(len)
+    labelColumnGuess=entryLengths.mean(axis=0).idxmax()
+
     
     #take care of tractogram and treamline issues
     if isinstance(tractStreamlines,str):
@@ -953,39 +956,7 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     #get the keys so that you can iterate through them later
     keyTargets=list(grouping.keys())
     keyTargetsArray=np.asarray(keyTargets)
-    
-    #work with the input lookup table
-    if isinstance(atlasLookupTable,str):
-        if atlasLookupTable[-4:]=='.csv':
-            atlasLookupTable=pd.read_csv(atlasLookupTable)
-        elif (np.logical_or(atlasLookupTable[-4:]=='.xls',atlasLookupTable[-5:]=='.xlsx')):
-            atlasLookupTable=pd.read_excel(atlasLookupTable)
-
-    # if the lookup table has more entries than the atlas has items, we'll need to do some readjusting
-    # probably need to do some readjusting in any case
-    if len(atlasLookupTable)>len(labelMappings):
-        #infer which column contains the original identities
-        #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
-        matchingLabelsCount=[len(list(set(atlasLookupTable[iColumns]).intersection(set(np.unique(atlas.get_data()))))) for iColumns in atlasLookupTable.columns.to_list()]
-        #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
-        #worry about that later
-        columnBestGuess=atlasLookupTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
-        #we can also take this opportunity to pick the longest average column, which is likely the optimal label name
-        entryLengths=atlasLookupTable.applymap(str).applymap(len)
-        labelColumnGuess=entryLengths.mean(axis=0).idxmax()
-        
-        #lets get the correspondances of the labels in the two atlases, we can 
-        #assume that ordering has been preserved, it's just that identity has been 
-        #shifted to a contiguous integer sequence
-                
-        #now that we have the guess, get the corresponding row entries, and reset the index.
-        #This should make the index match the renumbered label values.
-        #NOTE np.round results in a very different outcome than .astype(int) WHY
-        LUTWorking=atlasLookupTable[atlasLookupTable[columnBestGuess].isin(np.round(labelMappings))].reset_index(drop=True)
-        
-        #indexMappings=np.asar[np.where(labelMappings[iLabels]==atlasLookupTable[columnBestGuess].values)[0] for iLabels in range(len(labelMappings))]
-      
-    
+       
     #iterate across both sets of endpoints
     for iEndpoints in range(keyTargetsArray.shape[1]):
         uniqueLabelValues=np.unique(keyTargetsArray[:,iEndpoints])
@@ -997,7 +968,7 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
             counts=[len(grouping[iKeys]) for iKeys in targetKeys]
             #append to the plotValue list
             plotValues.append(np.sum(counts))
-            plotLabels.append(LUTWorking[labelColumnGuess].iloc[iUniqueLabelValues])
+            plotLabels.append(reducedLookupTable[labelColumnGuess].iloc[iUniqueLabelValues])
         
         if iEndpoints==0:
             endpoints1DF=pd.DataFrame(data ={'labelNames': plotLabels, 'endpointCounts':plotValues})
@@ -1005,6 +976,141 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
             endpoints2DF=pd.DataFrame(data ={'labelNames': plotLabels, 'endpointCounts':plotValues})
     
     return endpoints1DF, endpoints2DF
+
+def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColumns=True):
+    """
+    Reduces the input atlas such that label indexes are continuous (i.e. proceed
+    from 0 to N, without skipping, where N is the total number of labels) AND
+    also remaps the input looktable to reflect this change.  
+
+
+    Parameters
+    ----------
+    atlas : Nifti, int based
+        A nifti atlas that will be used to determine the endpoint connectivity
+    atlasLookupTable : pandas dataframe or file loadable to pandas dataframe
+        A dataframe of the atlas lookup table which includes the labels featured
+        in the atlas and their identities.  These identities will be used
+        to label the periphery of the radial plot.
+    removeAbsentLabels : boolean, optional
+        Option flag to remove entries from the lookup table which are not found
+        in the input atlas. The default is True.
+    reduceRenameColumns : boolean, optional
+        Drops the non labelNumber and labelNames columns
+
+    Returns
+    -------
+    reducedAtlas : nifti
+        Nifti version of the atlas with the labels renumbered in a continuous
+        fashion starting at 0
+    reducedLookUpTable : pandas dataframe
+        Dataframe containing the identities of the shifted label mappings.  The
+        indexes are the integer value of the label in the relabeled atlas.
+        Column names: 'labelNumber' and 'labelNames'
+
+    """
+    import nibabel as nib
+    import dipy
+    import numpy as np
+    from dipy.segment.clustering import QuickBundles
+    from dipy.tracking.utils import reduce_labels
+    import pandas as pd
+
+    #use dipy function to reduce labels to contiguous values
+    if isinstance(atlas,str):
+        atlas=nib.load(atlas)
+    #NOTE astype(int) is causing all sorts of problems, BE WARNED
+    #first get the data out of the input atlas and *ensure* that it is Int
+    #some atlases are being passed as float
+    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+    
+    [relabeledAtlasData, labelMappings]=reduce_labels(inputAtlasDataINT)
+    #create new nifti object
+    reducedAtlas=nib.Nifti1Image(relabeledAtlasData, atlas.affine, atlas.header)
+    reducedAtlas.set_data_dtype(int)
+      
+    if isinstance(lookUpTable,str):
+        if lookUpTable[-4:]=='.csv':
+            lookUpTable=pd.read_csv(lookUpTable)
+        elif (np.logical_or(lookUpTable[-4:]=='.xls',lookUpTable[-5:]=='.xlsx')):
+            lookUpTable=pd.read_excel(lookUpTable)
+
+    #for various subsequent operations, you're going to need to know which
+    #column is which, so here we're going to make a couple educated guesses.
+    
+    #infer which column contains the original integer identities
+    #we'll use a heuristic, in that the appropriate column for the integer
+    #label identities ought to have the most matches with the unique values
+    #of the input atlas
+ 
+    #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
+    matchingLabelsCount=[len(list(set(lookUpTable[iColumns]).intersection(set(np.unique(inputAtlasDataINT))))) for iColumns in lookUpTable.columns.to_list()]
+    #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
+    #worry about that later
+    columnBestGuess=lookUpTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
+    #what about the labels we didn't find?
+    labelsNotFound=list(set(set(np.unique(inputAtlasDataINT)))-set(lookUpTable[columnBestGuess]))
+    #if *any* labels are not found, make a warning
+    if not len(labelsNotFound)==0:
+        import warnings
+        warnings.warn('Incomplete or mismatched lookup table provided: \n The following labels were found in provided atlas BUT NOT in provided lookup table \n' + str(labelsNotFound) )
+    
+    #we can also take this opportunity to pick the longest average column,
+    #which is likely the optimal label name column name.  There could be
+    #issues with this, but short of asking users to specify the name column
+    #this is probably the best way to automate this.
+    #you might also be able to do some sort of additive evidence with this
+    #e.g. if you find evidence of left and right labels.  Wouldn't help you
+    #if there was an abbreviation column though.
+    entryLengths=lookUpTable.applymap(str).applymap(len)
+    labelColumnGuess=entryLengths.mean(axis=0).idxmax()
+    
+    #now that we have the column names for both the integer labels and the
+    #string names, we can create a holder for the atlas labels we didn't
+    #find in the lookup table
+    
+    #add the labels not accounted for in the lookupTable to this table
+    #first create a small dataframe for them
+    mysteryTable=pd.DataFrame(columns=[columnBestGuess,labelColumnGuess])
+    #iterate across the msystery labels
+    for iMysteryLabels in range(len(labelsNotFound)):
+        #convert the list of the integer label and the new arbitrary name to a series
+        curSeries=pd.Series([labelsNotFound[iMysteryLabels],'mysteryLabel_'+str(iMysteryLabels+1)],index=mysteryTable.columns)
+        #append the series to the table
+        mysteryTable=mysteryTable.append(curSeries,ignore_index=True)
+
+    #lets just do this by default and see if it causes any problems    
+    #if len(lookUpTable)>len(labelMappings):
+        #lets get the correspondances of the labels in the two atlases, we can 
+        #assume that ordering has been preserved, due to the dipy function
+        #it's just that identity has been 
+        #shifted to a contiguous integer sequence
+                
+        #now that we have the guess, get the corresponding row entries, and reset the index.
+        #This should make the index match the renumbered label values.
+    LUTWorking=lookUpTable[lookUpTable[columnBestGuess].isin(labelMappings)].reset_index(drop=True)
+             
+        #append the mystery table to the working lookupt table     
+    reducedLookUpTable=LUTWorking.append(mysteryTable,ignore_index=True)
+    
+    #if the input variable has been set to preserve the lookup table entries
+    #for labels not found in the atlas
+    if not removeAbsentLabels:
+        leftOverEntries=lookUpTable[~lookUpTable[columnBestGuess].isin(labelMappings)].reset_index(drop=True)
+        reducedLookUpTable=reducedLookUpTable.append(leftOverEntries,ignore_index=True)
+        
+    #rename the relevant output colums for standardization purposes
+    #don't do this, its actually more useful to just assume that column 0 is
+    # the numbers and 1 is the names.  Otherwise we have to redo the heuristics
+    #again to get this info
+    #reducedLookUpTable=reducedLookUpTable.rename(columns={columnBestGuess : 'labelNumber', labelColumnGuess : 'labelNames'})
+    
+    #reduce it, if that's what the options called for
+    if reduceRenameColumns:
+        reducedLookUpTable=reducedLookUpTable[[columnBestGuess,labelColumnGuess]]
+    
+    return reducedAtlas, reducedLookUpTable
+
 
 def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
     """
@@ -1338,7 +1444,7 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     
     return voxelAtlasConnectivityTable
 
-def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
+def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable,reductionFactor=None):
     
     import pandas as pd
     import numpy as np
@@ -1352,6 +1458,30 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable):
     
     #get the indexes, which also serve as the voxel labels
     voxelIndexes=voxelAtlasConnectivityTable.index
+    
+    #modify the atlasConnectivityTable, if the reductionFactor requires it
+    if not reductionFactor==None:
+        voxelIndexesArray=np.asarray(list(voxelIndexes))
+        #if it's == to 1 you don't need to do anything
+        if not reductionFactor == 1:
+            #use floor divide to essentially round down by the specified factor
+            voxelIndexesArrayRounded=np.floor_divide(voxelIndexesArray,reductionFactor).astype(int)
+            #regenerate the indexes
+            voxelIndexesArrayRounded=np.multiply(voxelIndexesArrayRounded,reductionFactor).astype(int)
+            #get the unique voxel indexes for this
+            uniqueRoundedVoxelIndexes=np.unique(voxelIndexesArrayRounded,axis=0)
+            #create a subtable using these
+            reducedVoxelAtlasConnectivityTable=voxelAtlasConnectivityTable.loc(uniqueRoundedVoxelIndexes.tolist())
+            #iterate across rounded indexes
+            for iVoxels in tqdm.tqdm(list(reducedVoxelAtlasConnectivityTable.index)):
+                #is there a faster or smarter way to do this?
+                #find the array indexes of the now rounded voxel indicies that are equal the current unique rounded voxel index value
+                currentVoxels=np.where([connectedVoxels==iVoxels for connectedVoxels in list(voxelIndexes)])
+                #for all of these that meet the citerion (are in the appropriate neighborhood)
+                #sum across the columns (i.e. labels), and place value in the reduced table
+                reducedVoxelAtlasConnectivityTable[iVoxels]=voxelAtlasConnectivityTable.iloc(currentVoxels).sum(axis=1)
+        #set the working connectivity table to the reduced connectivity table
+        voxelAtlasConnectivityTable=reducedVoxelAtlasConnectivityTable
     #determine if the output has been normalized
     #if you did the tracking using trackStreamsInMask then each voxel should
     #have the same number of streamlines

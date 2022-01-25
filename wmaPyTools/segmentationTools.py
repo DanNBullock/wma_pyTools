@@ -44,6 +44,7 @@ def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
     
     
     import numpy as np
+    import pandas as pd
     
     #initialize an output order vector
     outOrder=list(range(len(criteriaROIs)))
@@ -93,6 +94,10 @@ def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
         volumesToCheckOut[iOutputs]=np.sum(sortedCriteriaROIs[iOutputs].get_data()).astype(int)
         #if it is an exclusion, get the number of streamlines that are left out
     print("volumes of output ROIs to check " + str(volumesToCheckOut))
+    
+    reportData=[[volumesToCheckOut[iOut],sortedInclusionCriteria[iOut],sortedOperations[iOut]] for iOut in range(len(criteriaROIs))]
+    reportFrame=pd.DataFrame(data=reportData, columns=['roiVolumes','inclusionCriteria','operations'])
+    print(reportFrame)
     
     return sortedCriteriaROIs,sortedInclusionCriteria, sortedOperations
     
