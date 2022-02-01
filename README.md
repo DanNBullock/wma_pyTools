@@ -13,8 +13,9 @@ This repository contains a number of python code tools which can be used to perf
 - [Sarah Heilbronner](https://med.umn.edu/bio/department-of-neuroscience/sarah-heilbronner) ([heilb028@umn.edu](mailto:heilb028@umn.edu))
 
 ### Funding
+[![NIH-NIBIB-1T32EB031512-01](https://img.shields.io/badge/NIH_NIBIB-1T32EB031512-01-blue.svg)](https://reporter.nih.gov/search/xAQsrWpJ90ah8kacTbgQIw/project-details/10205698)
 
-[This section needs expansion. You can help by adding to it]
+Dan Bullock's work is supported by the University of Minnesota’s Neuroimaging Postdoctoral Fellowship Program, College of Science and Engineering's, and the Medical School's NIH funded T32 Neuroimaging Training Grant. NOGA: [1T32EB031512-01](https://reporter.nih.gov/search/xAQsrWpJ90ah8kacTbgQIw/project-details/10205698) 
 
 ## Development note
 Work to better structure and document this code is ongoing.  Please feel free to create issues to provoke clarity in documentation, or to suggest alterations to documentation or code more directly. Furthermore, it is acutely understood that many of the functionalities in this package may be redundant implementations of (likely more robust and reliable) functionalities from other packages. The identification of such instances (and their other-package correspondances) would be **greatly appreciated**. 
