@@ -36,6 +36,17 @@ def makePlanarROI(reference, mmPlane, dimension):
 
     """
     
+    # #consider replacing some of this with this:
+    # refDimBounds=np.asarray(mask.bounding_box(region_of_interest))
+    
+    # #use itertools and cartesian product to generate vertex img space coordinates
+    # outCoordnates=np.asarray(list(itertools.product(refDimBounds[:,0], refDimBounds[:,1], refDimBounds[:,2])))
+     
+    # #perform affine
+    # convertedBoundCoords=nib.affines.apply_affine(affine,outCoordnates)
+    
+    
+    
     import nibabel as nib
     import numpy as np
     import dipy.tracking.utils as ut
@@ -77,6 +88,7 @@ def makePlanarROI(reference, mmPlane, dimension):
     #convert to coordinate vector
     testSplit=np.vstack(planeCloud).reshape(3,-1).T
     #use dipy functions to treat point cloud like one big streamline, and move it back to image space
+    #alternatively just use inds=nib.affines.apply_affine(np.linalg.inv(fullMask.affine),testSplit)
     lin_T, offset =ut._mapping_to_voxel(fullMask.affine)
     inds = ut._to_voxel_coordinates(testSplit, lin_T, offset)
     

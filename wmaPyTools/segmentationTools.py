@@ -156,7 +156,101 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     #these are the winners
     outBoolVec[remainingStreamIndexes]=True
     return outBoolVec
-   
+
+def segmentTractMultiROI_fast(streamlines, roisVec, includeVec, operationsVec):
+    """
+    Iteratively applies ROI-based streamline criteria using a number of speedup
+    heuristics.
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        treamlines to segment from, e.g. a candidate tractome.
+    roisVec : TYPE
+        nifti or list there of that will serve as your criteria ROIs.
+        Streamlines will be assesed for their relation to these objects
+    includeVec : bool or list thereof
+        A boolean  or list thereof indicating whether you want the
+        corresponding entry in roisVec to act as an INCLUSION or EXCLUSION ROI 
+        (True=inclusion)
+    operationsVec : string or list thereof
+        A string or list thereof with any of the following instructions
+        regarding which streamline nodes to asses (and how).
+            >  "any" : any point is within tol from ROI. The default.
+            >  "all" : all points are within tol from ROI.
+            >  "either_end" : either of the end-points is within tol from ROI
+            >  "both_end" : both end points are within tol from ROI.
+
+    Raises
+    ------
+    ValueError
+        Throws error if input vectors are of different lengths. 
+    TypeError
+        Throws error if inputs are of incorrect types
+
+    Returns
+    -------
+    outBoolVec : boolean vector
+        A boolean vector indicating which streamlines survived ALL operations.
+
+    """
+    import numpy as np
+    import nibabel as nib
+    import itertools
+  
+    if isinstance(roisVec, nib.nifti1.Nifti1Image):
+        #make it a list
+        roisVec=[roisVec]
+    if isinstance(roisVec, list):
+        #check to make sure the input is correct
+        if isinstance(roisVec[0], np.ndarray):
+            raise TypeError ('Input mask format expected to be Nifti, not ndarray')
+        
+    if isinstance(includeVec, bool):
+        #make it a list
+        includeVec=[includeVec]
+    if isinstance(includeVec, list):
+        #seems sensible
+        #check to make sure the input is correct
+        if not np.all( [isinstance(iInclude, bool) for iInclude in includeVec]):
+            raise TypeError ('Input includeVec not boolean vector')
+
+    acceptableOperations=['any', 'all', 'either_end', 'both_end']
+    if isinstance(operationsVec, bool):
+        #make it a list
+        includeVec=[operationsVec]
+    if isinstance(operationsVec, list):
+        #check to make sure the input is correct
+        if not np.all( [iOperations in acceptableOperations for iOperations in operationsVec]):
+            raise TypeError ('Input operationsVec operations not understood')
+
+    if not len(np.unique([len(roisVec), len(includeVec), len(operationsVec)]))==1:
+        raise ValueError('Mismatch between lengths of ROI/Mask, inclusion, and operation vectors')
+        
+    #sort the criterion for speed, harshest criteria first
+    sortedCriteriaROIs,sortedInclusionCriteria, sortedOperations=speedSortSegCriteria(roisVec,includeVec,operationsVec)
+        
+    #initialize a list of surviving streams, battle royale style
+    remainingStreamIndexes=list(range(len(streamlines)))
+    
+    #iterate across segmentation operations
+    for iOperations in range(len(roisVec)):
+        #perform this segmentation operation
+        curBoolVec=near_roi_fast(streamlines[remainingStreamIndexes], roisVec[iOperations].affine, roisVec[iOperations].get_data(),mode=operationsVec[iOperations])
+        #if the inclusion operation requires it, negate the output
+        if not includeVec[iOperations]:
+            curBoolVec=np.logical_not(curBoolVec)
+            
+        #after the cull
+        remainingStreamIndexes=list(itertools.compress(remainingStreamIndexes,curBoolVec))
+        
+    #create blank output structure
+    outBoolVec=np.zeros(len(streamlines),dtype=bool)
+    #these are the winners
+    outBoolVec[remainingStreamIndexes]=True
+    
+    return outBoolVec
+                              
 
 def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operationSpec):
     """segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
@@ -268,7 +362,10 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
              mode="any"):
     """
     Fast version of dipy's "near_roi" function.  Acheives speedup by first 
-    subsetting streamlines by an bounding box.
+    subsetting streamlines by an bounding box.  Moves much of the functionality
+    of the prototype 
+    wmaPyTools.segmentationTools.applyNiftiCriteriaToTract_DIPY_Test into
+    a revision of dipy's dipy.tracking.utils.near_roi 
     
     Provide filtering criteria for a set of streamlines based on whether
     they fall within a tolerance distance from an ROI.
@@ -310,11 +407,30 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     import nibabel as nib
     from dipy.core.geometry import dist_to_corner
     from dipy.tracking.utils import streamline_near_roi
+    from dipy.tracking.utils import density_map
+    from cipy.ndimage import binary_dilation
     from warnings import warn
+    
+    #one thing off the top we can do is reduce the size of the input 
+    #region_of_interest such that we are only considering voxels that 
+    #intersect at all with the streamline mask
+    tractMask=density_map(streamlines, affine, region_of_interest.shape)
+    #dialate tract mask in order to include voxels that are outside of the 
+    #tractmask, but nonetheless within the tolerance.
+    
+    #given that dtc will kick in automatically later if tol is too small, a
+    #single round of dialation should be sufficient here in order to expand
+    #the tract mask beyond the tol threshold    
+    tractMask=binary_dilation(tractMask.astype(bool), iterations=1)
+    #convert int-based voxel-wise count data to int because apparently that's the only way you can save with nibabel
+    #tractMask=nib.Nifti1Image(np.greater(tractMask,0).astype(int), affine=affine)
+    
+    #TODO confirm np.and returns same size
+    tract_ROI_intersection =np.logical_and(tractMask,region_of_interest)
     
     #NOTE: here we are just copying the functionality of subjectSpaceMaskBoundaryCoords
     #get the bounding box in image space
-    refDimBounds=np.asarray(mask.bounding_box(region_of_interest))
+    refDimBounds=np.asarray(mask.bounding_box(tract_ROI_intersection))
     
     #use itertools and cartesian product to generate vertex img space coordinates
     outCoordnates=np.asarray(list(itertools.product(refDimBounds[:,0], refDimBounds[:,1], refDimBounds[:,2])))
@@ -347,8 +463,30 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
         
         #here, for each streamline, we determine which nodes are within bounds
         nodeCriteria=np.asarray([np.logical_and(streamlines[iStreamline][:,iDems]>subjectSpaceBounds[0,iDems],streamlines[iStreamline][:,iDems]<subjectSpaceBounds[1,iDems]) for iDems in list(range(subjectSpaceBounds.shape[1])) ])
+        
+        #we can also go ahead and implement the "mode" behavior for either_end
+        #and both_end, and possibly set things up for a future one_end,
+        #by dropping everything between the endpoints.
+        #we might need a weird conditional here, or a try except to make
+        #indexing robust to already short streamlines (e.g. 2 nodes)
+        
+        #TODO NOTE: 'one_end' would need to be implemented inside
+        #streamline_near_roi in order to avoid running both 'either_end' and
+        #'both_end' (and) then negating the output of 'both_end'
+        if np.any(mode == 'either_end', mode == 'both_end',mode == 'one_end'):
+            try:
+                nodeCriteria[1:-1]=False
+            except:
+                #in a test case with nodeCriteria=[False,False] attempting
+                #nodeCriteria[1:-1]=False results in
+                #TypeError: can only assign an iterable, which is a fine
+                #behavior if we're using try except
+                pass
+
         streamlinesSubMask[iStreamline]=np.all(nodeCriteria,axis=0)
-       
+    
+    #END streamlineWithinBounds
+    
     # so at this point, you might ask what is streamlinesSubMask?  
     # streamlinesSubMask is a list N items long, where N is the number of
     # streamlines, where each item i in N is a list that is j units long,
@@ -373,35 +511,49 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
         warn(w_s)
         tol = dtc
 
-    roi_coords = np.array(np.where(region_of_interest)).T
+    roi_coords = np.array(np.where(tract_ROI_intersection)).T
     x_roi_coords = nib.affines.apply_affine(affine, roi_coords)
 
-    # If it's already a list, we can save time by pre-allocating the output
-    if isinstance(streamlines, list):
-        out = np.zeros(len(streamlines), dtype=bool)
-        for ii, sl in enumerate(streamlines):
-            #NOTE: here we are implementing a difference from the standard
-            # dipy.tracking.utils.near_roi
-            out[ii] = streamline_near_roi(sl[streamlinesSubMask[ii]],
-                                          x_roi_coords, tol=tol, mode=mode)
-    # If it's a generator, we'll need to generate the output into a list
-    else:
-        #as above
-        #NOTE: here we are implementing a difference from the standard
-        # dipy.tracking.utils.near_roi
-        #TODO: Ensure that a streamlines generator object is a valid target 
-        #for enumerate
-        #create the full output list here
-        #ok, here's a lazy way to do it
-        out = [[] for iStreamlines in streamlines]
-        for ii, sl in enumerate(streamlines):
-            #as above
-            #NOTE: here we are implementing a difference from the standard
-            # dipy.tracking.utils.near_roi
-            #out.append(streamline_near_roi(sl, x_roi_coords, tol=tol,
-            #                              mode=mode))
-            out[ii] = streamline_near_roi(sl[streamlinesSubMask[ii]],
-                                          x_roi_coords, tol=tol, mode=mode)
+    # # If it's already a list, we can save time by pre-allocating the output
+    # if isinstance(streamlines, list):
+    #     out = np.zeros(len(streamlines), dtype=bool)
+    #     for ii, sl in enumerate(streamlines):
+            
+    #         #quick pre dipy fix solution
+    #         if not np.any(sl):
+    #             out[ii]=False
+                
+    #         else:
+    #             #NOTE: here we are implementing a difference from the standard
+    #             # dipy.tracking.utils.near_roi
+    #             out[ii] = streamline_near_roi(sl[streamlinesSubMask[ii]],
+    #                                           x_roi_coords, tol=tol, mode=mode)
+    # # If it's a generator, we'll need to generate the output into a list
+    # else:
+    #     #as above
+    #     #NOTE: here we are implementing a difference from the standard
+    #     # dipy.tracking.utils.near_roi
+    #     #TODO: Ensure that a streamlines generator object is a valid target 
+    #     #for enumerate
+    #     #create the full output list here
+    #     #ok, here's a lazy way to do it
+    #     out = [[] for iStreamlines in streamlines]
+    #     for ii, sl in enumerate(streamlines):
+    #         #as above
+    #         #NOTE: here we are implementing a difference from the standard
+    #         # dipy.tracking.utils.near_roi
+    #         #out.append(streamline_near_roi(sl, x_roi_coords, tol=tol,
+    #         #                              mode=mode))
+    #         if not np.any(sl):
+    #             out[ii]=False
+                
+    #         else:
+    #             out[ii] = streamline_near_roi(sl[streamlinesSubMask[ii]],
+    #                                           x_roi_coords, tol=tol, mode=mode)
+    
+    #or just do this:
+    #does this actually work?
+    out=[streamline_near_roi(iStreamlines, x_roi_coords, tol=tol, mode=mode) if iStreamlines else False for iStreamlines in streamlines]
             
     #at the end of this, we should essentialy have the same boolean
     #vector output that would be typical of near_roi
