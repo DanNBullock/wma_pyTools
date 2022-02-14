@@ -1047,12 +1047,6 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
     #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
     matchingLabelsCount=[len(list(set(lookUpTable[iColumns]).intersection(set(np.unique(inputAtlasDataINT))))) for iColumns in lookUpTable.columns.to_list()]
     
-    for iColumns in lookUpTable.columns.to_list():
-        print(iColumns)
-        print(lookUpTable[iColumns])
-        print(np.unique(inputAtlasDataINT))
-        print(list(set(lookUpTable[iColumns]).intersection(set(np.unique(inputAtlasDataINT)))))
-    
     #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
     #worry about that later
     columnBestGuess=lookUpTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
