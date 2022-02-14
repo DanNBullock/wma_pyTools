@@ -1071,6 +1071,25 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
     entryLengths=lookUpTable.applymap(str).applymap(len)
     labelColumnGuess=entryLengths.mean(axis=0).idxmax()
     
+    #we should take this opportunity to check for and remove redundant entries
+    #or throw an error if there are contradictory ones
+    for iterIndexes,iLabels in enumerate(np.unique(lookUpTable[columnBestGuess].values)):
+        correspondingRows=lookUpTable[lookUpTable[columnBestGuess]==iLabels]
+        if len(correspondingRows)>1:
+            #get the indexes
+            currentIndexes=correspondingRows.index
+            #check to determine if the name is the same for all
+            if np.all([correspondingRows[labelColumnGuess].tolist()[0]==iNames for iNames in correspondingRows[labelColumnGuess].tolist()]):
+            #remove the excess ones
+                for iToRemove in np.arange(1,len(currentIndexes)):
+                    #find the index to remove
+                    toRemoveIndex=currentIndexes[iToRemove]
+                    lookUpTable=lookUpTable.drop(index=toRemoveIndex)
+            else:
+                
+                raise  ValueError('Multiple identities found for label '+ str(iLabels))
+            
+    
     #now that we have the column names for both the integer labels and the
     #string names, we can create a holder for the atlas labels we didn't
     #find in the lookup table
