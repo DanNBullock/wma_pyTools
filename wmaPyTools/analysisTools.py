@@ -983,6 +983,7 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
     from 0 to N, without skipping, where N is the total number of labels) AND
     also remaps the input looktable to reflect this change.  
 
+    NOTE:  0 is presumed to be background / unlabeled
 
     Parameters
     ----------
@@ -1045,12 +1046,23 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
  
     #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
     matchingLabelsCount=[len(list(set(lookUpTable[iColumns]).intersection(set(np.unique(inputAtlasDataINT))))) for iColumns in lookUpTable.columns.to_list()]
+    
+    for iColumns in lookUpTable.columns.to_list():
+        print(iColumns)
+        print(lookUpTable[iColumns])
+        print(np.unique(inputAtlasDataINT))
+        print(list(set(lookUpTable[iColumns]).intersection(set(np.unique(inputAtlasDataINT)))))
+    
     #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
     #worry about that later
     columnBestGuess=lookUpTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
     #what about the labels we didn't find?
     labelsNotFound=list(set(set(np.unique(inputAtlasDataINT)))-set(lookUpTable[columnBestGuess]))
     #if *any* labels are not found, make a warning
+    #you forgot about 0
+    #remove it if it is there.
+    if len(labelsNotFound)==1 and labelsNotFound[0]==0:
+        labelsNotFound.remove(0)
     if not len(labelsNotFound)==0:
         import warnings
         warnings.warn('Incomplete or mismatched lookup table provided: \n The following labels were found in provided atlas BUT NOT in provided lookup table \n' + str(labelsNotFound) )
@@ -1089,7 +1101,12 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
         #now that we have the guess, get the corresponding row entries, and reset the index.
         #This should make the index match the renumbered label values.
     LUTWorking=lookUpTable[lookUpTable[columnBestGuess].isin(labelMappings)].reset_index(drop=True)
-             
+    #don't forget to include the 0 label
+    unknownEntryTable=pd.DataFrame(columns=[columnBestGuess,labelColumnGuess])
+    unknownEntryTable.loc[0]=[0,'unlabeled (unlabeled)']
+    
+    
+    LUTWorking=unknownEntryTable.append(LUTWorking,ignore_index=True)    
         #append the mystery table to the working lookupt table     
     reducedLookUpTable=LUTWorking.append(mysteryTable,ignore_index=True)
     
