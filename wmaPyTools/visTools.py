@@ -1008,6 +1008,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     import dipy.tracking.utils as ut
     from scipy import ndimage
     from nilearn.image import crop_img, resample_to_img 
+    import matplotlib.pyplot as plt
     
     import wmaPyTools.streamlineTools
     import wmaPyTools.roiTools
@@ -1223,7 +1224,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     #subselect
     croppedArray=outArray[(minVals[0]-borderPixels):(maxVals[0]+borderPixels),(minVals[1]-borderPixels):(maxVals[1]+borderPixels),:]
     
-    matplotlib.pyplot.imsave(outName + '.png',croppedArray)
+    plt.imsave(outName + '.png',croppedArray)
     #now lets crop it a bit
     
 
