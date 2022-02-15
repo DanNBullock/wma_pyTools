@@ -4,6 +4,33 @@ Created on Sun Dec  5 16:03:51 2021
 
 @author: Daniel
 """
+#lets do the importing at the top I guess
+import numpy as np
+import pandas as pd
+import nibabel as nib
+import itertools
+from dipy.tracking.utils import near_roi
+import dipy.tracking.utils as ut
+from nilearn import masking 
+import scipy
+from scipy.spatial.distance import cdist
+from dipy.core.geometry import dist_to_corner
+from dipy.tracking.streamline import Streamlines
+
+import time
+import wmaPyTools.roiTools
+import dipy.segment.mask as mask
+from dipy.tracking.utils import streamline_near_roi
+from dipy.tracking.utils import density_map
+from scipy.ndimage import binary_dilation
+from warnings import warn
+import tqdm
+import dipy.tracking.utils as ut
+from dipy.tracking.vox2track import _streamlines_in_mask   
+import copy
+
+
+
 def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
     """
     Sorts segmentation criteria in order to minimize segmentation time.
@@ -43,8 +70,8 @@ def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
     #we could auto convert those as well to speed things up further.
     
     
-    import numpy as np
-    import pandas as pd
+    #import numpy as np
+    #import pandas as pd
     
     #initialize an output order vector
     outOrder=list(range(len(criteriaROIs)))
@@ -128,8 +155,8 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     # the number of nodes considered per streamline to 2.  This would be an effective way
     # of implementing a fast and harsh first criteria.
     """
-    import numpy as np
-    import itertools 
+    #import numpy as np
+    #import itertools 
     
     if ~ len(np.unique([len(roisvec), len(includeVec), len(operationsVec)]))==1:
         raise ValueError('mismatch between lengths of roi, inclusion, and operation vectors')
@@ -156,6 +183,70 @@ def segmentTractMultiROI(streamlines, roisvec, includeVec, operationsVec):
     #these are the winners
     outBoolVec[remainingStreamIndexes]=True
     return outBoolVec
+
+def streamIndexesFromConnGroupDict(grouping,indexes1,indexes2,undirected=True):
+    """
+    
+
+    Parameters
+    ----------
+    grouping : collections.defaultdict, dictionary
+        The output grouping object dictionary from
+        dipy.tracking.utils.connectivity_matrix
+    indexes1 : list of int
+        A list of integers corresponding to the labels that the desired
+        streamlines are to be connected to.
+    indexes2 : list of int
+        A list of integers corresponding to the labels that the desired
+        streamlines are to be connected to.
+    undirected : Bool, optional
+        Flag that indicates whether the requested lables are to be treated
+        as undirected (i.e. indexes1 to indexes2 OR indexes2 to indexes1).
+        The default is True.
+
+    Returns
+    -------
+    streamIndexes : list of int
+        A list of integers corresponding to the streamline indexes of the
+        streamlines that meet the desired connectivity criteria.
+
+    """
+    #create a function that checks if the input indexes are in the specified cols in the key array
+    def keyCheck(grouping,indexesIn1,indexesIn2):
+        np.asarray(list(grouping.keys()))
+        outBoolVec=np.zeros(len(grouping.keys()),dtype=bool)
+        
+        for iIndexes,iKeys in enumerate(list(grouping.keys())):
+            criteria1=iKeys[0] in indexes1
+            criteria2=iKeys[1] in indexes2
+            outBoolVec[iIndexes]=np.all([criteria1,criteria2])
+            
+        return outBoolVec
+    
+    #if its undirected
+    if undirected:
+        #do it with both orderings
+        outBoolVec1=keyCheck(grouping,indexes1,indexes2)
+        outBoolVec2=keyCheck(grouping,indexes2,indexes1)
+        #and combine the results
+        keysToCheck=np.any([outBoolVec1,outBoolVec2],axis=0)
+    else:
+        outBoolVec1=keyCheck(grouping,indexes1,indexes2)
+        #and combine the results
+        keysToCheck=outBoolVec1
+    
+    #create a list to hold the streamline indexes
+    streamsList=[]
+    #now iterate across the keys and pull out the indexes
+    for iIndexes,iBool in enumerate(keysToCheck):
+        if iBool:
+            streamsList.append(grouping[list(grouping.keys())[iIndexes]])
+    
+    #unpack the lists
+    streamIndexes=[streamIndxs for sublist in streamsList for streamIndxs in sublist]
+    
+    return streamIndexes
+    
 
 def segmentTractMultiROI_fast(streamlines, roisVec, includeVec, operationsVec):
     """
@@ -194,9 +285,9 @@ def segmentTractMultiROI_fast(streamlines, roisVec, includeVec, operationsVec):
         A boolean vector indicating which streamlines survived ALL operations.
 
     """
-    import numpy as np
-    import nibabel as nib
-    import itertools
+    # import numpy as np
+    # import nibabel as nib
+    # import itertools
   
     if isinstance(roisVec, nib.nifti1.Nifti1Image):
         #make it a list
@@ -216,16 +307,20 @@ def segmentTractMultiROI_fast(streamlines, roisVec, includeVec, operationsVec):
             raise TypeError ('Input includeVec not boolean vector')
 
     acceptableOperations=['any', 'all', 'either_end', 'both_end']
-    if isinstance(operationsVec, bool):
+    if isinstance(operationsVec, str):
         #make it a list
-        includeVec=[operationsVec]
+        operationsVec=[operationsVec]
     if isinstance(operationsVec, list):
         #check to make sure the input is correct
         if not np.all( [iOperations in acceptableOperations for iOperations in operationsVec]):
             raise TypeError ('Input operationsVec operations not understood')
 
     if not len(np.unique([len(roisVec), len(includeVec), len(operationsVec)]))==1:
-        raise ValueError('Mismatch between lengths of ROI/Mask, inclusion, and operation vectors')
+        # print( str(np.unique([len(roisVec), len(includeVec), len(operationsVec)])))
+        # print( str(len(roisVec)))
+        # print( str(len(includeVec)))
+        # print( str(len(operationsVec)))
+        raise ValueError('Mismatch between lengths of ROI/Mask, inclusion, and operation vectors ')
         
     #sort the criterion for speed, harshest criteria first
     sortedCriteriaROIs,sortedInclusionCriteria, sortedOperations=speedSortSegCriteria(roisVec,includeVec,operationsVec)
@@ -280,12 +375,12 @@ def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operatio
     # - outBoolVec: boolean vec indicating streamlines that survived operation
     """
     #still learning how to import from modules
-    from dipy.tracking.utils import near_roi
-    import numpy as np
-    import dipy.tracking.utils as ut
-    import nibabel as nib
-    from nilearn import masking 
-    import scipy
+    # from dipy.tracking.utils import near_roi
+    # import numpy as np
+    # import dipy.tracking.utils as ut
+    # import nibabel as nib
+    # from nilearn import masking 
+    # import scipy
     
     #perform some input checks
     validOperations=["any","all","either_end","both_end"]
@@ -358,12 +453,65 @@ def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operatio
     
     return outBoolVec
 
+def preFiltered_Streamline_near_roi(streamline, roi_coords, tol, mode='any'):
+    """
+    An alternate version of dipy's streamline_near_roi with fewer checks.
+    This should only be run if the input streamline collection has been
+    prefiltered in near_roi_fast.
+    
+    This was done because streamline_near_roi was operating at about 2-3
+    iterations per second for some reason.  Possibly a bad version.
+
+    Parameters
+    ----------
+    streamline : array, shape (N, 3)
+        A single streamline.
+    roi_coords : array, shape (M, 3)
+        ROI coordinates transformed to the streamline coordinate frame..
+    tol : float
+        Distance (in the units of the streamlines, usually mm). If any
+        coordinate in the streamline is within this distance from the center
+        of any voxel in the ROI, this function returns True..
+    mode : string, optional
+        One of {"any", "all", "either_end", "both_end"}, where return True
+        if:
+        "any" : any point is within tol from ROI.
+        "all" : all points are within tol from ROI.
+        "either_end" : either of the end-points is within tol from ROI
+        "both_end" : both end points are within tol from ROI.
+        
+        The default is 'any'.
+
+    Returns
+    -------
+    boolOut : boolean
+        An indicator of whether the streamline meets the specified criterion
+
+    """
+    import numpy as np
+    
+    dist = cdist(streamline, roi_coords, 'euclidean')
+    
+    if mode == "any" or mode == "either_end":
+        return np.min(dist) <= tol
+    else:
+        return np.all(np.min(dist, -1) <= tol)
+    
+
 def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
              mode="any"):
     """
-    Fast version of dipy's "near_roi" function.  Acheives speedup by first 
-    subsetting streamlines by an bounding box.  Moves much of the functionality
-    of the prototype 
+    Fast version of dipy's "near_roi" function.  Acheives speedup implementing 
+    a number of heuristics:
+        
+        1. Subsets input ROI by intersecting with tract mask.  Reduces number
+        of coordinates from ROI involved in cdist computation
+        2. Pre-culls candidate streamlines to those within ROI bounding-box.
+        Reduces number of streamline-based coordinates in cdist computation.
+        3. Within candidate streamlines, eliminates those streamlines
+        
+        
+    Moves much of the functionality of the prototype 
     wmaPyTools.segmentationTools.applyNiftiCriteriaToTract_DIPY_Test into
     a revision of dipy's dipy.tracking.utils.near_roi 
     
@@ -401,15 +549,16 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     otherwise.
     """    
     
-    import dipy.segment.mask as mask
-    import numpy as np
-    import itertools
-    import nibabel as nib
-    from dipy.core.geometry import dist_to_corner
-    from dipy.tracking.utils import streamline_near_roi
-    from dipy.tracking.utils import density_map
-    from cipy.ndimage import binary_dilation
-    from warnings import warn
+    # import dipy.segment.mask as mask
+    # import numpy as np
+    # import itertools
+    # import nibabel as nib
+    # from dipy.core.geometry import dist_to_corner
+    # from dipy.tracking.utils import streamline_near_roi
+    # from dipy.tracking.utils import density_map
+    # from scipy.ndimage import binary_dilation
+    # from warnings import warn
+    # import tqdm
     
     #one thing off the top we can do is reduce the size of the input 
     #region_of_interest such that we are only considering voxels that 
@@ -453,7 +602,8 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     #NOTE, THIS IS replicatiing the functionality of streamlineWithinBounds
     #setup an streamline-node-submask structure
     streamlinesSubMask=[[] for iSreamlines in range(len(streamlines))]
-    for iStreamline in range(len(streamlines)):
+    print('Computing streamline nodes within ROI bounding box')
+    for iStreamline in tqdm.tqdm(range(len(streamlines))):
         #this function is predicated upon 2 assumptions:  (1) for the 
         #vast majority of mask cases, because the mask is sufficiently small
         #there is a massive speedup to be had by doing the following within-bounds
@@ -473,7 +623,7 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
         #TODO NOTE: 'one_end' would need to be implemented inside
         #streamline_near_roi in order to avoid running both 'either_end' and
         #'both_end' (and) then negating the output of 'both_end'
-        if np.any(mode == 'either_end', mode == 'both_end',mode == 'one_end'):
+        if np.any((mode == 'either_end', mode == 'both_end',mode == 'one_end')):
             try:
                 nodeCriteria[1:-1]=False
             except:
@@ -496,12 +646,10 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     # corresponding nodes meet the "within-boundaries" criteria implemented
     # above
     
-    #TODO:  the following presumes that streamline_near_roi can handle
-    #being passed an empty vector from streamline, which probably isnt' the case
-    #make a push to github for this
-          
+
     #the following is mostly copied from the normal dipy.tracking.utils.near_roi
-    #HOWEVER: instead of performing cdist on all nodes of all streamlines,
+    #HOWEVER: instead of performing cdist on *all* nodes of all streamlines,
+    #what if we used your mask to filter the nodes
     dtc = dist_to_corner(affine)
     if tol is None:
         tol = dtc
@@ -511,50 +659,46 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
         warn(w_s)
         tol = dtc
 
+    #convert the tract_ROI_intersection roi coordinate into the same
+    #reference space as the streamlines
     roi_coords = np.array(np.where(tract_ROI_intersection)).T
     x_roi_coords = nib.affines.apply_affine(affine, roi_coords)
 
-    # # If it's already a list, we can save time by pre-allocating the output
-    # if isinstance(streamlines, list):
-    #     out = np.zeros(len(streamlines), dtype=bool)
-    #     for ii, sl in enumerate(streamlines):
-            
-    #         #quick pre dipy fix solution
-    #         if not np.any(sl):
-    #             out[ii]=False
-                
-    #         else:
-    #             #NOTE: here we are implementing a difference from the standard
-    #             # dipy.tracking.utils.near_roi
-    #             out[ii] = streamline_near_roi(sl[streamlinesSubMask[ii]],
-    #                                           x_roi_coords, tol=tol, mode=mode)
-    # # If it's a generator, we'll need to generate the output into a list
-    # else:
-    #     #as above
-    #     #NOTE: here we are implementing a difference from the standard
-    #     # dipy.tracking.utils.near_roi
-    #     #TODO: Ensure that a streamlines generator object is a valid target 
-    #     #for enumerate
-    #     #create the full output list here
-    #     #ok, here's a lazy way to do it
-    #     out = [[] for iStreamlines in streamlines]
-    #     for ii, sl in enumerate(streamlines):
-    #         #as above
-    #         #NOTE: here we are implementing a difference from the standard
-    #         # dipy.tracking.utils.near_roi
-    #         #out.append(streamline_near_roi(sl, x_roi_coords, tol=tol,
-    #         #                              mode=mode))
-    #         if not np.any(sl):
-    #             out[ii]=False
-                
-    #         else:
-    #             out[ii] = streamline_near_roi(sl[streamlinesSubMask[ii]],
-    #                                           x_roi_coords, tol=tol, mode=mode)
+    #here we precompute the number of nodes in each streamline in the bounding box
+    #we can just skip over the ones that are empty
+    boundedNodeSums=[np.sum(iStreams) for iStreams in streamlinesSubMask]
+    #in the case of "any" we'll even be able to skip over any streamline that
+    #doesn't have all of its nodes in the bounding box, for an additional
+    #pre-cdist speedup
+    streamNodeSums=[len(iStreams) for iStreams in streamlines]
     
-    #or just do this:
-    #does this actually work?
-    out=[streamline_near_roi(iStreamlines, x_roi_coords, tol=tol, mode=mode) if iStreamlines else False for iStreamlines in streamlines]
-            
+    #get the indexes of the locations you'll be iterating over different cases
+    # for 'all' and other cases
+    if mode=='all':
+        #you would need the number of nodes in the mask to be equal to the 
+        #number of nodes in the streamline to justify checking it.
+        streamsToCheck=np.where(np.equal(boundedNodeSums,streamNodeSums))[0]
+    else: #if it isn't mode=all
+        #otherwise we just need to ensure there are any  
+        #this check may be obviated by an upcoming dipy update
+        streamsToCheck=np.where( not boundedNodeSums==0)[0]
+    
+    #I guess we have to create a whole new subset of streamlines here
+    #GOODBYE RAM
+    print('Subsetting streamlines')
+    #this may not be necessary
+    #streamlinesSubset=[streamlines[iStreamlineToCheck][streamlinesSubMask[iStreamlineToCheck]] for iStreamlineToCheck in tqdm.tqdm(streamsToCheck)]
+    
+    print('Appliying segmentation criterion')
+    #set up the output vector, initialize with false because we're skipping
+    #streamlines skipped by streamsToCheck
+    out=[False for iStreamlines in streamlines]
+    #iterate over the streamlines that warrant inspection (rather than all 
+    #streamlines)
+    for iCount, iStreamlineToCheck in enumerate(tqdm.tqdm(streamsToCheck)):
+        #this can be replaced with standard streamline_near_roi once
+        #new version is in dipy production branch.
+        out[streamsToCheck[iCount]]=preFiltered_Streamline_near_roi(streamlines[iStreamlineToCheck][streamlinesSubMask[iStreamlineToCheck]], x_roi_coords, tol, mode) 
     #at the end of this, we should essentialy have the same boolean
     #vector output that would be typical of near_roi
     
@@ -588,13 +732,13 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
     # - outBoolVec: boolean vec indicating streamlines that survived operation
     """
     #still learning how to import from modules
-    from dipy.tracking.utils import near_roi
-    import numpy as np
-    import dipy.tracking.utils as ut
-    import nibabel as nib
-    from nilearn import masking 
-    import scipy
-    import time
+    # from dipy.tracking.utils import near_roi
+    # import numpy as np
+    # import dipy.tracking.utils as ut
+    # import nibabel as nib
+    # from nilearn import masking 
+    # import scipy
+    # import time
     
     #perform some input checks
     validOperations=["any","all","either_end","both_end"]
@@ -698,9 +842,9 @@ def subsetStreamsByROIboundingBox(streamlines, maskNifti):
     #
     """
     #compute distance tolerance
-    from dipy.core.geometry import dist_to_corner
-    import time
-    import wmaPyTools.roiTools 
+    # from dipy.core.geometry import dist_to_corner
+    # import time
+    # import wmaPyTools.roiTools 
     
     #begin timing
     t1_start=time.process_time()
@@ -741,11 +885,11 @@ def subsetStreamsNodesByROIboundingBox(streamlines, maskNifti):
     #
     """
     #compute distance tolerance
-    from dipy.core.geometry import dist_to_corner
-    from dipy.tracking.streamline import Streamlines
-    import numpy as np
-    import time
-    import wmaPyTools.roiTools  
+    # from dipy.core.geometry import dist_to_corner
+    # from dipy.tracking.streamline import Streamlines
+    # import numpy as np
+    # import time
+    # import wmaPyTools.roiTools  
     
     #begin timing
     t1_start=time.process_time()
@@ -784,7 +928,7 @@ def streamlineWithinBounds(streamline,bounds):
         withinBoundsBool:  a boolean value indicating whether the input streamline satisfies the within-bounds criteria
     
     """
-    import numpy as np
+    # import numpy as np
 
     #see which nodes are between the bounds
     nodeCriteria=np.asarray([np.logical_and(streamline[:,iDems]>bounds[0,iDems],streamline[:,iDems]<bounds[1,iDems]) for iDems in list(range(bounds.shape[1])) ])
@@ -803,7 +947,7 @@ def streamlineNodesWithinBounds(streamline,bounds):
         withinBoundsNodes:  an array of the nodes 
     
     """
-    import numpy as np
+    # import numpy as np
     
     #see which nodes are between the bounds
     nodeCriteria=np.asarray([np.logical_and(streamline[:,iDems]>bounds[0,iDems],streamline[:,iDems]<bounds[1,iDems]) for iDems in list(range(bounds.shape[1])) ])
@@ -822,9 +966,9 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     Output:
         streamBool:  a boolean vector indicating which streamlines meet the specified criteria.
     """
-    import numpy as np
-    import nibabel as nib
-    import wmaPyTools.roiTools 
+    # import numpy as np
+    # import nibabel as nib
+    # import wmaPyTools.roiTools 
     
     fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_data().shape), planarROI.affine, planarROI.header)
     #obtain boundary coords in subject space in order set max min values for interactive visualization
@@ -913,9 +1057,9 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     Output:
         streamBool:  a boolean vector indicating which streamlines meet the specified criteria.
     """
-    import numpy as np
-    import nibabel as nib
-    import wmaPyTools.roiTools  
+    # import numpy as np
+    # import nibabel as nib
+    # import wmaPyTools.roiTools  
     
     fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_data().shape), planarROI.affine, planarROI.header)
     #obtain boundary coords in subject space in order set max min values for interactive visualization
@@ -988,7 +1132,7 @@ def maskMatrixByBoolVec(dipyGrouping,boolVec):
         matrixSubset:  a matrix whose entries have been altered in accordance with the input
     """
 
-    import numpy as np 
+    # import numpy as np 
 
     #get the number of unique labels
     uniqueLabels=np.unique(np.asarray(list(dipyGrouping.keys())))
@@ -1024,10 +1168,10 @@ def subsetStreamsNodesByROIboundingBox_test(streamlines, maskNifti):
     #
     """
     #compute distance tolerance
-    from dipy.core.geometry import dist_to_corner
-    from dipy.tracking.streamline import Streamlines
-    import numpy as np
-    import wmaPyTools.roiTools  
+    # from dipy.core.geometry import dist_to_corner
+    # from dipy.tracking.streamline import Streamlines
+    # import numpy as np
+    # import wmaPyTools.roiTools  
     
     import time
     
@@ -1096,13 +1240,13 @@ def applyNiftiCriteriaToTract_DIPY_Cython(streamlines, maskNifti, includeBool, o
     # - outBoolVec: boolean vec indicating streamlines that survived operation
     """
     #still learning how to import from modules
-    from dipy.tracking.utils import near_roi
-    import numpy as np
-    import dipy.tracking.utils as ut
-    import nibabel as nib
-    from nilearn import masking 
-    import scipy
-    from dipy.tracking.vox2track import _streamlines_in_mask
+    # from dipy.tracking.utils import near_roi
+    # import numpy as np
+    # import dipy.tracking.utils as ut
+    # import nibabel as nib
+    # from nilearn import masking 
+    # import scipy
+    # from dipy.tracking.vox2track import _streamlines_in_mask
     
     #perform some input checks
     validOperations=["any","all","either_end","both_end"]
@@ -1152,7 +1296,7 @@ def segmentTractUsingTractMask(streamlines,singleTractMask):
         DESCRIPTION.
 
     """
-    import wmaPyTools.roiTools
+    # import wmaPyTools.roiTools
     
     tractProbabilityMap2SegCriteria(singleTractMask)
     
@@ -1253,10 +1397,10 @@ def tractProbabilityMap2SegCriteria(singleTractProbMap):
 
 def densityMaskToSegCriteria(densityMask):
     
-    import numpy as np
-    import nibabel as nib
-    import scipy
-    import copy
+    # import numpy as np
+    # import nibabel as nib
+    # import scipy
+    # import copy
     
     #MAJOR INSIGHT:  it is never the case that endpoints can be in the "core" of a
     #tract.  Ergo, you can erode the mask a bit and use it as an endpoint exclusion criterion, 
