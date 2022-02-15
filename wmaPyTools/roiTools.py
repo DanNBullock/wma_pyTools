@@ -623,7 +623,7 @@ def alignROItoReference(inputROI,reference):
 
 def alignNiftis(nifti1,nifti2):
     """
-    
+    What is this?
 
     Parameters
     ----------
@@ -881,7 +881,7 @@ def removeIslandsFromAtlas(atlasNifti):
         
     return atlasNiftiOut, removalReport 
 
-def inflateAtlasIntoWMandBG(atlasNifti,iterations):
+def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
     """
     Inflates label values of input atlas into (INFERRED, SEE IN CODE NOTES)
     white matter labels, and background 0 labels.  Will perform island removal
@@ -910,6 +910,8 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
     #from scipy.interpolate import NearestNDInterpolator
     import scipy
     import tqdm
+    from nilearn.image import crop_img, resample_img
+    from scipy import ndimage
     #import dipy.tracking.utils as ut
     
     if isinstance(atlasNifti,str):
@@ -967,10 +969,17 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
     #we would have no apriori intutions about which labels were the WM.
     #in the event that no labels meet the threshold, the presumedWMLabels should
     #be empty, and a simple cat of it and the BG label shouldn't result in a problem
-    inflationLabelTargets=list(presumedWMLabels)+list(np.atleast_1d(detectBackground))
-    #also get remaining labels
-    remaining=nonBGLabels[np.isin(nonBGLabels,inflationLabelTargets,invert=True)]
     
+    #actually, it seems like this might be a problem sometimes, so lets set this as an option
+    if inferWM:
+        inflationLabelTargets=list(presumedWMLabels)+list(np.atleast_1d(detectBackground))
+        #also get remaining labels
+        remaining=nonBGLabels[np.isin(nonBGLabels,inflationLabelTargets,invert=True)]
+    else:
+        inflationLabelTargets=list(np.atleast_1d(detectBackground))
+        #also get remaining labels
+        remaining=nonBGLabels[np.isin(nonBGLabels,inflationLabelTargets,invert=True)]
+        
     #now iteratively perform the inflation
     
     #so long as nothing is on the edge this will probably work, due to coord weirdness
@@ -979,10 +988,14 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
     noIslandAtlasData=noIslandAtlas.get_data()
     noIslandAtlasData=np.round(noIslandAtlasData).astype(int)
     
+    atlasBounds=subjectSpaceMaskBoundaryCoords(atlas)  
+    
     for iInflations in range(iterations):
         print('inflation iteration ' + str(iInflations+1))
         #pad the data to avoid indexing issues
         noIslandAtlasData=np.pad(noIslandAtlasData,[1,1])
+        #create a blank holder for the new label identities
+        newIDentityHolder=np.zeros(noIslandAtlasData.shape)
         #create a mask of the non target data
         dataMask=np.isin(noIslandAtlasData,remaining)
         #get essentially the opposite of this, in the form of the mask of the inflation targets
@@ -1028,10 +1041,20 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations):
                 #get the vote counts
                 (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
                 voteWinner=labels[np.where(np.max(counts)==counts)[0]]
+                #just in case
+                del voxelVotes
                 window=window+1
             #print(str(noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]))
             #print(str(voteWinner))
-            noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+            newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+            del voteWinner
+        #once the inflations are done for this round, set the values in the atlas data
+        #to their new identities
+        #2/25/2022 note:  previously we had been directly setting the identity
+        #within the iInflationTargetCoords loop.  This was probably leading
+        #to over-percolation of low number identities
+        noIslandAtlasData[infationArrayTargets]=newIDentityHolder[infationArrayTargets]
+        
         
         #return the data object to its regular size
         noIslandAtlasData=noIslandAtlasData[1:-1,1:-1,1:-1]
