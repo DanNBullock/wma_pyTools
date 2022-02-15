@@ -681,7 +681,7 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     else: #if it isn't mode=all
         #otherwise we just need to ensure there are any  
         #this check may be obviated by an upcoming dipy update
-        streamsToCheck=np.where( not boundedNodeSums==0)[0]
+        streamsToCheck=np.where( np.logical_not( [iBoundedNodeSums==0 for iBoundedNodeSums in boundedNodeSums]))[0]
     
     #I guess we have to create a whole new subset of streamlines here
     #GOODBYE RAM
