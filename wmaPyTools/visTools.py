@@ -1022,13 +1022,32 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     
     #fix this later
     if refAnatT1!=None:
-       # vol_actor = actor.slicer(refAnatT1.get_data())
-       # vol_actor.display(x=0)
-       # scene.add(vol_actor)
-       print('skipping')
+        #borrowed from app-
+        # compute mean and standard deviation of t1 for brigthness adjustment
+        print("setting brightness")
+        t1Data=refAnatT1.get_data()
+        mean, std = t1Data[t1Data > 0].mean(), t1Data[t1Data > 0].std()
+
+        img_min = 0.5
+
+        img_max = 3
+
+        # set brightness range
+        value_range = (mean - img_min * std, mean + img_max * std)
+        
+        
+        
+        # vol_actor = actor.slicer(refAnatT1.get_data())
+        # vol_actor.display(x=0)
+        # scene.add(vol_actor)
+        print('skipping')
     else:
         refAnatT1=wmaPyTools.streamlineTools.dummyNiftiForStreamlines(streamlines)
-        
+    
+    
+    
+    
+    
     #colormap for main tract
     cmap = matplotlib.cm.get_cmap('seismic')
     #colormap for neck
@@ -1042,6 +1061,10 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     
     #find the neck nodes
     neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
+    
+    #use this to establish the appropriate focus location for camera
+    neckCenterOfMass=np.mean(iStreamline[neckNodes[iIndex],:] for iIndex,iStreamline in enumerate(streamlines))
+    
     
     lin_T, offset =ut._mapping_to_voxel(refAnatT1.affine)
     
@@ -1226,6 +1249,49 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     
     plt.imsave(outName + '.png',croppedArray)
     #now lets crop it a bit
+
+def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twilight' ,endpointCmaps=['winter','autumn']):
+    
+    import matplotlib
+    import numpy as np
+    if isinstance(streamCmap, 'str'):
+        streamCmap = matplotlib.cm.get_cmap(streamCmap)
+    if isinstance(neckCmap, 'str'):
+        neckCmap = matplotlib.cm.get_cmap(neckCmap)
+    if isinstance(endpointCmaps[0], 'str'):
+        endpointCmap1 = matplotlib.cm.get_cmap(endpointCmaps[0])
+        endpointCmap2 = matplotlib.cm.get_cmap(endpointCmaps[1])
+    else:
+        endpointCmap1 = endpointCmaps[0]
+        endpointCmap2 = endpointCmaps[1]
+        
+    #go ahead and apply the full streamline colorscheme
+    streamColors = [streamCmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
+    
+   
+    # #find the neck nodes
+    # neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
+    
+    # for iStreamlines in range(len(streamlines)):
+    #     #A check to make sure you've got room to do this indexing on both sides
+    #     if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
+    #         aheadNodes[iStreamlines]=(neckNodes[iStreamlines]+lookDistance)
+    #         behindNodes[iStreamlines]=(neckNodes[iStreamlines]-lookDistance)
+    #         #otherwise do the best you can
+    #     else:
+    #         #if there's a limit to how many nodes are available ahead, do the best you can
+    #         spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
+    #         if spaceAhead<=lookDistance:
+    #             aheadWindow=spaceAhead-1
+    #         else:
+    #             aheadWindow=lookDistance
+    #         #if there's a limit to how many nodes are available behind, do the best you can
+    #         spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
+    #         if spaceBehind<=lookDistance:
+    #             behindWindow=spaceBehind-1
+    #         else:
+    #             behindWindow=lookDistance
+    
     
 
 def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=None,outdir=None,tractName=None):
@@ -1245,7 +1311,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     import nibabel as nib
     import os
     import numpy as np
-    import wmaPyTools.streamTools  
+    import wmaPyTools.streamlineTools  
     
     if isinstance(streamlines,str):
         streamlinesLoad=nib.streamlines.load(streamlines)
@@ -1262,7 +1328,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
         tractName=str(len(streamlines))+'_streamsTract'
     
     #determine whether te input streamlines are a coherent bundle
-    neckQuantifications=wmaPyTools.streamTools.bundleTest(streamlines)
+    neckQuantifications=wmaPyTools.streamlineTools.bundleTest(streamlines)
     
     if neckQuantifications['mean'] <8:
         print('submitted streamlines appear to be coherent bundle via neck criterion')
