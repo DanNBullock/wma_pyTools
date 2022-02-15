@@ -1112,7 +1112,7 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     
     
     #sort the bounds
-    sortedBounds=np.sort(planeCoord,positionTermsDict[requirement])
+    sortedBounds=np.sort([planeCoord,positionTermsDict[requirement]])
     #get the relevant image dimension
     spaceDim=np.where(np.equal(uniqueCoordCounts,1))[0][0]
     
