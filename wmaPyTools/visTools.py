@@ -1068,11 +1068,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     colors = [cmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
     
     #find the neck nodes
-    neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
-    
-    #use this to establish the appropriate focus location for camera
-    neckCenterOfMass=np.mean(iStreamline[neckNodes[iIndex],:] for iIndex,iStreamline in enumerate(streamlines))
-    
+    neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines) 
     
     lin_T, offset =ut._mapping_to_voxel(refAnatT1.affine)
     
