@@ -344,8 +344,10 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
             #put some text about the current dimension and slice
             yLims=curFig.gca().get_ylim()
             #xLims=curFig.gca().get_xlim()
-            curFig.gca().text(0, yLims[0]-1, dimsList[iDims] + ' = ' + str(subjectSpaceSlices[iSlices]),
-            bbox={'facecolor': 'white', 'alpha': 1, 'pad': 10})
+            #this changes the resolution of the figure itself, and breaks everything
+            #fix later
+            # curFig.gca().text(0, yLims[0]-1, dimsList[iDims] + ' = ' + str(subjectSpaceSlices[iSlices]),
+            # bbox={'facecolor': 'white', 'alpha': 1, 'pad': 10})
 
             
             curFig.gca().yaxis.set_ticks_position('left')
@@ -1253,9 +1255,51 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     
     plt.imsave(outName + '.png',croppedArray)
     #now lets crop it a bit
+    
+# def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None,endpointColorDensityKernel=7):
+#     import numpy as np
+#     from fury import actor, window
+#     import matplotlib
+#     import nibabel as nib
+#     from scipy.spatial.distance import cdist
+#     import dipy.tracking.utils as ut
+#     from scipy import ndimage
+#     from nilearn.image import crop_img, resample_to_img 
+#     import matplotlib.pyplot as plt
+    
+#     import wmaPyTools.streamlineTools
+#     import wmaPyTools.roiTools
 
 def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twilight' ,endpointCmaps=['winter','autumn']):
+    """
+    Computes and implements a colormapping for an input collection of streamlines
+    applies a separate colormap at the "neck" of the tract, and also
+    applies separate color maps at the endpoints of the tract.
     
+    NOTE:  DOES NOT REORIENT THE TRACT BEFORE DOING THIS.  PREORIENT THE
+    STREAMLINES BEFORE APPLYING THIS FUNCTION
+
+    Parameters
+    ----------
+    streamlines : collection of streamlines
+        The streamlines for which the colormapping (for each streamline) is to
+        be computed,
+    streamCmap : string, specifying matplotlib colormap (or colormap itself), optional
+        The colormap for the overall streamline. The default is 'seismic'.
+    neckCmap : string, specifying matplotlib colormap (or colormap itself), optional, optional
+        The colormap that is specific to the neck. The default is 'twilight'.
+    endpointCmaps : string, specifying matplotlib colormap (or colormap itself), optional, optional
+        The colormap that is specific to the endpoints. The default is ['winter','autumn'].
+
+    Returns
+    -------
+    streamColors : a list of lists, with foats inside
+        For each node of each streamline, this list of list contains the color
+        value for that node.
+
+    """
+    
+    import wmaPyTools.streamlineTools
     import matplotlib
     import numpy as np
     if isinstance(streamCmap, 'str'):
@@ -1272,31 +1316,99 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     #go ahead and apply the full streamline colorscheme
     streamColors = [streamCmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
     
-   
-    # #find the neck nodes
-    # neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
+    #steal come code from orientTractUsingNeck to color the neck
+    #lets aim for a realspace distance when orienting our streamlines
+    #we'll arbitrarily say 5 for the moment
+    #we'll assume that all streamlines have the same internode distance
+    #it's a TERRIBLE assumption, but really, people who violate it are the ones in error...
+    avgNodeDistance=np.mean(np.sqrt(np.sum(np.square(np.diff(streamlines[0],axis=0)),axis=1)))
+    lookDistanceMM=2.5
+    #find the number of nodes this is equivalent to
+    lookDistance=np.round(lookDistanceMM/avgNodeDistance).astype(int)
+    aheadNodes=np.zeros(len(streamlines)).astype(int)
+    behindNodes=np.zeros(len(streamlines)).astype(int)
+
+    neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
     
-    # for iStreamlines in range(len(streamlines)):
-    #     #A check to make sure you've got room to do this indexing on both sides
-    #     if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
-    #         aheadNodes[iStreamlines]=(neckNodes[iStreamlines]+lookDistance)
-    #         behindNodes[iStreamlines]=(neckNodes[iStreamlines]-lookDistance)
-    #         #otherwise do the best you can
-    #     else:
-    #         #if there's a limit to how many nodes are available ahead, do the best you can
-    #         spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
-    #         if spaceAhead<=lookDistance:
-    #             aheadWindow=spaceAhead-1
-    #         else:
-    #             aheadWindow=lookDistance
-    #         #if there's a limit to how many nodes are available behind, do the best you can
-    #         spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
-    #         if spaceBehind<=lookDistance:
-    #             behindWindow=spaceBehind-1
-    #         else:
-    #             behindWindow=lookDistance
+    for iStreamlines in range(len(streamlines)):
+        #A check to make sure you've got room to do this indexing on both sides
+        if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
+            aheadNodes[iStreamlines]=(neckNodes[iStreamlines]+lookDistance)
+            behindNodes[iStreamlines]=(neckNodes[iStreamlines]-lookDistance)
+            #otherwise do the best you can
+        else:
+            #if there's a limit to how many nodes are available ahead, do the best you can
+            spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
+            if spaceAhead<=lookDistance:
+                aheadWindow=spaceAhead-1
+            else:
+                aheadWindow=lookDistance
+            #if there's a limit to how many nodes are available behind, do the best you can
+            spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
+            if spaceBehind<=lookDistance:
+                behindWindow=spaceBehind-1
+            else:
+                behindWindow=lookDistance
+           
+            #append the relevant values
+            aheadNodes[iStreamlines]=neckNodes[iStreamlines]+aheadWindow
+            behindNodes[iStreamlines]=neckNodes[iStreamlines]-behindWindow
+    
+    #create some arrays to use for blending
+    #could proably clean up discreapancy between using len of arrayas and the lookdistance
+    whiteArray=np.ones([np.round(lookDistance).astype(int),4])
+    blendWeightsArray=np.asarray([np.arange(np.round(lookDistance).astype(int))/len(whiteArray),np.flip(np.arange(np.round(lookDistance).astype(int))/len(whiteArray))])
+    blendWeightsArray=np.stack([blendWeightsArray]*4,axis=-1)
+    #make a long array too for blending
+    longBlendWeightsArray=np.asarray([np.arange(np.round(lookDistance).astype(int))/np.round(lookDistance).astype(int),np.flip(np.arange(np.round(lookDistance).astype(int))/np.round(lookDistance).astype(int))])
+    longBlendWeightsArray=np.stack([longBlendWeightsArray]*4,axis=-1)
     
     
+    #do the endpoints
+    for iStreamlines in range(len(streamlines)):
+        #do the neck
+        streamColors[iStreamlines][behindNodes[iStreamlines]:aheadNodes[iStreamlines]]=neckCmap(np.array(range(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))/(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))
+        #but also blend it a bit
+        #don't need to do an if check, because streamlines can always be shorter
+        #if len(streamlines[iStreamlines])
+        #ok, so what we are doing here: blending the existing streamline color with white using a weighed average along the streamline
+        #this turned out extremely nice, so lets also do it for the endpoints as well
+        #if there's room, don't bother with it otherwise
+        if 0<=behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):
+            behindColors=streamColors[iStreamlines][behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):behindNodes[iStreamlines]]
+            blendColorsStack=np.asarray([behindColors,whiteArray])
+            blendedReplacement=np.average(blendColorsStack,axis=0,weights=np.flip(blendWeightsArray,axis=1))
+            streamColors[iStreamlines][behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):behindNodes[iStreamlines]]=blendedReplacement
+        #now do the other side
+        #if there's room, don't bother with it otherwise
+        if len(streamColors[iStreamlines])>=aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int)):
+            aheadColors=streamColors[iStreamlines][aheadNodes[iStreamlines]:aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int))]
+            blendColorsStack=np.asarray([aheadColors,whiteArray])
+            blendedReplacement=np.average(blendColorsStack,axis=0,weights=blendWeightsArray)
+            streamColors[iStreamlines][aheadNodes[iStreamlines]:aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int))]=blendedReplacement
+        
+        #also, this will recolor the streamlines if they had a neck point near the end of the streamline
+        #do endpoints 1
+        #no need to flip in order to ensure correct sequencing, apprently?
+        end1Colors=streamColors[iStreamlines][0:lookDistance]
+        #you know, like a telomere
+        newEndpoint1Cap=np.flip(endpointCmap1(np.linspace(0,1,num=lookDistance)),axis=0)
+        blendColorsStack=np.asarray([end1Colors,newEndpoint1Cap])
+        blendedReplacement=np.average(blendColorsStack,axis=0,weights=longBlendWeightsArray)
+        streamColors[iStreamlines][0:lookDistance]=blendedReplacement
+        #do endpoints 2
+        #we do need to flip here in order to get sequecning at end of streamline correct
+        #actually it was for the other one
+        end2Colors=streamColors[iStreamlines][-(lookDistance+1):-1]
+        #you know, like a telomere
+        newEndpoint2Cap=endpointCmap2(np.linspace(0,1,num=lookDistance))
+        blendColorsStack=np.asarray([end2Colors,newEndpoint2Cap])
+        blendedReplacement=np.average(blendColorsStack,axis=0,weights=np.flip(longBlendWeightsArray,axis=1))
+        streamColors[iStreamlines][-(lookDistance+1):-1]=blendedReplacement
+    
+    return streamColors
+    
+
 
 def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=None,outdir=None,tractName=None):
     """
