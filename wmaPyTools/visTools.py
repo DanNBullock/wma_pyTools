@@ -340,6 +340,14 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
             curFig=plt.gcf()
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
             plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
+            
+            #put some text about the current dimension and slice
+            yLims=curFig.gca().get_ylim()
+            #xLims=curFig.gca().get_xlim()
+            curFig.gca().text(0, yLims[0]-1, dimsList[iDims] + ' = ' + str(subjectSpaceSlices[iSlices]),
+            bbox={'facecolor': 'white', 'alpha': 1, 'pad': 10})
+
+            
             curFig.gca().yaxis.set_ticks_position('left')
             curFig.gca().tick_params( colors='white')
             # we use *2 in order to afford room for the subsequent blended images
@@ -1330,12 +1338,14 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     #determine whether te input streamlines are a coherent bundle
     neckQuantifications=wmaPyTools.streamlineTools.bundleTest(streamlines)
     
-    if neckQuantifications['mean'] <8:
-        print('submitted streamlines appear to be coherent bundle via neck criterion')
-        streamlines=wmaPyTools.streamTools.orientTractUsingNeck(streamlines)
-    else:
-        print('submitted streamlines DO NOT appear to be coherent bundle via neck criterion')
-        streamlines=wmaPyTools.streamTools.dipyOrientStreamlines(streamlines)
+    # if neckQuantifications['mean'] <8:
+    #     print('submitted streamlines appear to be coherent bundle via neck criterion')
+    #     streamlines=wmaPyTools.streamlineTools.orientTractUsingNeck(streamlines)
+    # else:
+    #     print('submitted streamlines DO NOT appear to be coherent bundle via neck criterion')
+    #     streamlines=wmaPyTools.streamlineTools.dipyOrientStreamlines(streamlines)
+    
+    # streamlines=wmaPyTools.streamlineTools.orientAllStreamlines(streamlines)
     
     #plots currently work better without reference T1
     print('creating anatomy plot')
@@ -1347,9 +1357,13 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
         radialTractEndpointFingerprintPlot_MultiSubj([streamlines, streamlines],[atlas, atlas],atlasLookupTable,tractName=tractName,saveDir=outdir)
     
     #do the cross section gif if a reference anatomy has been provided
-    if np.logical_not(refAnatT1==None):
-        print('creating cross section density gifs')
-        densityGifsOfTract(streamlines,refAnatT1,saveDir=outdir,tractName=tractName)
+    # if np.logical_not(refAnatT1==None):
+    #     print('creating cross section density gifs')
+    #     densityGifsOfTract(streamlines,refAnatT1,saveDir=outdir,tractName=tractName)
+    
+    multiTileDensity(streamlines,refAnatT1,outdir,tractName,noEmpties=True)
+    
+    
         
 def plotFullyConnectedRelations(squareformDistTable):
     """
