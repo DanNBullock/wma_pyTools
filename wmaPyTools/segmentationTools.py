@@ -578,7 +578,7 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     tract_ROI_intersection =np.logical_and(tractMask,region_of_interest)
     
     if not np.any(tract_ROI_intersection):
-        print('Input ROI with volume ' + np.sum(region_of_interest) + 'does not intersect with tract mask')
+        print('Input ROI with volume ' + str(np.sum(region_of_interest)) + 'does not intersect with tract mask')
     
     #NOTE: here we are just copying the functionality of subjectSpaceMaskBoundaryCoords
     #get the bounding box in image space
