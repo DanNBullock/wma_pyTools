@@ -577,6 +577,9 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     #TODO confirm np.and returns same size
     tract_ROI_intersection =np.logical_and(tractMask,region_of_interest)
     
+    if not np.any(tract_ROI_intersection):
+        print('Input ROI with volume ' + np.sum(region_of_interest) + 'does not intersect with tract mask')
+    
     #NOTE: here we are just copying the functionality of subjectSpaceMaskBoundaryCoords
     #get the bounding box in image space
     refDimBounds=np.asarray(mask.bounding_box(tract_ROI_intersection))
@@ -623,16 +626,21 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
         #TODO NOTE: 'one_end' would need to be implemented inside
         #streamline_near_roi in order to avoid running both 'either_end' and
         #'both_end' (and) then negating the output of 'both_end'
+        #also, probably not necessary given that streamline_near_roi only 
+        #checks the end in the relevant cases
         if np.any((mode == 'either_end', mode == 'both_end',mode == 'one_end')):
             try:
-                nodeCriteria[1:-1]=False
+                #indexing here was mesed up previously
+                #it was just flatly negating an entire slice it seems
+                #thus nothing could pass the subsequent np.all check
+                nodeCriteria[:,1:-1]=False
             except:
                 #in a test case with nodeCriteria=[False,False] attempting
                 #nodeCriteria[1:-1]=False results in
                 #TypeError: can only assign an iterable, which is a fine
                 #behavior if we're using try except
                 pass
-
+        
         streamlinesSubMask[iStreamline]=np.all(nodeCriteria,axis=0)
     
     #END streamlineWithinBounds
