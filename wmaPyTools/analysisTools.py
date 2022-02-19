@@ -1052,14 +1052,6 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
     columnBestGuess=lookUpTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
     #what about the labels we didn't find?
     labelsNotFound=list(set(set(np.unique(inputAtlasDataINT)))-set(lookUpTable[columnBestGuess]))
-    #if *any* labels are not found, make a warning
-    #you forgot about 0
-    #remove it if it is there.
-    if len(labelsNotFound)==1 and labelsNotFound[0]==0:
-        labelsNotFound.remove(0)
-    if not len(labelsNotFound)==0:
-        import warnings
-        warnings.warn('Incomplete or mismatched lookup table provided: \n The following labels were found in provided atlas BUT NOT in provided lookup table \n' + str(labelsNotFound) )
     
     #we can also take this opportunity to pick the longest average column,
     #which is likely the optimal label name column name.  There could be
@@ -1070,6 +1062,18 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
     #if there was an abbreviation column though.
     entryLengths=lookUpTable.applymap(str).applymap(len)
     labelColumnGuess=entryLengths.mean(axis=0).idxmax()
+    
+    #if *any* labels are not found, make a warning
+    #you forgot about 0
+    #remove it if it is there.
+    if len(labelsNotFound)==1 and labelsNotFound[0]==0:
+        labelsNotFound.remove(0)
+        unknownEntryTable=pd.DataFrame(columns=[columnBestGuess,labelColumnGuess])
+        unknownEntryTable.loc[0]=[0,'unlabeled (unlabeled)']
+    if not len(labelsNotFound)==0:
+        import warnings
+        warnings.warn('Incomplete or mismatched lookup table provided: \n The following labels were found in provided atlas BUT NOT in provided lookup table \n' + str(labelsNotFound) )
+    
     
     #we should take this opportunity to check for and remove redundant entries
     #or throw an error if there are contradictory ones
@@ -1115,11 +1119,10 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
         #This should make the index match the renumbered label values.
     LUTWorking=lookUpTable[lookUpTable[columnBestGuess].isin(labelMappings)].reset_index(drop=True)
     #don't forget to include the 0 label
-    unknownEntryTable=pd.DataFrame(columns=[columnBestGuess,labelColumnGuess])
-    unknownEntryTable.loc[0]=[0,'unlabeled (unlabeled)']
     
-    
-    LUTWorking=unknownEntryTable.append(LUTWorking,ignore_index=True)    
+    #ugly, but maybe.
+    if 'unknownEntryTable' in locals():
+        LUTWorking=unknownEntryTable.append(LUTWorking,ignore_index=True)    
         #append the mystery table to the working lookupt table     
     reducedLookUpTable=LUTWorking.append(mysteryTable,ignore_index=True)
     
@@ -1510,7 +1513,11 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable,reductionFactor=None):
                 #for all of these that meet the citerion (are in the appropriate neighborhood)
                 #sum across the columns (i.e. labels), and place value in the reduced table
                 reducedVoxelAtlasConnectivityTable[iVoxels]=voxelAtlasConnectivityTable.iloc(currentVoxels).sum(axis=1)
-        #set the working connectivity table to the reduced connectivity table
+        #managing the edge case
+        else:
+            uniqueRoundedVoxelIndexes=voxelIndexesArray
+        
+       #set the working connectivity table to the reduced connectivity table
         voxelAtlasConnectivityTable=reducedVoxelAtlasConnectivityTable
     #determine if the output has been normalized
     #if you did the tracking using trackStreamsInMask then each voxel should
@@ -1555,5 +1562,8 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable,reductionFactor=None):
     #        cosineDistanceMatrix[iVoxelIndexesRow,iVoxelIndexesCol]=cdist(np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesRow]),np.atleast_2d(normalizedVoxelAtlasConnectivityTable.to_numpy()[iVoxelIndexesCol]),metric='cosine')[0][0]
     cosineDistanceMatrix=pairwise_distances(sparseNormalizedVoxelAtlasConnectivityTable,metric='cosine', n_jobs=1)
     #I guess we're done
-    return voxelIndexes, cosineDistanceMatrix
     
+    if not reductionFactor==None:
+        return uniqueRoundedVoxelIndexes, cosineDistanceMatrix
+    else:
+        return voxelIndexes, cosineDistanceMatrix
