@@ -503,8 +503,8 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     #set up the dictionary for boundaries
     positionTermsDict={'superior': np.max(fullVolumeBoundCoords[:,2]),
                       'inferior': np.min(fullVolumeBoundCoords[:,2]),
-                      'medial':   np.min(fullVolumeBoundCoords[np.min(np.abs(fullVolumeBoundCoords[:,0]))==np.abs(fullVolumeBoundCoords[:,0]),0]),
-                      'lateral': np.max(fullVolumeBoundCoords[np.max(np.abs(fullVolumeBoundCoords[:,0]))==np.abs(fullVolumeBoundCoords[:,0]),0]),
+                      'medial':   0,
+                      'lateral': [np.min(fullVolumeBoundCoords[:,0]),np.max(fullVolumeBoundCoords[:,0])],
                       'anterior': np.max(fullVolumeBoundCoords[:,1]),
                       'posterior': np.min(fullVolumeBoundCoords[:,1]),
                       'rostral': np.max(fullVolumeBoundCoords[:,1]),
@@ -525,6 +525,12 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
                    'right': 0}    
 
 
+    #silly solution to lateral case
+    def find_nearest(array, value):
+        array = np.asarray(array)
+        idx = (np.abs(array - value)).argmin()
+        return array[idx]
+
     planeCoords=[]
     #i guess the only way
     for iDims in list(range(len(inputROINifti.shape))):
@@ -534,7 +540,16 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
             #kind of wishy,washy, but because we halved the step size in the previous step
             #by taking the average of the coord bounds (in subject space) we should actually be fine
             #we'll use this as one of our two bounds
-            thisDimBounds=np.sort([np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]),positionTermsDict[relativePosition]])
+            #just do 5 cases
+            if relativePosition=='medial':
+               #i guess it doesn't matter what sign is, one bound is always 0
+               thisDimBounds=np.sort([np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]),0])
+            elif relativePosition=='lateral':
+               #find the nearest x bound, since you're not on the midline, it will work.
+               thisDimBounds=np.sort([np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]),find_nearest([positionTermsDict['left'],positionTermsDict['right']], np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]))])
+       
+            else:
+               thisDimBounds=np.sort([np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]),positionTermsDict[relativePosition]])
            
         else:
             thisDimBounds=np.sort([fullVolumeBoundCoords[0,iDims],fullVolumeBoundCoords[1,iDims]])
