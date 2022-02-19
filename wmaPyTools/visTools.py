@@ -559,7 +559,7 @@ def densityGifsOfTract(tractStreamlines,referenceAnatomy,saveDir,tractName):
         [path, file]=os.path.split(iFiles)
         os.rename(iFiles,os.path.join(path,tractName+'_'+file))
         
-def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',forcePlotLabels=None,saveDir=None):
+def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',forcePlotLabels=None,saveDir=None,color=False):
     """radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName=None,saveDir=None)
     A function used to generate radial fingerprint plots for input tracts, as 
     found in Folloni 2021.  Plots absolute streamline count
@@ -604,6 +604,24 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
     #don't pass the output of this to the next part, because the label numbers no longer match the atlas
     [endpointsDF1, endpointsDF2]=wmaPyTools.analysisTools.quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable)
     
+    
+    if color==True:
+       endpointsDF1['color']=''
+       endpointsDF2['color']=''
+       streamColors, colorLut=colorStreamEndpointsFromParc(tractStreamlines,atlas)
+       #place label names in the color lut
+       colorLut['name']=''
+       for iRows,iLabels in enumerate(colorLut['labels'].to_list()):
+            colorLut['name'].iloc[iRows]=reducedLookUpTable.iloc[(reducedLookUpTable.iloc[:,0]==iLabels).to_numpy(),1].values[0]
+       #now do it the other way for the label values  
+       for iRows,iNames in enumerate(colorLut['name'].to_list()):
+           if iNames in endpointsDF1['labelNames'].to_list():
+               endpointsDF1['color'].iloc[(endpointsDF1['labelNames']==iNames).to_numpy()]=pd.Series([colorLut['rgb_Color'].iloc[iRows]])
+           if iNames in endpointsDF2['labelNames'].to_list():
+               endpointsDF2['color'].iloc[(endpointsDF2['labelNames']==iNames).to_numpy()]=pd.Series([colorLut['rgb_Color'].iloc[iRows]])
+      
+        
+        
     #get the requested labels, if any
     if not forcePlotLabels==None:
         #get the sub table for the requeseted labels
@@ -620,8 +638,12 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
         endpointsDF1['endpointCounts']= endpointsDF1['endpointCounts'].fillna(0)
         endpointsDF2['endpointCounts']= endpointsDF2['endpointCounts'].fillna(0)
     
-    figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']))
-    figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']))
+    if color==True:
+        figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']),COLORS=endpointsDF1['color'].to_list())
+        figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']),COLORS=endpointsDF2['color'].to_list())
+    else:
+        figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']),COLORS=endpointsDF1['color'])
+        figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']),COLORS=endpointsDF2['color'])
     
     figure1.get_axes()[0].set_title(tractName+'\nRAS endpoints')
     figure1.get_axes()[0].set_facecolor([0,0,1,.15])
@@ -817,7 +839,7 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
     
     
     
-def basicRadarPlot(labels,values, metaValues=None):
+def basicRadarPlot(labels,values, metaValues=None,COLORS=None):
     """
     https://www.python-graph-gallery.com/web-circular-barplot-with-matplotlib
     #maybe also consider
@@ -861,7 +883,8 @@ def basicRadarPlot(labels,values, metaValues=None):
     plt.rc("axes", unicode_minus=False)
 
     # Colors
-    COLORS = ["#6C5B7B","#C06C84","#F67280","#F8B195"]
+    if not np.any(COLORS):
+        COLORS = ["#6C5B7B","#C06C84","#F67280","#F8B195"]
 
     # Colormap
     cmap = mpl.colors.LinearSegmentedColormap.from_list("my color", COLORS, N=256)
@@ -981,7 +1004,7 @@ def dipyBasicPlotTract(streamlines,colors,tractName):
  
 
     # window.show(scene, size=(600, 600), reset_camera=False)
-    if tractName!=None:
+    if not tractName==None:
         outName=tractName
     else:
         outName='tractFigure'
@@ -1023,7 +1046,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     import wmaPyTools.streamlineTools
     import wmaPyTools.roiTools
     
-    if refAnatT1!=None:
+    if not refAnatT1==None:
         if isinstance(refAnatT1,str):
             refAnatT1=nib.load(refAnatT1)
 
@@ -1031,7 +1054,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     scene.clear()
     
     #fix this later
-    if refAnatT1!=None:
+    if not refAnatT1==None:
         #borrowed from app-
         # compute mean and standard deviation of t1 for brigthness adjustment
         print("setting brightness")
@@ -1256,19 +1279,119 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     plt.imsave(outName + '.png',croppedArray)
     #now lets crop it a bit
     
-# def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None,endpointColorDensityKernel=7):
-#     import numpy as np
-#     from fury import actor, window
-#     import matplotlib
-#     import nibabel as nib
-#     from scipy.spatial.distance import cdist
-#     import dipy.tracking.utils as ut
-#     from scipy import ndimage
-#     from nilearn.image import crop_img, resample_to_img 
-#     import matplotlib.pyplot as plt
+def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=None):
+    import numpy as np
+    from fury import actor, window
+    import matplotlib
+    import nibabel as nib
+    from scipy.spatial.distance import cdist
+    import dipy.tracking.utils as ut
+    from scipy import ndimage
+    from nilearn.image import crop_img, resample_to_img 
+    import matplotlib.pyplot as plt
     
-#     import wmaPyTools.streamlineTools
-#     import wmaPyTools.roiTools
+    import wmaPyTools.streamlineTools
+    import wmaPyTools.roiTools
+
+    if not refAnatT1==None:
+        if isinstance(refAnatT1,str):
+            refAnatT1=nib.load(refAnatT1)
+
+    scene = window.Scene()
+    scene.clear()
+    
+    #fix this later
+    # if not refAnatT1==None:
+    #     # #borrowed from app-
+    #     # # compute mean and standard deviation of t1 for brigthness adjustment
+    #     # print("setting brightness")
+    #     # t1Data=refAnatT1.get_data()
+    #     # mean, std = t1Data[t1Data > 0].mean(), t1Data[t1Data > 0].std()
+
+    #     # img_min = 0.5
+
+    #     # img_max = 3
+
+    #     # # set brightness range
+    #     # value_range = (mean - img_min * std, mean + img_max * std)
+        
+        
+        
+    #     # vol_actor = actor.slicer(refAnatT1.get_data(), refAnatT1.affine, value_range)
+    #     # vol_actor.display(x=0)
+    #     # scene.add(vol_actor)
+    #     # print('skipping')
+    # else:
+    #     refAnatT1=wmaPyTools.streamlineTools.dummyNiftiForStreamlines(streamlines)
+        
+    if not parcNifti==None:
+        streamColors, colorLut=colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWindowMM=2.5)
+    else:
+        streamColors=colorGradientForStreams(streamlines)
+        
+    
+    
+    stream_actor = actor.line(streamlines, streamColors, linewidth=10,fake_tube=True,opacity=1)
+    #stream_actor = actor.line(streamlines[1:10000], colors[1:10000], linewidth=10,fake_tube=True,opacity=1)
+    #stream_actor = actor.line(streamlines[1:3000], colors[1:3000])
+    #scene.clear()
+    scene.add(stream_actor)
+
+
+    #try and find the mean x coord and use this to establish the view position
+    #and focal point
+    # #use the neck to find thsi
+    # neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
+    # #decompress it?
+    # neckNodes=[iNodes[0] for iNodes in neckNodes]
+    # neckCoords=[iStreamlines[neckNodes[iIndex],:] for iIndex,iStreamlines in enumerate(streamlines)]
+    # #no idea whether this will return long or wide, will assume wide for now
+    # meanNeckCoord=np.mean(np.asarray(neckCoords),axis=0)
+
+    # if meanNeckCoord[0] < 0:
+    #     #if the mean neck coord is on the negative side
+    #     scene.set_camera(position=(-176.42, 118.52, 128.20),
+    #                  focal_point=(113.30, 128.31, 76.56),
+    #                  view_up=(0.18, 0.00, 0.98))    
+    # else:
+    scene.set_camera(position=(-176.42, 118.52, 128.20),
+                     focal_point=(113.30, 128.31, 76.56),
+                     view_up=(0.18, 0.00, 0.98))  
+
+    scene.reset_camera()
+ 
+
+    # window.show(scene, size=(600, 600), reset_camera=False)
+    if not tractName==None:
+        outName=tractName
+    else:
+        outName='tractFigure'
+        
+    #window.record(scene, out_path=outName+'.png', size=(6000, 6000))
+     
+    outArray=window.snapshot(scene, fname=None, size=(6000, 6000))
+    #for whatever reason, the output of window.snapshot is upside down
+    #the record function inverts this
+    #https://github.com/fury-gl/fury/blob/0ff2c0ad98b92d9d2a80dc2bcc4e5c2e12f600a7/fury/window.py#L754
+    #but the record function opens an unclosable window, so we can't use that
+    #so here we flip it and rotate 90
+    outArray=np.flipud(outArray)
+    #outArray=np.rot90(outArray)
+    #now crop it; 0,0,0 is the rgb color for black, so those pixels sum to 0
+    colorsum=np.sum(outArray,axis=2)
+    pixelsWithColor=np.asarray(np.where(colorsum>0))
+    #find the borders
+    minVals=np.min(pixelsWithColor,axis=1)
+    maxVals=np.max(pixelsWithColor,axis=1)
+    #arbitrarily establish a desired border width
+    borderPixels=20
+    #subselect
+    croppedArray=outArray[(minVals[0]-borderPixels):(maxVals[0]+borderPixels),(minVals[1]-borderPixels):(maxVals[1]+borderPixels),:]
+    
+    plt.imsave(outName + '.png',croppedArray)
+    if not parcNifti==None:
+        colorLut.to_csv(outName+'.csv')
+    #now lets crop it a bit
 
 def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twilight' ,endpointCmaps=['winter','autumn']):
     """
@@ -1302,11 +1425,11 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     import wmaPyTools.streamlineTools
     import matplotlib
     import numpy as np
-    if isinstance(streamCmap, 'str'):
+    if isinstance(streamCmap, str):
         streamCmap = matplotlib.cm.get_cmap(streamCmap)
-    if isinstance(neckCmap, 'str'):
+    if isinstance(neckCmap, str):
         neckCmap = matplotlib.cm.get_cmap(neckCmap)
-    if isinstance(endpointCmaps[0], 'str'):
+    if isinstance(endpointCmaps[0], str):
         endpointCmap1 = matplotlib.cm.get_cmap(endpointCmaps[0])
         endpointCmap2 = matplotlib.cm.get_cmap(endpointCmaps[1])
     else:
@@ -1408,7 +1531,102 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     
     return streamColors
     
+def colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWindowMM=2.5):
+    """
+    Assigns colors to the end sections of streamlines in accordance with what
+    labels from the input parcNifti they terminate in
+    
 
+    Parameters
+    ----------
+    streamlines : collection of streamlines
+        The streamlines for which the colormapping (for each streamline) is to
+        be computed,
+    parcNifti : nifti
+        a nifti parcellation file, with integer values indicating volumetric
+        labels
+    streamColors : list of 3xN arrays
+        A precomputed, per node color map, such that, in each sublist, each 
+        column corresponds to the RBG color assigned to that node.
+        If no such colormapping is input, one will be computed using  the default
+        settings from colorGradientForStreams. The default is None.
+    colorWindowMM : float, optional
+        The length, in mm, of each streamline's end sections that you would
+        like colored in correspondance with the endpoint location.
+        The default is 2.5.
+
+    Returns
+    -------
+    streamColors : TYPE
+        DESCRIPTION.
+    colorLut : TYPE
+        DESCRIPTION.
+
+    """
+    
+    import numpy as np
+    import matplotlib
+    import dipy
+    from dipy.tracking import utils
+    import pandas as pd
+    
+    
+    avgNodeDistance=np.mean(np.sqrt(np.sum(np.square(np.diff(streamlines[0],axis=0)),axis=1)))
+    #colorWindowMM=2.5
+    #find the number of nodes this is equivalent to
+    colorNodeDistance=np.round(colorWindowMM/avgNodeDistance).astype(int)
+    
+    #get the number of colors required
+    uniqueLabels=np.unique(np.round(parcNifti.get_data()).astype(int))
+    neededColors=len(uniqueLabels)
+    #generate a color selection for these
+    endpointsColormap=matplotlib.cm.get_cmap('gist_rainbow')
+    
+    #establish a parameter to force the color selection to jump about the colormap
+    jitterParam=12
+    #this tells us how many times we will cycle through the colormap
+    floorDivideResult=np.floor_divide(neededColors,jitterParam)+1
+    #this establishes an offset to add for each added cycle through the loop
+    cycleJitter=np.divide(1,floorDivideResult)
+    
+    #find a color index value for each unique label identity
+    colorIndexes=[np.add(np.divide(np.remainder(iColors,jitterParam),jitterParam),np.multiply(np.divide(1,jitterParam),np.multiply(np.floor_divide(iColors,jitterParam)+1,cycleJitter)))  for iColors in range (neededColors) ]
+    #index into the color map with these
+    endpointColors = endpointsColormap(colorIndexes)
+    
+    #perform an initial colormapping if necessary
+    if not np.any(streamColors):
+        print('Running default color assignment for streamlines via colorGradientForStreams')
+        streamColors=colorGradientForStreams(streamlines)
+    
+    #get the endpoint identities
+    M, grouping=utils.connectivity_matrix(streamlines, parcNifti.affine, label_volume=np.round(parcNifti.get_data()).astype(int),
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    #get the keys so that you can iterate through them later
+    keyTargets=list(grouping.keys())
+    keyTargetsArray=np.asarray(keyTargets)
+      
+    #iterate across both sets of endpoints
+    for iIndexes,iPairs in enumerate(keyTargets):
+        #get the indexes of the relevant streams
+        currentStreams=grouping[iPairs]
+        
+        for iStreams in currentStreams:
+            #get the color value for this index
+            colorSequenceIndex1=np.where(np.isin(uniqueLabels,keyTargetsArray[iIndexes,0]))[0][0]
+            #set endpoint 1 colors
+            streamColors[iStreams][0:colorNodeDistance,:]=endpointColors[colorSequenceIndex1,:]
+            #get the color value for this index
+            colorSequenceIndex2=np.where(np.isin(uniqueLabels,keyTargetsArray[iIndexes,1]))[0][0]
+            #set endpoint 2 colors
+            streamColors[iStreams][-colorNodeDistance:,:]=endpointColors[colorSequenceIndex2,:]
+        
+    colorLut=pd.DataFrame(columns=['labels','rgb_Color'])
+    colorLut['rgb_Color']=pd.Series(list(endpointColors))
+    colorLut['labels']=uniqueLabels
+    
+    return streamColors, colorLut
 
 def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=None,outdir=None,tractName=None):
     """
