@@ -642,8 +642,8 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
         figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']),COLORS=endpointsDF1['color'].to_list())
         figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']),COLORS=endpointsDF2['color'].to_list())
     else:
-        figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']),COLORS=endpointsDF1['color'])
-        figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']),COLORS=endpointsDF2['color'])
+        figure1=basicRadarPlot(list(endpointsDF1['labelNames']),list(endpointsDF1['endpointCounts']))
+        figure2=basicRadarPlot(list(endpointsDF2['labelNames']),list(endpointsDF2['endpointCounts']))
     
     figure1.get_axes()[0].set_title(tractName+'\nRAS endpoints')
     figure1.get_axes()[0].set_facecolor([0,0,1,.15])
@@ -835,9 +835,174 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
         print('no uncommon for LPI')
         
             
+def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractName='tract',forcePlotLabels=None,saveDir=None,color=False):
+    """
+    A function used to generate radial fingerprint plots for input tracts, as 
+    found in Folloni 2021.  Norms by proportion of tract streamlines.  Outputs
+    a 2x2 plot between common and uncommon.
+    
+
+    Parameters
+    ----------
+    tractTractogramList : list of streamlines type
+        Streamlines corresponding to the tract of interest
+    atlasList: list of  Nifti, int based
+        A nifti atlas that will be used to determine the endpoint connectivity
+    atlasLookupTable : pandas dataframe or file loadable to pandas dataframe
+        A dataframe of the atlas lookup table which includes the labels featured
+        in the atlas and their identities.  These identities will be used
+        to label the periphery of the radial plot.
+    tractName : string, optional
+        The name of the tract to be used as a label in the output figure. No 
+        input will result in there being no corresponding label. The default is None.
+    forcePlotLabels: array-like / list of int, optional
+        A list or array of integer values corresponding to labels in the input
+        atlas / atlasLookupTable that will be included in the output plot 
+        REGARDLESS of whether streamlines connect to this region or not (e.g.
+        this option will force the plotting of 0 values for specificed labels)
+    saveDir : TYPE, optional
+        The directory in which to save the resultant radial plot. No input
+        will result in no save. The default is None.
+    
+
+    Returns
+    -------
+    None.
+
+    """
+    import pandas as pd
+    import numpy as np
+    import os
+    from matplotlib import pyplot as plt
+    import wmaPyTools.analysisTools  
+    
+    #just use this to get the column names, you can't be sure that all the names
+    #are there
+    [renumberedAtlasNifti,reducedLookUpTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(atlas,atlasLookupTable,removeAbsentLabels=False)
+    columnNames=reducedLookUpTable.columns
+
+    
+    RASendpointData=[]
+    LPIendpointData=[]
+    
+    [currentRAS,currentLPI]=wmaPyTools.analysisTools.quantifyTractEndpoints(tract,atlas,atlasLookupTable)
+    RASendpointData.append(currentRAS)
+    LPIendpointData.append(currentLPI)
+        
+    #normalize them
+    RASendpointData['endpointCounts']=RASendpointData['endpointCounts'].divide(RASendpointData['endpointCounts'].sum())
+    LPIendpointData['endpointCounts']=LPIendpointData['endpointCounts'].divide(LPIendpointData['endpointCounts'].sum())
+
+
+    #get the colors
+    if color==True:
+       RASendpointData['color']=''
+       LPIendpointData['color']=''
+       streamColors, colorLut=colorStreamEndpointsFromParc(tract,atlas)
+       #place label names in the color lut
+       colorLut['name']=''
+       for iRows,iLabels in enumerate(colorLut['labels'].to_list()):
+            colorLut['name'].iloc[iRows]=reducedLookUpTable.iloc[(reducedLookUpTable.iloc[:,0]==iLabels).to_numpy(),1].values[0]
+       #now do it the other way for the label values  
+       for iRows,iNames in enumerate(colorLut['name'].to_list()):
+           if iNames in RASendpointData['labelNames'].to_list():
+               RASendpointData['color'].iloc[(RASendpointData['labelNames']==iNames).to_numpy()]=pd.Series([colorLut['rgb_Color'].iloc[iRows]])
+           if iNames in LPIendpointData['labelNames'].to_list():
+               LPIendpointData['color'].iloc[(LPIendpointData['labelNames']==iNames).to_numpy()]=pd.Series([colorLut['rgb_Color'].iloc[iRows]])
+      
+        
+        
+
+    #arbitrary criteria for mean proportion
+    minThresh=.01
+    #split the dataframe in ordert to get the common and uncommon endpoints
+    firstLPIDFCommon= LPIendpointData[LPIendpointData['endpointCounts'] >= minThresh]
+    firstLPIDFUnCommon= LPIendpointData[LPIendpointData['endpointCounts'] <= minThresh]
+    firstRASDFCommon= RASendpointData[RASendpointData['endpointCounts'] >= minThresh]
+    firstRASDFUnCommon= RASendpointData[RASendpointData['endpointCounts'] <= minThresh]
+    
+    #here we enforce the required labels by switching them over or filling them in
+    #get the requested labels, if any
+    if not forcePlotLabels==None:
+        #get the sub table for the requeseted labels
+        forceTable=atlasLookupTable[atlasLookupTable[columnNames[0]].isin(forcePlotLabels)]
+        #check to see if they are in BOTH tables
+        missingLabels1=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(LPIendpointData['labelNames'])]
+        missingLabels2=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(RASendpointData['labelNames'])]
+        
+        #now append them to the uncommon tables
+        firstLPIDFUnCommon=firstLPIDFUnCommon.append(pd.DataFrame(data=missingLabels1.tolist(),columns=['labelNames']),ignore_index=True)
+        firstRASDFUnCommon=firstRASDFUnCommon.append(pd.DataFrame(data=missingLabels2.tolist(),columns=['labelNames']),ignore_index=True)
+        
+        #now set the nans to zero
+        firstLPIDFUnCommon= firstLPIDFUnCommon.fillna(0)
+        firstRASDFUnCommon= firstRASDFUnCommon.fillna(0)
+        
+        #then move over the relevant rows to the common table, a clever move
+        firstLPIDFCommon=firstLPIDFCommon.append(firstLPIDFUnCommon[firstLPIDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
+        firstRASDFCommon=firstRASDFCommon.append(firstRASDFUnCommon[firstRASDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
+        
+        
+    fig, axs = plt.subplots(2, 2)
+    #Plot the common endpoints
+    if color==True:
+        figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']),COLORS=firstRASDFCommon['color'].to_list())
+        figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']),COLORS=firstLPIDFCommon['color'].to_list())
+    else:
+        figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']))
+        figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']))
+    
+    figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']))
+    figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']))
+    
+    figure1.get_axes()[0].set_title(tractName+'\nRAS common endpoints\n',size=16)
+    figure1.get_axes()[0].set_facecolor([0,0,1,.15])
+    figure2.get_axes()[0].set_title(tractName+'\nRAS common endpoints\n',size=16)
+    figure2.get_axes()[0].set_facecolor([1,0,0,.15])
+    
+    axs[0,0]=figure1.get_axes()[0]
+    axs[0,1]=figure2.get_axes()[0]
+
     
     
+    #Plot the UNcommon endpoints
+    #but use try except
     
+    try: 
+    
+        if color==True:
+            figure3=basicRadarPlot(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']),COLORS=firstRASDFUnCommon['color'].to_list())
+        else:
+            figure3=basicRadarPlot(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']))
+        
+        #figure3=basicRadarPlot(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']))
+       
+        figure3.get_axes()[0].set_title(tractName+'\nRAS *UN*common endpoints')
+        figure3.get_axes()[0].set_facecolor([0,0,1,.15])
+        
+        axs[1,0]=figure3.get_axes()[0]
+    except:
+        print('no uncommon for RAS')
+    
+    try:
+        
+        if color==True:
+            figure4=basicRadarPlot(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['endpointCounts']),COLORS=firstLPIDFUnCommon['color'].to_list())
+        else:
+            figure4=basicRadarPlot(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['endpointCounts']))
+       
+        figure4.get_axes()[0].set_title(tractName+'\nLPI *UN*common endpoints')
+        figure4.get_axes()[0].set_facecolor([1,0,0,.15])
+       
+        axs[1,1]=figure4.get_axes()[0]
+    except:
+        print('no uncommon for LPI')    
+        
+      
+    
+    #save the overarching figure
+    fig.savefig(os.path.join(saveDir,tractName+'_endpointFingerprint_Normed.svg'))
+    plt.close() 
     
 def basicRadarPlot(labels,values, metaValues=None,COLORS=None):
     """
