@@ -948,16 +948,16 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     if color==True:
         axs[0,0]=basicRadarPlot_ax(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']),ax=axs[0,0],COLORS=firstRASDFCommon['color'].to_list())
         axs[0,1]=basicRadarPlot_ax(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']),ax=axs[0,1],COLORS=firstLPIDFCommon['color'].to_list())
-        axs[0,0].set_title(tractName+'\nRAS common endpoints\n',size=fontsize)
+        axs[0,0].set_title('RAS common endpoints',size=fontsize)
         axs[0,0].set_facecolor([0,0,1,.15])
-        axs[0,1].set_title(tractName+'\nRAS common endpoints\n',size=fontsize)
+        axs[0,1].set_title('RAS common endpoints',size=fontsize)
         axs[0,1].set_facecolor([1,0,0,.15])  
     else:
         axs[0,0]=basicRadarPlot_ax(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']),ax=axs[0,0])
         axs[0,1]=basicRadarPlot_ax(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']),ax=axs[0,1])
-        axs[0,0].set_title(tractName+'\nRAS common endpoints\n',size=fontsize)
+        axs[0,0].set_title('RAS common endpoints',size=fontsize)
         axs[0,0].set_facecolor([0,0,1,.15])
-        axs[0,1].set_title(tractName+'\nRAS common endpoints\n',size=fontsize)
+        axs[0,1].set_title('RAS common endpoints',size=fontsize)
         axs[0,1].set_facecolor([1,0,0,.15])  
 
 
@@ -974,7 +974,7 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         
         #figure3=basicRadarPlot(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']))
        
-        axs[1,0].set_title(tractName+'\nRAS *UN*common endpoints',size=fontsize)
+        axs[1,0].set_title('RAS *UN*common endpoints',size=fontsize)
         axs[1,0].set_facecolor([0,0,1,.15])
         
     except:
@@ -987,13 +987,14 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         else:
             axs[1,1]=basicRadarPlot_ax(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['endpointCounts']),ax=axs[1,1])
        
-        axs[1,1].set_title(tractName+'\nLPI *UN*common endpoints',size=fontsize)
+        axs[1,1].set_title('LPI *UN*common endpoints',size=fontsize)
         axs[1,1].set_facecolor([1,0,0,.15])
 
+   
     except:
         print('no uncommon for LPI')    
         
-      
+    fig.suptitle(tractName+' endpoints fingerprint', fontsize=12)
     plt.show()
     #save the overarching figure
     if not saveDir == None:
