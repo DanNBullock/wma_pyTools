@@ -881,13 +881,10 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     [renumberedAtlasNifti,reducedLookUpTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(atlas,atlasLookupTable,removeAbsentLabels=False)
     columnNames=reducedLookUpTable.columns
 
-    
-    RASendpointData=[]
-    LPIendpointData=[]
-    
+       
     [currentRAS,currentLPI]=wmaPyTools.analysisTools.quantifyTractEndpoints(tract,atlas,atlasLookupTable)
-    RASendpointData.append(currentRAS)
-    LPIendpointData.append(currentLPI)
+    RASendpointData=currentRAS
+    LPIendpointData=currentLPI
         
     #normalize them
     RASendpointData['endpointCounts']=RASendpointData['endpointCounts'].divide(RASendpointData['endpointCounts'].sum())
@@ -943,27 +940,27 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         firstRASDFCommon=firstRASDFCommon.append(firstRASDFUnCommon[firstRASDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
         
         
-    fig, axs = plt.subplots(2, 2)
+    fig, axs = plt.subplots(2, 2,subplot_kw=dict(projection='polar'))
+    fig.subplots_adjust(wspace=-.4,hspace=0.7)
+    fig.figsize=(12, 12)
+    fontsize=6
     #Plot the common endpoints
     if color==True:
-        figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']),COLORS=firstRASDFCommon['color'].to_list())
-        figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']),COLORS=firstLPIDFCommon['color'].to_list())
+        axs[0,0]=basicRadarPlot_ax(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']),ax=axs[0,0],COLORS=firstRASDFCommon['color'].to_list())
+        axs[0,1]=basicRadarPlot_ax(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']),ax=axs[0,1],COLORS=firstLPIDFCommon['color'].to_list())
+        axs[0,0].set_title(tractName+'\nRAS common endpoints\n',size=fontsize)
+        axs[0,0].set_facecolor([0,0,1,.15])
+        axs[0,1].set_title(tractName+'\nRAS common endpoints\n',size=fontsize)
+        axs[0,1].set_facecolor([1,0,0,.15])  
     else:
-        figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']))
-        figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']))
-    
-    figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']))
-    figure2=basicRadarPlot(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']))
-    
-    figure1.get_axes()[0].set_title(tractName+'\nRAS common endpoints\n',size=16)
-    figure1.get_axes()[0].set_facecolor([0,0,1,.15])
-    figure2.get_axes()[0].set_title(tractName+'\nRAS common endpoints\n',size=16)
-    figure2.get_axes()[0].set_facecolor([1,0,0,.15])
-    
-    axs[0,0]=figure1.get_axes()[0]
-    axs[0,1]=figure2.get_axes()[0]
+        axs[0,0]=basicRadarPlot_ax(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']),ax=axs[0,0])
+        axs[0,1]=basicRadarPlot_ax(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']),ax=axs[0,1])
+        axs[0,0].set_title(tractName+'\nRAS common endpoints\n',size=fontsize)
+        axs[0,0].set_facecolor([0,0,1,.15])
+        axs[0,1].set_title(tractName+'\nRAS common endpoints\n',size=fontsize)
+        axs[0,1].set_facecolor([1,0,0,.15])  
 
-    
+
     
     #Plot the UNcommon endpoints
     #but use try except
@@ -971,37 +968,38 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     try: 
     
         if color==True:
-            figure3=basicRadarPlot(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']),COLORS=firstRASDFUnCommon['color'].to_list())
+            axs[1,0]=basicRadarPlot_ax(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']),ax=axs[1,0],COLORS=firstRASDFUnCommon['color'].to_list())
         else:
-            figure3=basicRadarPlot(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']))
+            axs[1,0]=basicRadarPlot_ax(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']),ax=axs[1,0])
         
         #figure3=basicRadarPlot(list(firstRASDFUnCommon['labelNames']),list(firstRASDFUnCommon['endpointCounts']))
        
-        figure3.get_axes()[0].set_title(tractName+'\nRAS *UN*common endpoints')
-        figure3.get_axes()[0].set_facecolor([0,0,1,.15])
+        axs[1,0].set_title(tractName+'\nRAS *UN*common endpoints',size=fontsize)
+        axs[1,0].set_facecolor([0,0,1,.15])
         
-        axs[1,0]=figure3.get_axes()[0]
     except:
         print('no uncommon for RAS')
     
     try:
         
         if color==True:
-            figure4=basicRadarPlot(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['endpointCounts']),COLORS=firstLPIDFUnCommon['color'].to_list())
+            axs[1,1]=basicRadarPlot_ax(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['endpointCounts']),ax=axs[1,1],COLORS=firstLPIDFUnCommon['color'].to_list())
         else:
-            figure4=basicRadarPlot(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['endpointCounts']))
+            axs[1,1]=basicRadarPlot_ax(list(firstLPIDFUnCommon['labelNames']),list(firstLPIDFUnCommon['endpointCounts']),ax=axs[1,1])
        
-        figure4.get_axes()[0].set_title(tractName+'\nLPI *UN*common endpoints')
-        figure4.get_axes()[0].set_facecolor([1,0,0,.15])
-       
-        axs[1,1]=figure4.get_axes()[0]
+        axs[1,1].set_title(tractName+'\nLPI *UN*common endpoints',size=fontsize)
+        axs[1,1].set_facecolor([1,0,0,.15])
+
     except:
         print('no uncommon for LPI')    
         
       
-    
+    plt.show()
     #save the overarching figure
-    fig.savefig(os.path.join(saveDir,tractName+'_endpointFingerprint_Normed.svg'))
+    if not saveDir == None:
+        fig.savefig(os.path.join(saveDir,tractName+'_endpointFingerprint_Normed.svg'),dpi=800,bbox_inches='tight')
+    else:
+        fig.savefig(tractName+'_endpointFingerprint_Normed.svg',dpi=800,bbox_inches='tight')
     plt.close() 
     
 def basicRadarPlot(labels,values, metaValues=None,COLORS=None):
@@ -1124,6 +1122,138 @@ def basicRadarPlot(labels,values, metaValues=None,COLORS=None):
     #ax.text(0, np.max(values)-.5, "Log10  # \n of streamlines", rotation=-69, 
     #    ha="center", va="center", size=12, zorder=12)
     return plt.gcf()
+
+def basicRadarPlot_ax(labels,values, metaValues=None,COLORS=None,ax=None):
+    """
+    https://www.python-graph-gallery.com/web-circular-barplot-with-matplotlib
+    #maybe also consider
+    https://www.python-graph-gallery.com/circular-barplot/
+    and group with lobes?
+
+    Parameters
+    ----------
+    values : TYPE
+        DESCRIPTION.
+    labels : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    figure handle
+
+    """
+    import matplotlib.pyplot as plt
+    import matplotlib as mpl
+    import numpy as np
+    from textwrap import wrap
+    from matplotlib.ticker import MaxNLocator
+    
+    fontSize=4
+    
+    #convert the values to log scale
+    #figure out a way to do this conditionally
+    #maybe if standard deviation of values is greater than 100 ?
+    #values=np.log10(values)
+    
+    # Values for the x axis
+    ANGLES = np.linspace(0.05, 2 * np.pi - 0.05, len(labels), endpoint=False)
+    
+    # Set default font to Bell MT
+    plt.rcParams.update({"font.family": "Bell MT"})
+
+    GREY12 = "#1f1f1f"
+    # Set default font color to GREY12
+    plt.rcParams["text.color"] = GREY12
+
+    # The minus glyph is not available in Bell MT
+    # This disables it, and uses a hyphen
+    plt.rc("axes", unicode_minus=False)
+
+    # Colors
+    if not np.any(COLORS):
+        COLORS = ["#6C5B7B","#C06C84","#F67280","#F8B195"]
+
+    # Colormap
+    cmap = mpl.colors.LinearSegmentedColormap.from_list("my color", COLORS, N=256)
+
+    # Normalizer
+    #norm = mpl.colors.Normalize(vmin=TRACKS_N.min(), vmax=TRACKS_N.max())
+
+    # Normalized colors. Each number of tracks is mapped to a color in the 
+    # color scale 'cmap'
+    #COLORS = cmap(norm(TRACKS_N))
+
+    # Some layout stuff ----------------------------------------------
+    # Initialize layout in polar coordinates
+    if ax==None:
+        fig, ax = plt.subplots(figsize=(9, 12.6), subplot_kw={"projection": "polar"})
+    
+        # Set background color to white, both axis and figure.
+        fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
+    ax.set_theta_offset(1.2 * np.pi / 2)
+    #find adaptive way to set min value
+    valueRange=np.max(values)-np.min(values)
+    if np.logical_or(metaValues==None, not metaValues):
+        ax.set_ylim(0-np.max(values)*.05, np.max(values)*1.3)
+    else:
+        ax.set_ylim(0-np.max(values)*.05, (np.max(values)+np.max(metaValues))*1.3)
+    
+
+    # Add geometries to the plot -------------------------------------
+    # See the zorder to manipulate which geometries are on top
+
+    # Add bars to represent the cumulative track lengths
+    #make conditional on metavalues
+    if metaValues==None:
+        ax.bar(ANGLES, values, color=COLORS, alpha=0.9, width=(3.1415/(len(values)))*1.5 )
+    else:
+        ax.bar(ANGLES, values, yerr=metaValues,color=COLORS, alpha=0.9, width=(3.1415/(len(values)))*1.5 )
+        
+    #overly specific to aparcaseg, fix later
+    #try and do split lines
+    for iREGION in range(len(labels)):
+        if 'ctx_lh_G_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_lh_G_','ctx_lh_G\n')
+        elif 'ctx_lh_S_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_lh_S_','ctx_lh_S\n')
+        elif 'ctx_lh_G\nand_S_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_lh_G\nand_S_','ctx_lh_G_and_S\n')
+            
+    for iREGION in range(len(labels)):
+        if 'ctx_rh_G_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_rh_G_','ctx_rh_G\n')
+        elif 'ctx_rh_S_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_rh_S_','ctx_rh_S\n')
+        elif 'ctx_rh_G\nand_S_' in labels[iREGION]:
+            labels[iREGION]=labels[iREGION].replace('ctx_rh_G\nand_S_','ctx_rh_G_and_S\n')
+
+    REGION = ["\n".join(wrap(r, 5, break_long_words=False)) for r in labels]
+    
+    
+    
+    XTICKS = ax.xaxis.get_major_ticks()
+    for tick in XTICKS:
+        tick.set_pad(0)
+    ax.yaxis.labelpad=0
+    
+    YTICKS = ax.yaxis.get_major_ticks()
+    #we only need half th
+    ax.yaxis.set_major_locator(MaxNLocator(5)) 
+
+    
+    ax.tick_params(axis='y', labelsize=fontSize )
+    
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            #ax.spines["start"].set_color("none")
+    ax.spines["polar"].set_color("none")
+    
+    ax.xaxis.grid(False)
+    ax.set_xticks(ANGLES)
+    ax.set_xticklabels(REGION, size=fontSize);
+    #ax.text(0, np.max(values)-.5, "Log10  # \n of streamlines", rotation=-69, 
+    #    ha="center", va="center", size=12, zorder=12)
+    return ax
 
 def dipyPlotPrototypicality(streamlines,filename):
     
