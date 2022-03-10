@@ -838,7 +838,13 @@ def removeIslandsFromAtlas(atlasNifti):
         atlas=nib.load(atlasNifti)
     else:
         atlas=atlasNifti
-        
+
+
+    # atlasData=np.round(atlas.get_data()).astype(int)
+    # #COSIDER REPLACING ALL OR MSOT OF THIS WITH
+    #Doesn't seem to work?
+    # relabelConnectedData=scipy.ndimage.measurements.label(atlasData.astype(bool))
+
     #count the label instances, and make an inference as to the background value
     #it's almost certianly the most common value, eg. 0
     (labels,counts)=np.unique(atlas.get_data(), return_counts=True)
@@ -924,7 +930,13 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
     import numpy as np
     #from scipy.interpolate import NearestNDInterpolator
     import scipy
-    import tqdm
+    #conditional import of tqdm
+    try: 
+        import tqdm
+        tqdmFlag=True
+    except:
+        tqdmFlag=False
+        
     from nilearn.image import crop_img, resample_img
     from scipy import ndimage
     #import dipy.tracking.utils as ut
@@ -1025,44 +1037,86 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
         #this manuver is going to cost us .gif
         #NOTE, sequencing of coordinates may influence votes
         #create a dummy array for each inflation iteration to avoid this
-        for iInflationTargetCoords in tqdm.tqdm(inflationTargetCoords):
-            #because I dont trust iteration in 
-            #print(str(iInflationTargetCoords))
-            #set some while loop iteration values
-            #this is the voxel-wise radius of the expans you're considering
-            window=1
-            #if you set the vector to 2 or longer by default, it will run until fixed
-            voteWinner=[0,0]
-            while len(voteWinner)>1:
-            #+2 because python is weird and doesn't include the top index
-                #we need to consider those cases in which the voxels are adjacent to the edge of the volume
-                xRange=np.asarray(range((iInflationTargetCoords[0]-window),(iInflationTargetCoords[0]+1+window)))
-                yRange=np.asarray(range((iInflationTargetCoords[1]-window),(iInflationTargetCoords[1]+1+window)))
-                zRange=np.asarray(range((iInflationTargetCoords[2]-window),(iInflationTargetCoords[2]+1+window)))
-                #remove invalid indexes
-                #-1, right?
-                xRange=xRange[np.all([xRange<noIslandAtlasData.shape[0]-1,  xRange>=0],axis=0)]
-                yRange=yRange[np.all([yRange<noIslandAtlasData.shape[1]-1,  yRange>=0],axis=0)]
-                zRange=zRange[np.all([zRange<noIslandAtlasData.shape[2]-1,  zRange>=0],axis=0)]
-                
-                x, y, z = np.meshgrid(xRange, yRange, zRange,indexing='ij')
-                #squeeze the output (maybe not necessary)          
-                windowBlock= np.squeeze([x, y, z])
-                #convert to array of coordinates
-                windowIndexes=np.vstack(windowBlock).reshape(3,-1).T
- 
-                #probably dumb and inefficient, but here we are
-                voxelVotes=np.asarray([noIslandAtlasData[iVoxel[0],iVoxel[1],iVoxel[2]] for iVoxel in list(windowIndexes)])
-                #get the vote counts
-                (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
-                voteWinner=labels[np.where(np.max(counts)==counts)[0]]
-                #just in case
-                del voxelVotes
-                window=window+1
-            #print(str(noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]))
-            #print(str(voteWinner))
-            newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
-            del voteWinner
+        if  tqdmFlag:
+            for iInflationTargetCoords in tqdm.tqdm(inflationTargetCoords):
+                #because I dont trust iteration in 
+                #print(str(iInflationTargetCoords))
+                #set some while loop iteration values
+                #this is the voxel-wise radius of the expans you're considering
+                window=1
+                #if you set the vector to 2 or longer by default, it will run until fixed
+                voteWinner=[0,0]
+                while len(voteWinner)>1:
+                #+2 because python is weird and doesn't include the top index
+                    #we need to consider those cases in which the voxels are adjacent to the edge of the volume
+                    xRange=np.asarray(range((iInflationTargetCoords[0]-window),(iInflationTargetCoords[0]+1+window)))
+                    yRange=np.asarray(range((iInflationTargetCoords[1]-window),(iInflationTargetCoords[1]+1+window)))
+                    zRange=np.asarray(range((iInflationTargetCoords[2]-window),(iInflationTargetCoords[2]+1+window)))
+                    #remove invalid indexes
+                    #-1, right?
+                    xRange=xRange[np.all([xRange<noIslandAtlasData.shape[0]-1,  xRange>=0],axis=0)]
+                    yRange=yRange[np.all([yRange<noIslandAtlasData.shape[1]-1,  yRange>=0],axis=0)]
+                    zRange=zRange[np.all([zRange<noIslandAtlasData.shape[2]-1,  zRange>=0],axis=0)]
+                    
+                    x, y, z = np.meshgrid(xRange, yRange, zRange,indexing='ij')
+                    #squeeze the output (maybe not necessary)          
+                    windowBlock= np.squeeze([x, y, z])
+                    #convert to array of coordinates
+                    windowIndexes=np.vstack(windowBlock).reshape(3,-1).T
+     
+                    #probably dumb and inefficient, but here we are
+                    voxelVotes=np.asarray([noIslandAtlasData[iVoxel[0],iVoxel[1],iVoxel[2]] for iVoxel in list(windowIndexes)])
+                    #get the vote counts
+                    (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
+                    voteWinner=labels[np.where(np.max(counts)==counts)[0]]
+                    #just in case
+                    del voxelVotes
+                    window=window+1
+                #print(str(noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]))
+                #print(str(voteWinner))
+                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+                del voteWinner
+        else: 
+            #kind of ugly here in that there's duplicated code
+            for iInflationTargetCoords in inflationTargetCoords:
+                #because I dont trust iteration in 
+                #print(str(iInflationTargetCoords))
+                #set some while loop iteration values
+                #this is the voxel-wise radius of the expans you're considering
+                window=1
+                #if you set the vector to 2 or longer by default, it will run until fixed
+                voteWinner=[0,0]
+                while len(voteWinner)>1:
+                #+2 because python is weird and doesn't include the top index
+                    #we need to consider those cases in which the voxels are adjacent to the edge of the volume
+                    xRange=np.asarray(range((iInflationTargetCoords[0]-window),(iInflationTargetCoords[0]+1+window)))
+                    yRange=np.asarray(range((iInflationTargetCoords[1]-window),(iInflationTargetCoords[1]+1+window)))
+                    zRange=np.asarray(range((iInflationTargetCoords[2]-window),(iInflationTargetCoords[2]+1+window)))
+                    #remove invalid indexes
+                    #-1, right?
+                    xRange=xRange[np.all([xRange<noIslandAtlasData.shape[0]-1,  xRange>=0],axis=0)]
+                    yRange=yRange[np.all([yRange<noIslandAtlasData.shape[1]-1,  yRange>=0],axis=0)]
+                    zRange=zRange[np.all([zRange<noIslandAtlasData.shape[2]-1,  zRange>=0],axis=0)]
+                    
+                    x, y, z = np.meshgrid(xRange, yRange, zRange,indexing='ij')
+                    #squeeze the output (maybe not necessary)          
+                    windowBlock= np.squeeze([x, y, z])
+                    #convert to array of coordinates
+                    windowIndexes=np.vstack(windowBlock).reshape(3,-1).T
+     
+                    #probably dumb and inefficient, but here we are
+                    voxelVotes=np.asarray([noIslandAtlasData[iVoxel[0],iVoxel[1],iVoxel[2]] for iVoxel in list(windowIndexes)])
+                    #get the vote counts
+                    (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
+                    voteWinner=labels[np.where(np.max(counts)==counts)[0]]
+                    #just in case
+                    del voxelVotes
+                    window=window+1
+                #print(str(noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]))
+                #print(str(voteWinner))
+                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+                del voteWinner
+            
         #once the inflations are done for this round, set the values in the atlas data
         #to their new identities
         #2/25/2022 note:  previously we had been directly setting the identity
@@ -1214,7 +1268,7 @@ def findROISintersection(ROIs,inflateiter=0):
     intersectionNifti=masking.intersect_masks(ROIs, threshold=1)
     
     #if it's empty throw a warning
-    if not (1 in np.unique(intersectionNifti.get_data)) or (True in np.unique(intersectionNifti.get_data)):
+    if not np.any(intersectionNifti.get_data()):
         import warnings
         warnings.warn("Empty mask for intersection returned; likely no mutual intersection between input " + str(len(ROIs)) + "ROIs")
                       

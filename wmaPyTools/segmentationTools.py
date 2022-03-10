@@ -24,7 +24,7 @@ from dipy.tracking.utils import streamline_near_roi
 from dipy.tracking.utils import density_map
 from scipy.ndimage import binary_dilation
 from warnings import warn
-import tqdm
+
 import dipy.tracking.utils as ut
 from dipy.tracking.vox2track import _streamlines_in_mask   
 import copy
@@ -559,6 +559,12 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     # from scipy.ndimage import binary_dilation
     # from warnings import warn
     # import tqdm
+    #conditional import of tqdm
+    try: 
+        import tqdm
+        tqdmFlag=True
+    except:
+        tqdmFlag=False
     
     #one thing off the top we can do is reduce the size of the input 
     #region_of_interest such that we are only considering voxels that 
@@ -600,48 +606,88 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     #max
     subjectSpaceBounds[1,:]=[np.max(convertedBoundCoords[:,iDems]) for iDems in list(range(convertedBoundCoords.shape[1]))]
     # END subjectSpaceMaskBoundaryCoords
+    print('Input ROI with volume ' + str(np.sum(region_of_interest)) + ' has bounding box :\n' +str(subjectSpaceBounds))
     
     #now that we have the boundary coords, we check to see if all streamlines are within it
     #NOTE, THIS IS replicatiing the functionality of streamlineWithinBounds
     #setup an streamline-node-submask structure
     streamlinesSubMask=[[] for iSreamlines in range(len(streamlines))]
     print('Computing streamline nodes within ROI bounding box')
-    for iStreamline in tqdm.tqdm(range(len(streamlines))):
-        #this function is predicated upon 2 assumptions:  (1) for the 
-        #vast majority of mask cases, because the mask is sufficiently small
-        #there is a massive speedup to be had by doing the following within-bounds
-        #computation followed by the standard cdist and distance > tol 
-        #computation on the surviving subset, than doing the standard computation
-        #on ALL streamline nodes.
+    if tqdmFlag:
+        for iStreamline in tqdm.tqdm(range(len(streamlines))):
+            #this function is predicated upon 2 assumptions:  (1) for the 
+            #vast majority of mask cases, because the mask is sufficiently small
+            #there is a massive speedup to be had by doing the following within-bounds
+            #computation followed by the standard cdist and distance > tol 
+            #computation on the surviving subset, than doing the standard computation
+            #on ALL streamline nodes.
+            
+            #here, for each streamline, we determine which nodes are within bounds
+            nodeCriteria=np.asarray([np.logical_and(streamlines[iStreamline][:,iDems]>subjectSpaceBounds[0,iDems],streamlines[iStreamline][:,iDems]<subjectSpaceBounds[1,iDems]) for iDems in list(range(subjectSpaceBounds.shape[1])) ])
+            
+            #we can also go ahead and implement the "mode" behavior for either_end
+            #and both_end, and possibly set things up for a future one_end,
+            #by dropping everything between the endpoints.
+            #we might need a weird conditional here, or a try except to make
+            #indexing robust to already short streamlines (e.g. 2 nodes)
+            
+            #TODO NOTE: 'one_end' would need to be implemented inside
+            #streamline_near_roi in order to avoid running both 'either_end' and
+            #'both_end' (and) then negating the output of 'both_end'
+            #also, probably not necessary given that streamline_near_roi only 
+            #checks the end in the relevant cases
+            if np.any((mode == 'either_end', mode == 'both_end',mode == 'one_end')):
+                try:
+                    #indexing here was mesed up previously
+                    #it was just flatly negating an entire slice it seems
+                    #thus nothing could pass the subsequent np.all check
+                    nodeCriteria[:,1:-1]=False
+                except:
+                    #in a test case with nodeCriteria=[False,False] attempting
+                    #nodeCriteria[1:-1]=False results in
+                    #TypeError: can only assign an iterable, which is a fine
+                    #behavior if we're using try except
+                    pass
+            
+            streamlinesSubMask[iStreamline]=np.all(nodeCriteria,axis=0)
+        else:
+            for iStreamline in range(len(streamlines)):
+                #this function is predicated upon 2 assumptions:  (1) for the 
+                #vast majority of mask cases, because the mask is sufficiently small
+                #there is a massive speedup to be had by doing the following within-bounds
+                #computation followed by the standard cdist and distance > tol 
+                #computation on the surviving subset, than doing the standard computation
+                #on ALL streamline nodes.
+                
+                #here, for each streamline, we determine which nodes are within bounds
+                nodeCriteria=np.asarray([np.logical_and(streamlines[iStreamline][:,iDems]>subjectSpaceBounds[0,iDems],streamlines[iStreamline][:,iDems]<subjectSpaceBounds[1,iDems]) for iDems in list(range(subjectSpaceBounds.shape[1])) ])
+                
+                #we can also go ahead and implement the "mode" behavior for either_end
+                #and both_end, and possibly set things up for a future one_end,
+                #by dropping everything between the endpoints.
+                #we might need a weird conditional here, or a try except to make
+                #indexing robust to already short streamlines (e.g. 2 nodes)
+                
+                #TODO NOTE: 'one_end' would need to be implemented inside
+                #streamline_near_roi in order to avoid running both 'either_end' and
+                #'both_end' (and) then negating the output of 'both_end'
+                #also, probably not necessary given that streamline_near_roi only 
+                #checks the end in the relevant cases
+                if np.any((mode == 'either_end', mode == 'both_end',mode == 'one_end')):
+                    try:
+                        #indexing here was mesed up previously
+                        #it was just flatly negating an entire slice it seems
+                        #thus nothing could pass the subsequent np.all check
+                        nodeCriteria[:,1:-1]=False
+                    except:
+                        #in a test case with nodeCriteria=[False,False] attempting
+                        #nodeCriteria[1:-1]=False results in
+                        #TypeError: can only assign an iterable, which is a fine
+                        #behavior if we're using try except
+                        pass
+                
+                streamlinesSubMask[iStreamline]=np.all(nodeCriteria,axis=0)
         
-        #here, for each streamline, we determine which nodes are within bounds
-        nodeCriteria=np.asarray([np.logical_and(streamlines[iStreamline][:,iDems]>subjectSpaceBounds[0,iDems],streamlines[iStreamline][:,iDems]<subjectSpaceBounds[1,iDems]) for iDems in list(range(subjectSpaceBounds.shape[1])) ])
-        
-        #we can also go ahead and implement the "mode" behavior for either_end
-        #and both_end, and possibly set things up for a future one_end,
-        #by dropping everything between the endpoints.
-        #we might need a weird conditional here, or a try except to make
-        #indexing robust to already short streamlines (e.g. 2 nodes)
-        
-        #TODO NOTE: 'one_end' would need to be implemented inside
-        #streamline_near_roi in order to avoid running both 'either_end' and
-        #'both_end' (and) then negating the output of 'both_end'
-        #also, probably not necessary given that streamline_near_roi only 
-        #checks the end in the relevant cases
-        if np.any((mode == 'either_end', mode == 'both_end',mode == 'one_end')):
-            try:
-                #indexing here was mesed up previously
-                #it was just flatly negating an entire slice it seems
-                #thus nothing could pass the subsequent np.all check
-                nodeCriteria[:,1:-1]=False
-            except:
-                #in a test case with nodeCriteria=[False,False] attempting
-                #nodeCriteria[1:-1]=False results in
-                #TypeError: can only assign an iterable, which is a fine
-                #behavior if we're using try except
-                pass
-        
-        streamlinesSubMask[iStreamline]=np.all(nodeCriteria,axis=0)
     
     #END streamlineWithinBounds
     
@@ -693,7 +739,7 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     
     #I guess we have to create a whole new subset of streamlines here
     #GOODBYE RAM
-    print('Subsetting streamlines')
+    print(str(len(streamsToCheck)) +' Streamlines remain after bounding box and other assesments')
     #this may not be necessary
     #streamlinesSubset=[streamlines[iStreamlineToCheck][streamlinesSubMask[iStreamlineToCheck]] for iStreamlineToCheck in tqdm.tqdm(streamsToCheck)]
     
@@ -703,10 +749,17 @@ def near_roi_fast(streamlines, affine, region_of_interest, tol=None,
     out=[False for iStreamlines in streamlines]
     #iterate over the streamlines that warrant inspection (rather than all 
     #streamlines)
-    for iCount, iStreamlineToCheck in enumerate(tqdm.tqdm(streamsToCheck)):
-        #this can be replaced with standard streamline_near_roi once
-        #new version is in dipy production branch.
-        out[streamsToCheck[iCount]]=preFiltered_Streamline_near_roi(streamlines[iStreamlineToCheck][streamlinesSubMask[iStreamlineToCheck]], x_roi_coords, tol, mode) 
+    if tqdmFlag:
+        for iCount, iStreamlineToCheck in enumerate(tqdm.tqdm(streamsToCheck)):
+            #this can be replaced with standard streamline_near_roi once
+            #new version is in dipy production branch.
+            out[streamsToCheck[iCount]]=preFiltered_Streamline_near_roi(streamlines[iStreamlineToCheck][streamlinesSubMask[iStreamlineToCheck]], x_roi_coords, tol, mode) 
+    else:
+        for iCount, iStreamlineToCheck in enumerate(streamsToCheck):
+            #this can be replaced with standard streamline_near_roi once
+            #new version is in dipy production branch.
+            out[streamsToCheck[iCount]]=preFiltered_Streamline_near_roi(streamlines[iStreamlineToCheck][streamlinesSubMask[iStreamlineToCheck]], x_roi_coords, tol, mode) 
+
     #at the end of this, we should essentialy have the same boolean
     #vector output that would be typical of near_roi
     

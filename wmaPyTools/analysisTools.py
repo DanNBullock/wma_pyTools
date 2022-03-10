@@ -188,7 +188,13 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     import os
     import time
     from functools import partial
-    import tqdm
+    #conditional import
+    try: 
+        import tqdm
+        tqdmFlag=True
+    except:
+        tqdmFlag=False
+    
     import wmaPyTools.streamlineTools 
     
     #create a dummy nifti if necessary in order to get a get an affine?
@@ -256,7 +262,11 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     t1_start=time.process_time()
     #streamsListList=processes_pool.map(partial(streamsInImgSpaceWindow,streamlineMapping=streamlineMapping,mask_r=mask_r), imgCoords)
     print('computing voxel-wise collections of streamlines to check for while using a ' + str(distanceParameter) + 'mm spherical window')
-    streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in tqdm.tqdm(imgCoords, position=0, leave=True)]
+    if tqdmFlag:
+        streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in tqdm.tqdm(imgCoords, position=0, leave=True)]
+    else:
+        streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in imgCoords]
+           
     t1_stop=time.process_time()
     modifiedTime=t1_stop-t1_start
     print(str(modifiedTime) + ' seconds to find streamline groups to check')  
@@ -273,7 +283,11 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     t1_start=time.process_time()
     #compute the dispersion for each subset of streamlines, and output the quantificaitons
     #outValues=processes_pool.map(computeStreamsDispersion,streamlines[subsampledStreamLists])
-    outValues=[computeStreamsDispersion_bootstrapNoOrient(streamlines[iStreamLists],bootstrapProportion=.5,bootstrapIter=1,refAnatT1=referenceNifti) for iStreamLists in tqdm.tqdm(streamsListList, position=0, leave=True)] 
+    if tqdmFlag:
+        outValues=[computeStreamsDispersion_bootstrapNoOrient(streamlines[iStreamLists],bootstrapProportion=.5,bootstrapIter=1,refAnatT1=referenceNifti) for iStreamLists in tqdm.tqdm(streamsListList, position=0, leave=True)] 
+    else:
+        outValues=[computeStreamsDispersion_bootstrapNoOrient(streamlines[iStreamLists],bootstrapProportion=.5,bootstrapIter=1,refAnatT1=referenceNifti) for iStreamLists in streamsListList] 
+       
     #A reminder of what's coming out of this:
     #endPoint1DistAvg, endPoint2DistAvg, endPoint1DistVar, endPoint2DistVar, X repeats
     
@@ -1402,7 +1416,12 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     from dipy.tracking.vox2track import streamline_mapping
     import itertools
     import pandas as pd
-    import tqdm
+    #conditional import of tqdm
+    try: 
+        import tqdm
+        tqdmFlag=True
+    except:
+        tqdmFlag=False
     
     #napkin math to predict size of output array:
     #16 bit * 200 labels * 300000 voxels =~ 120 MB, not too bad
@@ -1451,24 +1470,44 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     #     voxelAtlasConnectivityArray
     allEndpointMappings=list(streamlineEndpointMapping.keys())
     allGroups=list(grouping.keys())
-    for iEndpointVoxels in  tqdm.tqdm(range(len(allEndpointMappings))):
+    if tqdmFlag:
         
-        currentVoxLabelValue=relabeledAtlasData[allEndpointMappings[iEndpointVoxels]]
-        currentVoxStreams=streamlineEndpointMapping[allEndpointMappings[iEndpointVoxels]]
-        
-        groupKeysWithLabelBool=np.asarray([ currentVoxLabelValue in currentGrouping for currentGrouping in allGroups])
-        
-        currentGroupings=list(itertools.compress(allGroups,groupKeysWithLabelBool))
-        
-        for iGroupings in range(len(currentGroupings)):
-            #if the first group label is the current voxel value, go with the
-            #other label value.  Essentially, ignores ordering and deals with same
-            #label mappings adequately
-            if currentGroupings[iGroupings][0]==currentVoxLabelValue:
-                voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][1]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
-            else:
-                voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][0]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
-    
+        for iEndpointVoxels in  tqdm.tqdm(range(len(allEndpointMappings))):
+            
+            currentVoxLabelValue=relabeledAtlasData[allEndpointMappings[iEndpointVoxels]]
+            currentVoxStreams=streamlineEndpointMapping[allEndpointMappings[iEndpointVoxels]]
+            
+            groupKeysWithLabelBool=np.asarray([ currentVoxLabelValue in currentGrouping for currentGrouping in allGroups])
+            
+            currentGroupings=list(itertools.compress(allGroups,groupKeysWithLabelBool))
+            
+            for iGroupings in range(len(currentGroupings)):
+                #if the first group label is the current voxel value, go with the
+                #other label value.  Essentially, ignores ordering and deals with same
+                #label mappings adequately
+                if currentGroupings[iGroupings][0]==currentVoxLabelValue:
+                    voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][1]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
+                else:
+                    voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][0]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
+    else: 
+        for iEndpointVoxels in  range(len(allEndpointMappings)):
+            
+            currentVoxLabelValue=relabeledAtlasData[allEndpointMappings[iEndpointVoxels]]
+            currentVoxStreams=streamlineEndpointMapping[allEndpointMappings[iEndpointVoxels]]
+            
+            groupKeysWithLabelBool=np.asarray([ currentVoxLabelValue in currentGrouping for currentGrouping in allGroups])
+            
+            currentGroupings=list(itertools.compress(allGroups,groupKeysWithLabelBool))
+            
+            for iGroupings in range(len(currentGroupings)):
+                #if the first group label is the current voxel value, go with the
+                #other label value.  Essentially, ignores ordering and deals with same
+                #label mappings adequately
+                if currentGroupings[iGroupings][0]==currentVoxLabelValue:
+                    voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][1]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
+                else:
+                    voxelAtlasConnectivityArray[iEndpointVoxels,currentGroupings[iGroupings][0]]=len(np.intersect1d(grouping[currentGroupings[iGroupings]],currentVoxStreams))
+
     #set up the pandas output
     
     columnLabels=['Label_' + str(iLabel) for iLabel in range(M.shape[0])]
@@ -1483,7 +1522,13 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable,reductionFactor=None):
     import numpy as np
     import os
     from scipy.spatial.distance import cdist
-    import tqdm
+    #conditional import
+    try: 
+        import tqdm
+        tqdmFlag=True
+    except:
+        tqdmFlag=False
+    
     from sklearn.metrics.pairwise import cosine_similarity
     import sklearn.preprocessing as preprocess
     from sklearn.metrics import pairwise_distances
@@ -1506,13 +1551,23 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable,reductionFactor=None):
             #create a subtable using these
             reducedVoxelAtlasConnectivityTable=voxelAtlasConnectivityTable.loc(uniqueRoundedVoxelIndexes.tolist())
             #iterate across rounded indexes
-            for iVoxels in tqdm.tqdm(list(reducedVoxelAtlasConnectivityTable.index)):
-                #is there a faster or smarter way to do this?
-                #find the array indexes of the now rounded voxel indicies that are equal the current unique rounded voxel index value
-                currentVoxels=np.where([connectedVoxels==iVoxels for connectedVoxels in list(voxelIndexes)])
-                #for all of these that meet the citerion (are in the appropriate neighborhood)
-                #sum across the columns (i.e. labels), and place value in the reduced table
-                reducedVoxelAtlasConnectivityTable[iVoxels]=voxelAtlasConnectivityTable.iloc(currentVoxels).sum(axis=1)
+            if tqdmFlag:
+                for iVoxels in tqdm.tqdm(list(reducedVoxelAtlasConnectivityTable.index)):
+                    #is there a faster or smarter way to do this?
+                    #find the array indexes of the now rounded voxel indicies that are equal the current unique rounded voxel index value
+                    currentVoxels=np.where([connectedVoxels==iVoxels for connectedVoxels in list(voxelIndexes)])
+                    #for all of these that meet the citerion (are in the appropriate neighborhood)
+                    #sum across the columns (i.e. labels), and place value in the reduced table
+                    reducedVoxelAtlasConnectivityTable[iVoxels]=voxelAtlasConnectivityTable.iloc(currentVoxels).sum(axis=1)
+            else:
+                for iVoxels in list(reducedVoxelAtlasConnectivityTable.index):
+                    #is there a faster or smarter way to do this?
+                    #find the array indexes of the now rounded voxel indicies that are equal the current unique rounded voxel index value
+                    currentVoxels=np.where([connectedVoxels==iVoxels for connectedVoxels in list(voxelIndexes)])
+                    #for all of these that meet the citerion (are in the appropriate neighborhood)
+                    #sum across the columns (i.e. labels), and place value in the reduced table
+                    reducedVoxelAtlasConnectivityTable[iVoxels]=voxelAtlasConnectivityTable.iloc(currentVoxels).sum(axis=1)
+             
         #managing the edge case
         else:
             uniqueRoundedVoxelIndexes=voxelIndexesArray

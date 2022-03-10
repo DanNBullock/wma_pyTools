@@ -584,7 +584,11 @@ def streamlinesInWindowFromMapping(streamlines,streamlineMapping,referenceNifti=
     import os
     import time
     from functools import partial
-    import tqdm
+    try: 
+        import tqdm
+        tqdmFlag=True
+    except:
+        tqdmFlag=False
     
     
     #create a dummy nifti if necessary in order to get a get an affine?
@@ -652,7 +656,11 @@ def streamlinesInWindowFromMapping(streamlines,streamlineMapping,referenceNifti=
     t1_start=time.process_time()
     #streamsListList=processes_pool.map(partial(streamsInImgSpaceWindow,streamlineMapping=streamlineMapping,mask_r=mask_r), imgCoords)
     print('computing voxel-wise collections of streamlines to check for while using a ' + str(distanceParameter) + 'mm spherical window')
-    streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in tqdm.tqdm(imgCoords, position=0, leave=True)]
+    if tqdmFlag:
+        streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in tqdm.tqdm(imgCoords, position=0, leave=True)]
+    else:
+        streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in imgCoords]
+  
     t1_stop=time.process_time()
     modifiedTime=t1_stop-t1_start
     print(str(modifiedTime) + ' seconds to find streamline groups to check')  
@@ -1321,28 +1329,50 @@ def orientAllStreamlines(tractStreamlines):
 
     """
     import numpy as np
-    import tqdm
+    #conditional import of tqdm
+    try: 
+        import tqdm
+        tqdmFlag=True
+    except:
+        tqdmFlag=False
     import wmaPyTools.analysisTools
     
     #create a counter, for fun
     flipCount=0
-    for iStreamlines in tqdm.tqdm(range(len(tractStreamlines))):
+    if tqdmFlag:
+        for iStreamlines in tqdm.tqdm(range(len(tractStreamlines))):
+            
+            #compute traversals for streamline
+            traversals=wmaPyTools.analysisTools.cumulativeTraversalStream(tractStreamlines[iStreamlines])
+            #find which dimension has max traversal
+            maxTraversalDim=np.where(np.max(traversals)==traversals)[0][0]
+            #get the current endpoints
+            endpoint1=tractStreamlines[iStreamlines][0,:]
+            endpoint2=tractStreamlines[iStreamlines][-1,:]
         
-        #compute traversals for streamline
-        traversals=wmaPyTools.analysisTools.cumulativeTraversalStream(tractStreamlines[iStreamlines])
-        #find which dimension has max traversal
-        maxTraversalDim=np.where(np.max(traversals)==traversals)[0][0]
-        #get the current endpoints
-        endpoint1=tractStreamlines[iStreamlines][0,:]
-        endpoint2=tractStreamlines[iStreamlines][-1,:]
-    
-        #if the coordinate of endpoint1 in the max traversal dimension
-        #is less than the coordinate of endpoint1 in the max traversal dimension
-        #flip it
-        if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
-            tractStreamlines[iStreamlines]= tractStreamlines[iStreamlines][::-1]
-            flipCount=flipCount+1
-    
+            #if the coordinate of endpoint1 in the max traversal dimension
+            #is less than the coordinate of endpoint1 in the max traversal dimension
+            #flip it
+            if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
+                tractStreamlines[iStreamlines]= tractStreamlines[iStreamlines][::-1]
+                flipCount=flipCount+1
+    else:
+        for iStreamlines in range(len(tractStreamlines)):
+            
+            #compute traversals for streamline
+            traversals=wmaPyTools.analysisTools.cumulativeTraversalStream(tractStreamlines[iStreamlines])
+            #find which dimension has max traversal
+            maxTraversalDim=np.where(np.max(traversals)==traversals)[0][0]
+            #get the current endpoints
+            endpoint1=tractStreamlines[iStreamlines][0,:]
+            endpoint2=tractStreamlines[iStreamlines][-1,:]
+        
+            #if the coordinate of endpoint1 in the max traversal dimension
+            #is less than the coordinate of endpoint1 in the max traversal dimension
+            #flip it
+            if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
+                tractStreamlines[iStreamlines]= tractStreamlines[iStreamlines][::-1]
+                flipCount=flipCount+1
     #add a report        
     print( str(flipCount) + ' of ' + str(len(tractStreamlines)) + ' streamlines flipped')
 
@@ -1438,12 +1468,14 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     from dipy.data import get_fnames, default_sphere
     from dipy.io.gradients import read_bvals_bvecs
     from dipy.io.image import load_nifti
-    from dipy.reconst.csdeconv import (auto_response_ssst,
+    from dipy.reconst.csdeconv import (auto_response,
+                                   auto_response_ssst,
                                    mask_for_response_ssst,
                                    response_from_mask_ssst)
     import nibabel as nib
     from dipy.reconst.csdeconv import ConstrainedSphericalDeconvModel
     from dipy.data import default_sphere
+    from dipy.data import small_sphere
     from dipy.direction import ProbabilisticDirectionGetter
     from dipy.tracking.local_tracking import LocalTracking
     from dipy.tracking.stopping_criterion import ThresholdStoppingCriterion
@@ -1463,8 +1495,9 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     gtab = gradient_table(bvals, bvecs)
 
     response, ratio = auto_response_ssst(gtab, dwi.get_data(), roi_radii=10, fa_thr=0.7)
+    #response, ratio = auto_response(gtab, dwi.get_data(), roi_radii=10, fa_thr=0.7)
     
-    csd_model = ConstrainedSphericalDeconvModel(gtab, response)
+    csd_model = ConstrainedSphericalDeconvModel(gtab, response, sh_order=6)
     
     
    
@@ -1473,15 +1506,26 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     
     csd_fit = csd_model.fit(dwi.get_data(), mask=wmOnDwi.get_data())
 
-    prob_dg = ProbabilisticDirectionGetter.from_shcoeff(csd_fit.shm_coeff,
-                                                    max_angle=30.,
-                                                    sphere=default_sphere)
+    # prob_dg = ProbabilisticDirectionGetter.from_shcoeff(csd_fit.shm_coeff,
+    #                                                 max_angle=30.,
+    #                                                 sphere=default_sphere)
+    
+    
     csa_model = CsaOdfModel(gtab, sh_order=6)
+    gfa = csa_model.fit(dwi.get_data(), mask=wmOnDwi.get_data()).gfa
     stopping_thr= 0.2
-    gfa = csa_model.fit(dwi.get_data(), mask=wmMask.get_data()).gfa
     stopping_criterion = ThresholdStoppingCriterion(gfa, stopping_thr)
+    
+    fod = csd_fit.odf(default_sphere)
+    pmf = fod.clip(min=0)
+    prob_dg = ProbabilisticDirectionGetter.from_pmf(pmf, max_angle=30.,
+                                                    sphere=default_sphere)   
+
+   
     seeds = utils.seeds_from_mask(targetMask.get_data(), targetMask.affine, density=seed_density)
     step_size= dist_to_corner(targetMask.affine)
+    
+    
     streamline_generator = LocalTracking(prob_dg, stopping_criterion, seeds,
                                      targetMask.affine, step_size=step_size)
     streamlines = Streamlines(streamline_generator)
@@ -1497,3 +1541,4 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     #seeding_files= #testdata/mask.nii.gz
   
     return streamlines
+
