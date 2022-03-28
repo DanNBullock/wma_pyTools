@@ -245,6 +245,10 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
     import dipy.tracking.utils as ut
     import wmaPyTools.roiTools  
     
+    #Crop initial T1
+    #crop the anatomy back down in case it has gotten overly widened
+    refAnatT1=crop_img(refAnatT1)
+    
     #get tract density nifti
     tractDensityNifti=ut.density_map(streamlines, refAnatT1.affine, refAnatT1.shape)
     densityNifti = nib.nifti1.Nifti1Image(tractDensityNifti, refAnatT1.affine, refAnatT1.header)
@@ -271,21 +275,22 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
     
     #resample to the best resolution
     #but also assuming that the refernce anatomy is ultimately the shape that we want
-    #this is going to cause huge problems if the user passes in a super cropped overlay
-    if np.prod(refAnatT1Resolution)>np.prod(overlayResolution):
-        print('resampling reference anatomy to overlay')
-        refAnatT1=resample_img(refAnatT1,target_affine=overlayNifti.affine[0:3,0:3])
-        overlayNifti=resample_img(overlayNifti,target_affine=overlayNifti.affine[0:3,0:3])
-    else:
-        print('resampling overlay to reference anatomy')
-        refAnatT1=resample_img(refAnatT1,target_affine=refAnatT1.affine[0:3,0:3])
-        overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine[0:3,0:3])
+    # #this is going to cause huge problems if the user passes in a super cropped overlay
+    # THIS SHOULDN'T BE NECESSARY DUE TO THE USE OF THE REFT1 FOR DENSITY MAP
+    # if np.prod(refAnatT1Resolution)>np.prod(overlayResolution):
+    #     print('resampling reference anatomy to overlay')
+    #     refAnatT1=resample_img(refAnatT1,target_affine=overlayNifti.affine[0:3,0:3])
+    #     overlayNifti=resample_img(overlayNifti,target_affine=overlayNifti.affine[0:3,0:3])
+    # else:
+    #     print('resampling overlay to reference anatomy')
+    #     refAnatT1=resample_img(refAnatT1,target_affine=refAnatT1.affine[0:3,0:3])
+    #     overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine[0:3,0:3])
     
-    #crop the anatomy back down in case it has gotten overly widened
-    refAnatT1=crop_img(refAnatT1)
+    # #crop the anatomy back down in case it has gotten overly widened
+    # refAnatT1=crop_img(refAnatT1)
     
-    #now crop the overlay to the dimensions of the reference anatomy
-    overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine, target_shape=refAnatT1.shape)
+    # #now crop the overlay to the dimensions of the reference anatomy
+    # overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine, target_shape=refAnatT1.shape)
     
     #compute the bounds of the actual density data   
     streamDensityBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(overlayNifti)
@@ -1380,7 +1385,11 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     #colormap for main tract
     cmap = matplotlib.cm.get_cmap('seismic')
     #colormap for neck
-    neckCmap = matplotlib.cm.get_cmap('twilight')
+    #apparently this doesn't work for old versions of matplotlib
+    try:
+        neckCmap = matplotlib.cm.get_cmap('twilight')
+    except:
+        neckCmap = matplotlib.cm.get_cmap('jet')
     #jet could work too
     
     endpoints1Cmap=matplotlib.cm.get_cmap('winter')
@@ -2036,3 +2045,42 @@ def plotFullyConnectedRelations(squareformDistTable):
     linewidth=10,fontsize_names=15)
     
     return fig,axes
+
+def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,outDir):
+    
+    from dipy.tracking import utils
+    import numpy as np
+    import wmaPyTools.analysisTools
+    import os
+    
+    
+    [renumberedAtlasNifti,reducedLookupTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(atlas,lookupTable,removeAbsentLabels=True)
+    #still have to guess the column for the string name
+    #we could standardize the output of reduceAtlasAndLookupTable later
+    entryLengths=reducedLookupTable.applymap(str).applymap(len)
+    nameColumnGuess=entryLengths.mean(axis=0).idxmax()
+    
+   
+    #get the endpoint identities
+    M, grouping=utils.connectivity_matrix(streamlines, renumberedAtlasNifti.affine, label_volume=np.round(renumberedAtlasNifti.get_data()).astype(int),
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    #get the keys so that you can iterate through them later
+    keyTargets=list(grouping.keys())
+    keyTargetsArray=np.asarray(keyTargets)
+    
+    saveDir=os.path.join(outDir,'subCompTiles')
+    
+    if not os.path.exists(saveDir):
+        os.makedirs(saveDir)
+    
+    #iterate across both sets of endpoints
+    for iIndexes,iPairs in enumerate(keyTargets):
+        #get the indexes of the relevant streams
+        currentStreams=grouping[iPairs]
+        name1=reducedLookupTable[nameColumnGuess].iloc[iPairs[0]]
+        name2=reducedLookupTable[nameColumnGuess].iloc[iPairs[1]]
+        
+        tckName=name1+'_TO_'+name2
+        
+        multiTileDensity(streamlines[currentStreams],refAnatT1,saveDir,tckName,noEmpties=True)
