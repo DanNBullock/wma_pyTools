@@ -4,6 +4,45 @@ Created on Sun Dec  5 16:04:06 2021
 
 @author: Daniel
 """
+
+def combineTracts(tractsORstreamlines):
+    #import numpy as np
+    import nibabel as nib
+    #from dipy.tracking.streamline import Streamlines
+    #import wmaPyTools.streamlineTools
+    import os
+
+    #create blank holder for tracts / streamlines
+    tractHolder=[[] for iTracts in tractsORstreamlines ]
+    #iterate across inputs
+    for iterator,iTracts in enumerate(tractsORstreamlines):
+        if isinstance(iTracts, str):
+            #I guess we're just throwing out the stateful tractogram info here?
+            tempHold=nib.streamlines.load(iTracts)
+            tractHolder[iterator]=tempHold.streamlines
+        elif isinstance( iTracts, nib.streamlines.tck.TckFile):
+            #I guess we're just throwing out the stateful tractogram info here?
+            tractHolder[iterator]=iTracts.streamlines
+        elif isinstance( iTracts, nib.streamlines.array_sequence.ArraySequence):  
+        #probably a bit brittle and inelegant but, we'll do it this ugly way
+            tractHolder[iterator]=iTracts
+    
+    #now we have a collection of streamline inputs, lets merge them using .extend
+    
+    for iterator in range(1,len(tractHolder)):
+        tractHolder[0].extend(tractHolder[iterator])
+    
+    #we are only interested in tractHolder[0]
+    #here we save the file, but then immediately delete it.  If the user 
+    #wants to save the streamlines/tractogram they can do that outside this function
+    #theoretically, if the person has a tractogram already saved named the same way
+    #this would create a problem.  I guess we just have to create a crazy name
+    outStatefulTractogram=stubbornSaveTractogram(tractHolder[0],'tractogramToDelete.tck')
+    print (str(len(tractsORstreamlines)) + 'input tract-like objects merged into a single, ' + str(len(outStatefulTractogram.streamlines)) + ' streamline long stateful tractogram')
+   
+    os.remove("tractogramToDelete.tck") 
+    return outStatefulTractogram
+
 def dummyNiftiForStreamlines(streamlines):
     import numpy as np
     import nibabel as nib
@@ -769,6 +808,8 @@ def matWMC2jsonWMC(classification):
 def stubbornSaveTractogram(streamlines,savePath):
     """
     Why shouuld i supply a reference nifti?
+    
+    NOTE this only works for the sensible format of streamlines, i.e. RASMM
 
     Returns
     -------
@@ -801,8 +842,9 @@ def stubbornSaveTractogram(streamlines,savePath):
     dummyNifti= nib.nifti1.Nifti1Image(dummyData, constructedAffine)
     
     
-    voxStreams=dipy.tracking.streamline.transform_streamlines(streamlines,np.linalg.inv(constructedAffine))
-    statefulTractogramOut=StatefulTractogram(voxStreams, dummyNifti, Space.VOX)
+    #voxStreams=dipy.tracking.streamline.transform_streamlines(streamlines,np.linalg.inv(constructedAffine))
+    #statefulTractogramOut=StatefulTractogram(voxStreams, dummyNifti, Space.VOX)
+    statefulTractogramOut=StatefulTractogram(streamlines, dummyNifti, Space.RASMM)
     
     save_tractogram(statefulTractogramOut,savePath)
     return statefulTractogramOut

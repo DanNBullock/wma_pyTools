@@ -211,6 +211,181 @@ def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
         
         # get a streamline index dict of the whole brain tract
         
+        
+def generateAnatOverlayXSections(overlayNifti,refAnatT1,saveDir):
+    import nibabel as nib
+    #use dipy to create the density mask
+    from dipy.tracking import utils
+    import numpy as np
+    from glob import glob
+    import os
+    from nilearn.image import reorder_img  
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    from matplotlib import figure
+    from nilearn.image import crop_img, resample_img 
+    import matplotlib.pyplot as plt
+    import dipy.tracking.utils as ut
+    import wmaPyTools.roiTools  
+    
+    #do some testing here for binary vs count data
+    
+    #RAS reoreintation
+    refAnatT1=reorder_img(refAnatT1)
+    overlayNifti=reorder_img(overlayNifti)
+    
+    #get the resolution of each nifti
+    overlayRes=overlayNifti.header.get_zooms()
+    refT1Res=refAnatT1.header.get_zooms()
+    #if they aren't the same resolution
+    if not np.array_equal(overlayRes,refT1Res):
+        #resample the *T1* not the overlay
+        #this is because this is just for visualization purposes, not quantative
+        #and resampling the typically sparse overlay leads to substantial losses
+        refAnatT1=resample_img(refAnatT1,target_affine=overlayNifti.affine[0:3,0:3])
+        
+    #get their shapes as well
+    overlayShape=overlayNifti.shape
+    refT1Shape=refAnatT1.shape
+    
+    #obtain boundary coords in subject space in order to
+    #use plane generation function
+    convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(refAnatT1)
+    
+    dimsList=['x','y','z']
+    #brute force with matplotlib
+   
+    for iDims in list(range(len(refT1Shape))):
+   
+        if refT1Shape[iDims]<=overlayShape[iDims]:
+            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refT1Res[iDims])
+        else:
+            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],overlayRes[iDims])
+        #get the desired broadcast shape and delete current dim value
+        broadcastShape=list(refAnatT1.shape)
+        del broadcastShape[iDims]
+            
+            #iterate across slices
+        for iSlices in list(range(len(subjectSpaceSlices))):
+            #set the slice list entry to the appropriate singular value
+            #THE SOLUTION WAS SO OBVIOUS. DONT USE A SINGLE SLICE FOR BOTH THE
+            #REFERNCE AND THE OVERLAY.  DUH!
+            #actually this doesn't matter if we resample
+            currentRefSlice=wmaPyTools.roiTools.makePlanarROI(refAnatT1, subjectSpaceSlices[iSlices], dimsList[iDims])
+            #could be an issue if overlay nifti is signifigantly smaller
+            currentOverlaySlice=wmaPyTools.roiTools.makePlanarROI(overlayNifti, subjectSpaceSlices[iSlices], dimsList[iDims])
+    
+            #set up the figure
+            fig,ax = plt.subplots()
+            ax.axis('off')
+            #kind of overwhelming to do this in one line
+            refData=np.rot90(np.reshape(refAnatT1.get_data()[currentRefSlice.get_data().astype(bool)],broadcastShape),1)
+            plt.imshow(refData, cmap='gray', interpolation='antialiased')
+            #kind of overwhelming to do this in one line
+            overlayData=np.rot90(np.reshape(overlayNifti.get_data()[currentOverlaySlice.get_data().astype(bool)],broadcastShape),1)
+            #lets mask out the background
+            [unique, counts] = np.unique(overlayData, return_counts=True)
+            backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
+            
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='antialiased',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
+            curFig=plt.gcf()
+            cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
+            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
+            
+            #put some text about the current dimension and slice
+            yLims=curFig.gca().get_ylim()
+            #xLims=curFig.gca().get_xlim()
+            #this changes the resolution of the figure itself, and breaks everything
+            #fix later
+            # curFig.gca().text(0, yLims[0]-1, dimsList[iDims] + ' = ' + str(subjectSpaceSlices[iSlices]),
+            # bbox={'facecolor': 'white', 'alpha': 1, 'pad': 10})
+
+            
+            curFig.gca().yaxis.set_ticks_position('left')
+            curFig.gca().tick_params( colors='white')
+            # we use *2 in order to afford room for the subsequent blended images
+            figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)+'.png'
+            plt.savefig(os.path.join(saveDir,figName),bbox_inches='tight',pad_inches=0.0)
+            plt.close()
+
+def multiTileOverlay_wrap(overlayNifti,refAnatT1,saveDir,figName,noEmpties=True,postClean=True):
+    
+    import nibabel as nib
+    #use dipy to create the density mask
+    from dipy.tracking import utils
+    import numpy as np
+    from glob import glob
+    import os
+    from nilearn.image import reorder_img  
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    from matplotlib import figure
+    from nilearn.image import crop_img, resample_img 
+    import matplotlib.pyplot as plt
+    import dipy.tracking.utils as ut
+    import wmaPyTools.roiTools  
+    from dipy.segment.mask import bounding_box
+    
+    refAnatT1=reorder_img(refAnatT1)
+    overlayNifti=reorder_img(overlayNifti)
+    
+    generateAnatOverlayXSections(overlayNifti,refAnatT1,saveDir)
+    
+    imgSpaceMins, imgSpaceMaxs=bounding_box(overlayNifti.get_data())
+    
+    overlayShape=overlayNifti.shape
+    refT1Shape=refAnatT1.shape
+    
+    
+
+    
+    import os        
+    from PIL import Image
+    from glob import glob
+    #create blened images to smooth transitions between slices
+  
+    for iDims in list(range(len(refAnatT1.shape))):
+        #presumes continuous slice numbering
+        if noEmpties:
+            if refT1Shape[iDims]<=overlayShape[iDims]:
+                imgSpaceSlices=np.arange(imgSpaceMins[iDims],imgSpaceMaxs[iDims])
+            else:
+                #I don't think this can happen
+                imgSpaceSlices=np.arange(0,refT1Shape[iDims])
+        else:
+            
+            imgSpaceSlices=np.arange(0,refT1Shape[iDims])
+        
+        
+        dimStem='dim_' + str(iDims)
+        #open the images
+        img, *imgs = [Image.open(os.path.join(saveDir,dimStem+'_'+str(f).zfill(3)+'.png')) for f in  imgSpaceSlices]
+        #find the number you'll be working with
+        numImagesToTile=len(imgSpaceSlices)
+        #find the lenght of the aggregated sides
+        squareSide=np.ceil(np.sqrt(numImagesToTile)).astype(int)
+        #get the dimensions of the images in this dimension
+        imgPix=img.size
+        #create a blank output array
+        tileOut=np.zeros([imgPix[0]*squareSide,imgPix[1]*squareSide,np.asarray(img).shape[2]-1]).astype(np.uint8)
+        #create the iterated bounds
+        colBounds=np.arange(0,tileOut.shape[0],imgPix[0])
+        rowBounds=np.arange(0,tileOut.shape[1],imgPix[1])
+        #get the appropriate number of these to iterate across all imgs
+        y, x=np.meshgrid(colBounds,rowBounds,indexing='ij')
+        #turn into 1d vectors
+        yBoundVec=np.ravel(y)
+        xBoundVec=np.ravel(x)
+        for iImgs in range(len(imgs)):
+            #tileOut[yBoundVec[iImgs]:yBoundVec[iImgs]+imgPix[1],xBoundVec[iImgs]:xBoundVec[iImgs]+imgPix[0],:]=np.transpose(np.asarray(imgs[iImgs]),[1,0,2]).astype(np.uint8)[:,:,0:3]
+            tileOut[yBoundVec[iImgs]:yBoundVec[iImgs]+imgPix[0],xBoundVec[iImgs]:xBoundVec[iImgs]+imgPix[1],:]=np.transpose(np.asarray(imgs[iImgs]),[1,0,2]).astype(np.uint8)[:,:,0:3]
+
+        im=Image.fromarray(np.fliplr(np.rot90(tileOut,3)))
+        
+        im.save(os.path.join(saveDir,figName+'_'+dimStem+'.png'), format='png')
+        plt.close('all')
+        #conditionally remove the generated files
+        if postClean:
+            [os.remove(ipaths) for ipaths in sorted(glob(os.path.join(saveDir,dimStem+'_*.png')))]    
+        
 def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
     """
     
@@ -341,7 +516,7 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
             [unique, counts] = np.unique(overlayData, return_counts=True)
             backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
             
-            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='antialiased',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
             curFig=plt.gcf()
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
             plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
@@ -370,9 +545,9 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
     for iDims in list(range(len(refAnatT1.shape))):
         dimStem='dim_' + str(iDims)
         #open the images
-        img, *imgs = [Image.open(f) for f in sorted(glob(dimStem+'*.png'))]
+        img, *imgs = [Image.open(f) for f in sorted(glob(dimStem+'_*.png'))]
         #find the number you'll be working with
-        numImagesToTile=len(sorted(glob(dimStem+'*.png')))
+        numImagesToTile=len(sorted(glob(dimStem+'_*.png')))
         #find the lenght of the aggregated sides
         squareSide=np.ceil(np.sqrt(numImagesToTile)).astype(int)
         #get the dimensions of the images in this dimension
@@ -399,7 +574,24 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
         [os.remove(ipaths) for ipaths in sorted(glob(dimStem+'*.png'))]
     
     
-        
+def crossSectionGIFsFromOverlay(overlayNifti,refAnatT1,saveDir,figName,postClean=True):
+    
+    import matplotlib.pyplot as plt
+    generateAnatOverlayXSections(overlayNifti,refAnatT1,saveDir)
+    
+    import os        
+    from PIL import Image
+    from glob import glob
+
+    for iDims in list(range(len(refAnatT1.shape))):
+        dimStem='dim_' + str(iDims)
+        img, *imgs = [Image.open(f) for f in sorted(glob(os.path.join(saveDir,dimStem+'_*.png')))]
+        img.save(os.path.join(saveDir,figName+'_'+dimStem+'.gif'), format='GIF', append_images=imgs,
+                 save_all=True, duration=1, loop=0)
+        plt.close('all')
+
+        if postClean:
+            [os.remove(ipaths) for ipaths in sorted(glob(os.path.join(saveDir,dimStem+'_*.png')))]   
         
 def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False):
     import nibabel as nib
@@ -563,6 +755,8 @@ def densityGifsOfTract(tractStreamlines,referenceAnatomy,saveDir,tractName):
     for iFiles in filesToRename:
         [path, file]=os.path.split(iFiles)
         os.rename(iFiles,os.path.join(path,tractName+'_'+file))
+
+#def densityGifsOfOverlay(tractStreamlines,referenceAnatomy,saveDir,tractName):
         
 def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',forcePlotLabels=None,saveDir=None,color=False):
     """radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName=None,saveDir=None)
@@ -2046,7 +2240,7 @@ def plotFullyConnectedRelations(squareformDistTable):
     
     return fig,axes
 
-def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,outDir):
+def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,outDir,threshold=.01):
     
     from dipy.tracking import utils
     import numpy as np
@@ -2082,5 +2276,7 @@ def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,ou
         name2=reducedLookupTable[nameColumnGuess].iloc[iPairs[1]]
         
         tckName=name1+'_TO_'+name2
-        
-        multiTileDensity(streamlines[currentStreams],refAnatT1,saveDir,tckName,noEmpties=True)
+        # implement the thresholding
+        currentProportion=len(currentStreams)/len(streamlines)
+        if currentProportion >=  threshold: 
+           multiTileDensity(streamlines[currentStreams],refAnatT1,saveDir,tckName,noEmpties=True)

@@ -1273,3 +1273,19 @@ def findROISintersection(ROIs,inflateiter=0):
         warnings.warn("Empty mask for intersection returned; likely no mutual intersection between input " + str(len(ROIs)) + "ROIs")
                       
     return intersectionNifti
+
+def changeLabelValue(inputParc,targetLabelNum,newLabelNum):
+    import numpy as np
+    import nibabel as nib
+    parcData=inputParc.get_data().astype(int)
+    locations=np.where(parcData==targetLabelNum)
+    parcData[np.ix_(locations[0],locations[1],locations[2])]=newLabelNum
+    print(str(len(locations[0])) + ' labels changed from ' + str(targetLabelNum) +' to ' + str(newLabelNum))
+    nib.Nifti1Image(parcData, inputParc.affine, inputParc.header)
+    
+def changeMultpleLabelValues(inputParc,targetLabelNums,newLabelNum):
+    
+    for iLabels in targetLabelNums:
+        inputParc=changeLabelValue(inputParc,iLabels,newLabelNum)
+        
+    return inputParc

@@ -1622,3 +1622,100 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable,reductionFactor=None):
         return uniqueRoundedVoxelIndexes, cosineDistanceMatrix
     else:
         return voxelIndexes, cosineDistanceMatrix
+    
+def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,outDir,threshold=.01,separate=False):
+    
+    from dipy.tracking import utils
+    import numpy as np
+    import wmaPyTools.analysisTools
+    import os
+    import nibabel as nib
+    import pandas as pd
+    
+    
+    [renumberedAtlasNifti,reducedLookupTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(atlas,lookupTable,removeAbsentLabels=True)
+    #still have to guess the column for the string name
+    #we could standardize the output of reduceAtlasAndLookupTable later
+    entryLengths=reducedLookupTable.applymap(str).applymap(len)
+    nameColumnGuess=entryLengths.mean(axis=0).idxmax()
+    
+   
+    #get the endpoint identities
+    M, grouping=utils.connectivity_matrix(streamlines, renumberedAtlasNifti.affine, label_volume=np.round(renumberedAtlasNifti.get_data()).astype(int),
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    #get the keys so that you can iterate through them later
+    keyTargets=list(grouping.keys())
+    keyTargetsArray=np.asarray(keyTargets)
+    
+    saveDir=os.path.join(outDir,'subCompTiles')
+    
+    if not os.path.exists(saveDir):
+        os.makedirs(saveDir)
+    
+    #densityHolderSize=[]
+    #densityHolderSize.extend(list(refAnatT1.shape))
+    #densityHolderSize.extend([len(keyTargets)])
+    #densityHolder=np.zeros(densityHolderSize)
+    
+    outDataframe=pd.DataFrame(columns=['subCompNames','streamCount'])
+    
+    #iterate across both sets of endpoints
+    densityHolder=[]
+    if not separate:
+        for iIndexes,iPairs in enumerate(keyTargets):
+            #get the indexes of the relevant streams
+            currentStreams=grouping[iPairs]
+            name1=reducedLookupTable[nameColumnGuess].iloc[iPairs[0]]
+            name2=reducedLookupTable[nameColumnGuess].iloc[iPairs[1]]
+            
+            tckName=name1+'_TO_'+name2
+            # implement the thresholding
+            currentProportion=len(currentStreams)/len(streamlines)
+            #create out dataframe
+            #outDataframe.loc[iIndexes]=[tckName,len(currentStreams)]
+            
+            if currentProportion >=  threshold: 
+                print(tckName)
+                densityMap=utils.density_map(streamlines[currentStreams], refAnatT1.affine, refAnatT1.shape)
+                #densityHolder[:,:,:,iIndexes]=densityMap
+                outDataframe.loc[len(outDataframe)]=[tckName,len(currentStreams)]
+                densityHolder.extend([densityMap])
+        outData=np.stack(densityHolder,axis=-1)
+    
+        outNifti=nib.Nifti1Image(outData,refAnatT1.affine, refAnatT1.header)
+        if not outDir==None:
+            nib.save(outNifti,os.path.join(saveDir,'subCompDensities.nii.gz'))
+            outDataframe.to_csv(os.path.join(saveDir,'subCompCounts.csv'))
+        #clever?
+        return outNifti , outDataframe
+    else:
+        for iIndexes,iPairs in enumerate(keyTargets):
+            #get the indexes of the relevant streams
+            currentStreams=grouping[iPairs]
+            name1=reducedLookupTable[nameColumnGuess].iloc[iPairs[0]]
+            name2=reducedLookupTable[nameColumnGuess].iloc[iPairs[1]]
+            
+            tckName=name1+'_TO_'+name2
+            # implement the thresholding
+            currentProportion=len(currentStreams)/len(streamlines)
+            #create out dataframe
+            #outDataframe.loc[iIndexes]=[tckName,len(currentStreams)]
+            
+            if currentProportion >=  threshold: 
+                print(tckName)
+                densityMap=utils.density_map(streamlines[currentStreams], refAnatT1.affine, refAnatT1.shape)
+                #densityHolder[:,:,:,iIndexes]=densityMap
+                #outDataframe.loc[len(outDataframe)]=[tckName,len(currentStreams)]
+                #densityHolder.extend([densityMap])
+                #outData=np.stack(densityHolder,axis=-1)
+    
+                outNifti=nib.Nifti1Image(densityMap,refAnatT1.affine, refAnatT1.header)
+                if not outDir==None:
+                    nib.save(outNifti,os.path.join(saveDir,'tckName.nii.gz'))
+            #outDataframe.to_csv(os.path.join(saveDir,'subCompCounts.csv'))
+    
+    
+    
+            
+          
