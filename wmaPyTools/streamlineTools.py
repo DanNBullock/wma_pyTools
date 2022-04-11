@@ -11,16 +11,26 @@ def combineTracts(tractsORstreamlines):
     #from dipy.tracking.streamline import Streamlines
     #import wmaPyTools.streamlineTools
     import os
+    from dipy.io.stateful_tractogram import StatefulTractogram
+    from dipy.tracking.streamline import Streamlines
+    import warnings 
+    import numpy as np
 
     #create blank holder for tracts / streamlines
     tractHolder=[[] for iTracts in tractsORstreamlines ]
     #iterate across inputs
+    
     for iterator,iTracts in enumerate(tractsORstreamlines):
         if isinstance(iTracts, str):
             #I guess we're just throwing out the stateful tractogram info here?
             tempHold=nib.streamlines.load(iTracts)
             tractHolder[iterator]=tempHold.streamlines
         elif isinstance( iTracts, nib.streamlines.tck.TckFile):
+            #I guess we're just throwing out the stateful tractogram info here?
+            tractHolder[iterator]=iTracts.streamlines
+        #i guess it can come in a different flavor if its from dipy?
+        #yeay standardization
+        elif isinstance( iTracts, StatefulTractogram):
             #I guess we're just throwing out the stateful tractogram info here?
             tractHolder[iterator]=iTracts.streamlines
         elif isinstance( iTracts, nib.streamlines.array_sequence.ArraySequence):  
@@ -37,8 +47,13 @@ def combineTracts(tractsORstreamlines):
     #wants to save the streamlines/tractogram they can do that outside this function
     #theoretically, if the person has a tractogram already saved named the same way
     #this would create a problem.  I guess we just have to create a crazy name
-    outStatefulTractogram=stubbornSaveTractogram(tractHolder[0],'tractogramToDelete.tck')
-    print (str(len(tractsORstreamlines)) + 'input tract-like objects merged into a single, ' + str(len(outStatefulTractogram.streamlines)) + ' streamline long stateful tractogram')
+    #again we have to convert the streamlines with dipy because they can behave poorly?
+    #this is going to destroy the memory, but I gues it's the only way to clear poisioned metadata
+    cleanStreams=[x for x in tractHolder[0] if not np.any(np.isinf(x)) ]
+    infFlags=[np.any(np.isinf(x)) for x in tractHolder[0]]
+    warnings.warn('Streamlines ' + str (list(np.where(infFlags)[0]))+ ' removed for containing inf' )
+    outStatefulTractogram=stubbornSaveTractogram(Streamlines(cleanStreams),'tractogramToDelete.tck')
+    print (str(len(tractsORstreamlines)) + ' input tract-like objects merged into a single, ' + str(len(outStatefulTractogram.streamlines)) + ' streamline long stateful tractogram')
    
     os.remove("tractogramToDelete.tck") 
     return outStatefulTractogram
@@ -51,6 +66,7 @@ def dummyNiftiForStreamlines(streamlines):
     #dipy is stubborn and wants a reference nifti for some reason
     #fineI'llDoItMyself.jpg
     tractBounds=np.asarray([np.min(streamlines._data,axis=0),np.max(streamlines._data,axis=0)])
+    #tractBounds2=np.asarray([np.min(streamlines.data,axis=0),np.max(streamlines.data,axis=0)])
     roundedTractBounds=np.asarray([np.floor(tractBounds[0,:]),np.ceil(tractBounds[1,:])])
     constructedAffine=np.eye(4)
     constructedAffine[0:3,3]=tractBounds[0,:]
@@ -58,7 +74,7 @@ def dummyNiftiForStreamlines(streamlines):
     lin_T, offset =ut._mapping_to_voxel(constructedAffine)
     inds = ut._to_voxel_coordinates(streamlines._data, lin_T, offset)
         
-    testBounds=np.asarray([np.min(inds,axis=0),np.max(inds,axis=0)])
+    #testBounds=np.asarray([np.min(inds,axis=0),np.max(inds,axis=0)])
         
     #now create a dummy nifit, because that's what dipy demands
     dataShape=(roundedTractBounds[1,:]-roundedTractBounds[0,:]).astype(int)
@@ -822,6 +838,8 @@ def stubbornSaveTractogram(streamlines,savePath):
     from dipy.io.stateful_tractogram import Space, StatefulTractogram
     from dipy.io.streamline import load_tractogram, save_tractogram
     import dipy.tracking.utils as ut
+    
+    from dipy.tracking.streamline import Streamlines
 
     #dipy is stubborn and wants a reference nifti for some reason
     #fineI'llDoItMyself.jpg
@@ -840,13 +858,13 @@ def stubbornSaveTractogram(streamlines,savePath):
     #adding a +1 pad because it yells otherwise?
     dummyData=np.zeros(dataShape+1)
     dummyNifti= nib.nifti1.Nifti1Image(dummyData, constructedAffine)
-    
-    
+   
     #voxStreams=dipy.tracking.streamline.transform_streamlines(streamlines,np.linalg.inv(constructedAffine))
     #statefulTractogramOut=StatefulTractogram(voxStreams, dummyNifti, Space.VOX)
-    statefulTractogramOut=StatefulTractogram(streamlines, dummyNifti, Space.RASMM)
+    #note we have to force a conversion here
+    statefulTractogramOut=StatefulTractogram(Streamlines(streamlines), dummyNifti, Space.RASMM)
     
-    save_tractogram(statefulTractogramOut,savePath)
+    save_tractogram(statefulTractogramOut,savePath, bbox_valid_check=False)
     return statefulTractogramOut
 
 def orientTractUsingNeck(streamlines,refAnatT1=None,surpressReport=False):

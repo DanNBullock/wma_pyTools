@@ -991,6 +991,226 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     
     return endpoints1DF, endpoints2DF
 
+def inferReduceLUT_to_LabelNameCols(atlas,lookUpTable):
+    import pandas as pd
+    import nibabel as nib
+    import numpy as np
+    
+    #use dipy function to reduce labels to contiguous values
+    if isinstance(atlas,str):
+        atlas=nib.load(atlas)
+    #NOTE astype(int) is causing all sorts of problems, BE WARNED
+    #first get the data out of the input atlas and *ensure* that it is Int
+    #some atlases are being passed as float
+    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+      
+    if isinstance(lookUpTable,str):
+        if lookUpTable[-4:]=='.csv':
+            lookUpTable=pd.read_csv(lookUpTable)
+        elif (np.logical_or(lookUpTable[-4:]=='.xls',lookUpTable[-5:]=='.xlsx')):
+            lookUpTable=pd.read_excel(lookUpTable)
+
+    #for various subsequent operations, you're going to need to know which
+    #column is which, so here we're going to make a couple educated guesses.
+    
+    #infer which column contains the original integer identities
+    #we'll use a heuristic, in that the appropriate column for the integer
+    #label identities ought to have the most matches with the unique values
+    #of the input atlas
+ 
+    #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
+    matchingLabelsCount=[len(list(set(lookUpTable[iColumns]).intersection(set(np.unique(inputAtlasDataINT))))) for iColumns in lookUpTable.columns.to_list()]
+    
+    #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
+    #worry about that later
+    labelColumnBestGuess=lookUpTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
+    #what about the labels we didn't find?
+    labelsNotFound=list(set(set(np.unique(inputAtlasDataINT)))-set(lookUpTable[labelColumnBestGuess]))
+    
+    #we can also take this opportunity to pick the longest average column,
+    #which is likely the optimal label name column name.  There could be
+    #issues with this, but short of asking users to specify the name column
+    #this is probably the best way to automate this.
+    #you might also be able to do some sort of additive evidence with this
+    #e.g. if you find evidence of left and right labels.  Wouldn't help you
+    #if there was an abbreviation column though.
+    entryLengths=lookUpTable.applymap(str).applymap(len)
+    nameColumnGuess=entryLengths.mean(axis=0).idxmax()
+    
+    outDF= lookUpTable[[labelColumnBestGuess,nameColumnGuess]]
+    return outDF
+
+
+def coordinateLUTsAndAtlases(LUT1,LUT2,atlas1,atlas2):
+    #dumb way to do this for now
+    import numpy as np
+    import pandas as pd
+    import nibabel as nib
+    
+    if len(LUT1.columns)>2:
+        if not atlas1==None:
+            LUT1=inferReduceLUT_to_LabelNameCols(atlas1,LUT1)
+        else:
+            raise ValueError('Input LUT1 has more than 2 columns, \natlas needed to infer column identities')
+    if len(LUT2.columns)>2:
+        if not atlas2==None:
+            LUT2=inferReduceLUT_to_LabelNameCols(atlas2,LUT2)
+        else:
+            raise ValueError('Input LUT2 has more than 2 columns, \natlas needed to infer column identities')
+    
+    #drop 0 from the second if it is present in both
+    if 0 in LUT1.iloc[:,0].values and 0 in LUT2.iloc[:,0].values:
+        LUT2 = LUT2[np.logical_not(LUT2.iloc[:,0]==0) ]
+        
+    
+    #just add these labels on the end of the first dataframe
+    #TODO figure out a more elegant way to replicate the patterns of LR and sequencing to reflect source parc
+    #find max value in LUT 1
+    maxLabelVal=LUT1.iloc[:,0].max()
+    #find the nearsest thousand. Why? just a rule of thumb
+    bufferVal=1000
+    newLUT2start= (np.floor_divide(maxLabelVal,bufferVal)*bufferVal)+bufferVal
+    #change the LUT
+    LUT2.iloc[:,0]=LUT2.iloc[:,0]+newLUT2start
+    #rename the columns and stack them
+    new_cols = {x: y for x, y in zip(LUT2.columns, LUT1.columns)}
+    combinedLut = LUT1.append(LUT2.rename(columns=new_cols)).reset_index(drop=True)
+    
+    #what do we assume about negative numbers?
+    #get the atlas data for atlas 2
+    atlas2Data=atlas2.get_data()
+    atlas2Data[atlas2Data>0]=atlas2Data[atlas2Data>0]+newLUT2start
+    
+    atlas2=nib.Nifti1Image(atlas2Data, atlas2.affine, atlas2.header)
+    
+    #technically atlas1 is unchanged, but whatever
+    return combinedLut, atlas1, atlas2
+    
+    
+    
+def reduceLUTtoAvail(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColumns=True):
+    import pandas as pd
+    import nibabel as nib
+    import numpy as np
+
+    #use dipy function to reduce labels to contiguous values
+    if isinstance(atlas,str):
+        atlas=nib.load(atlas)
+    #NOTE astype(int) is causing all sorts of problems, BE WARNED
+    #first get the data out of the input atlas and *ensure* that it is Int
+    #some atlases are being passed as float
+    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+      
+    if isinstance(lookUpTable,str):
+        if lookUpTable[-4:]=='.csv':
+            lookUpTable=pd.read_csv(lookUpTable)
+        elif (np.logical_or(lookUpTable[-4:]=='.xls',lookUpTable[-5:]=='.xlsx')):
+            lookUpTable=pd.read_excel(lookUpTable)
+
+    #for various subsequent operations, you're going to need to know which
+    #column is which, so here we're going to make a couple educated guesses.
+    
+    #infer which column contains the original integer identities
+    #we'll use a heuristic, in that the appropriate column for the integer
+    #label identities ought to have the most matches with the unique values
+    #of the input atlas
+ 
+    #presumably, this would be the LUT column with the largest number of matching labels with the original atlas.
+    matchingLabelsCount=[len(list(set(lookUpTable[iColumns]).intersection(set(np.unique(inputAtlasDataINT))))) for iColumns in lookUpTable.columns.to_list()]
+    
+    #there's an edge case here relabeled atlas == the original atlas AND the provided LUT was larger (what would the extra entries be?)
+    #worry about that later
+    columnBestGuess=lookUpTable.columns.to_list()[matchingLabelsCount.index(np.max(matchingLabelsCount))]
+    #what about the labels we didn't find?
+    labelsNotFound=list(set(set(np.unique(inputAtlasDataINT)))-set(lookUpTable[columnBestGuess]))
+    
+    #we can also take this opportunity to pick the longest average column,
+    #which is likely the optimal label name column name.  There could be
+    #issues with this, but short of asking users to specify the name column
+    #this is probably the best way to automate this.
+    #you might also be able to do some sort of additive evidence with this
+    #e.g. if you find evidence of left and right labels.  Wouldn't help you
+    #if there was an abbreviation column though.
+    entryLengths=lookUpTable.applymap(str).applymap(len)
+    labelColumnGuess=entryLengths.mean(axis=0).idxmax()
+    
+    #if *any* labels are not found, make a warning
+    #you forgot about 0
+    #remove it if it is there.
+    if len(labelsNotFound)==1 and labelsNotFound[0]==0:
+        labelsNotFound.remove(0)
+        unknownEntryTable=pd.DataFrame(columns=[columnBestGuess,labelColumnGuess])
+        unknownEntryTable.loc[0]=[0,'unlabeled (unlabeled)']
+    if not len(labelsNotFound)==0:
+        import warnings
+        warnings.warn('Incomplete or mismatched lookup table provided: \n The following labels were found in provided atlas BUT NOT in provided lookup table \n' + str(labelsNotFound) )
+    
+    
+    #we should take this opportunity to check for and remove redundant entries
+    #or throw an error if there are contradictory ones
+    for iterIndexes,iLabels in enumerate(np.unique(lookUpTable[columnBestGuess].values)):
+        correspondingRows=lookUpTable[lookUpTable[columnBestGuess]==iLabels]
+        if len(correspondingRows)>1:
+            #get the indexes
+            currentIndexes=correspondingRows.index
+            #check to determine if the name is the same for all
+            if np.all([correspondingRows[labelColumnGuess].tolist()[0]==iNames for iNames in correspondingRows[labelColumnGuess].tolist()]):
+            #remove the excess ones
+                for iToRemove in np.arange(1,len(currentIndexes)):
+                    #find the index to remove
+                    toRemoveIndex=currentIndexes[iToRemove]
+                    lookUpTable=lookUpTable.drop(index=toRemoveIndex)
+            else:
+                
+                raise  ValueError('Multiple identities found for label '+ str(iLabels))
+            
+    
+    #now that we have the column names for both the integer labels and the
+    #string names, we can create a holder for the atlas labels we didn't
+    #find in the lookup table
+    
+    #add the labels not accounted for in the lookupTable to this table
+    #first create a small dataframe for them
+    mysteryTable=pd.DataFrame(columns=[columnBestGuess,labelColumnGuess])
+    #iterate across the msystery labels
+    for iMysteryLabels in range(len(labelsNotFound)):
+        #convert the list of the integer label and the new arbitrary name to a series
+        curSeries=pd.Series([labelsNotFound[iMysteryLabels],'mysteryLabel_'+str(iMysteryLabels+1)],index=mysteryTable.columns)
+        #append the series to the table
+        mysteryTable=mysteryTable.append(curSeries,ignore_index=True)
+
+    labelMappings=np.unique(inputAtlasDataINT)
+                
+        #now that we have the guess, get the corresponding row entries, and reset the index.
+        #This should make the index match the renumbered label values.
+    LUTWorking=lookUpTable[lookUpTable[columnBestGuess].isin(labelMappings)].reset_index(drop=True)
+    #don't forget to include the 0 label
+    
+    #ugly, but maybe.
+    if 'unknownEntryTable' in locals():
+        LUTWorking=unknownEntryTable.append(LUTWorking,ignore_index=True)    
+        #append the mystery table to the working lookupt table     
+    reducedLookUpTable=LUTWorking.append(mysteryTable,ignore_index=True)
+    
+    #if the input variable has been set to preserve the lookup table entries
+    #for labels not found in the atlas
+    if not removeAbsentLabels:
+        leftOverEntries=lookUpTable[~lookUpTable[columnBestGuess].isin(labelMappings)].reset_index(drop=True)
+        reducedLookUpTable=reducedLookUpTable.append(leftOverEntries,ignore_index=True)
+        
+    #rename the relevant output colums for standardization purposes
+    #don't do this, its actually more useful to just assume that column 0 is
+    # the numbers and 1 is the names.  Otherwise we have to redo the heuristics
+    #again to get this info
+    #reducedLookUpTable=reducedLookUpTable.rename(columns={columnBestGuess : 'labelNumber', labelColumnGuess : 'labelNames'})
+    
+    #reduce it, if that's what the options called for
+    if reduceRenameColumns:
+        reducedLookUpTable=reducedLookUpTable[[columnBestGuess,labelColumnGuess]]
+    
+    return reducedLookUpTable
+    
+
 def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColumns=True):
     """
     Reduces the input atlas such that label indexes are continuous (i.e. proceed
@@ -1663,6 +1883,7 @@ def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,out
     #iterate across both sets of endpoints
     densityHolder=[]
     if not separate:
+        print('outputting 4D nifti with keyfile subCompCounts.csv for identities')
         for iIndexes,iPairs in enumerate(keyTargets):
             #get the indexes of the relevant streams
             currentStreams=grouping[iPairs]
@@ -1690,6 +1911,7 @@ def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,out
         #clever?
         return outNifti , outDataframe
     else:
+        print('outputting separate 3D density niftis for each subcomponent in ' + saveDir )
         for iIndexes,iPairs in enumerate(keyTargets):
             #get the indexes of the relevant streams
             currentStreams=grouping[iPairs]
@@ -1712,7 +1934,7 @@ def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,out
     
                 outNifti=nib.Nifti1Image(densityMap,refAnatT1.affine, refAnatT1.header)
                 if not outDir==None:
-                    nib.save(outNifti,os.path.join(saveDir,'tckName.nii.gz'))
+                    nib.save(outNifti,os.path.join(saveDir,tckName+'.nii.gz'))
             #outDataframe.to_csv(os.path.join(saveDir,'subCompCounts.csv'))
     
     

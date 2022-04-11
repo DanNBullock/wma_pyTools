@@ -1279,9 +1279,16 @@ def changeLabelValue(inputParc,targetLabelNum,newLabelNum):
     import nibabel as nib
     parcData=inputParc.get_data().astype(int)
     locations=np.where(parcData==targetLabelNum)
-    parcData[np.ix_(locations[0],locations[1],locations[2])]=newLabelNum
+    #this takes a bewilderingly long time
+    #I must be using it wrong
+    #parcData[np.ix_(locations[0],locations[1],locations[2])]=newLabelNum
+    for iToChange in range(len(locations[0])):
+        parcData[locations[0][iToChange],locations[1][iToChange],locations[2][iToChange]]=newLabelNum
+    #for 
     print(str(len(locations[0])) + ' labels changed from ' + str(targetLabelNum) +' to ' + str(newLabelNum))
-    nib.Nifti1Image(parcData, inputParc.affine, inputParc.header)
+    #create the output
+    inputParc=nib.Nifti1Image(parcData, inputParc.affine, inputParc.header)
+    return inputParc
     
 def changeMultpleLabelValues(inputParc,targetLabelNums,newLabelNum):
     
@@ -1289,3 +1296,203 @@ def changeMultpleLabelValues(inputParc,targetLabelNums,newLabelNum):
         inputParc=changeLabelValue(inputParc,iLabels,newLabelNum)
         
     return inputParc
+
+
+
+def mergeVolParcellations(parc1, parc2, parc1LUT, parc2LUT,parc1_override_labels=None,parc2_override_labels=None):
+    import nibabel as nib
+    import numpy as np
+    import pandas as pd
+    import sys
+    import wmaPyTools.analysisTools
+    
+    print('USAGE NOTE/RECOMMENDATION')
+    print('inflation (via inflateAtlasIntoWMandBG) and label removal (via changeLabelValue) ')
+    print('recommended PRIOR to mergeVolParcellations usage')
+    from nilearn.image import crop_img, resample_img
+    print('loading parcellations')
+    #load the nifti files if necesary
+    if isinstance(parc1,str):
+        parc1=nib.load(parc1)
+        
+    if isinstance(parc2,str):
+        parc2=nib.load(parc2)
+        
+    #load the lookup tables
+    if isinstance(parc1LUT,str):
+        parc1LUT=pd.read_csv(parc1LUT)
+    if isinstance(parc2LUT,str):
+        parc2LUT=pd.read_csv(parc2LUT)
+    
+   
+    #need to do this to identify the relevant labels
+    parc1LUT_reduced=wmaPyTools.analysisTools.reduceLUTtoAvail(parc1,parc1LUT,removeAbsentLabels=True,reduceRenameColumns=True)
+    if not parc1_override_labels==None and np.any(parc1_override_labels):
+        print('Reducing parc1 LUT and identifying overrides')
+        #create an override name holder
+        override1Names=[[] for iOverride in parc1_override_labels ]
+        #collect the names
+        for iterator,iOverride in enumerate(parc1_override_labels):
+            #if it's actually in the atlas...
+            if iOverride in parc1LUT_reduced.iloc[:,0].values:
+                override1Names[iterator]=parc1LUT_reduced[parc1LUT_reduced.columns[1]].loc[parc1LUT_reduced.iloc[:,0]==iOverride].values[0]
+            else:
+                print (' Override request '+ str(iOverride) + ' not present in parc1' )
+                
+        print('Labels : ' + ' '.join(override1Names) + ' will serve as overrides for parc1')
+    #honestly we don't need to do this for atlas 1 due to the default behavior... but so long as we allow parc1_override_labels inputs...
+    
+    #do the same for atlas 2
+    parc2LUT_reduced=wmaPyTools.analysisTools.reduceLUTtoAvail(parc2,parc2LUT,removeAbsentLabels=True,reduceRenameColumns=True)
+    if not parc2_override_labels==None and np.any(parc2_override_labels):
+        print('Reducing parc2 LUT and identifying overrides')
+        #create an override name holder
+        override2Names=[[] for iOverride in parc2_override_labels ]
+        #collect the names
+        for iterator,iOverride in enumerate(parc2_override_labels):
+            #if it's actually in the atlas...
+            if iOverride in parc2LUT_reduced.iloc[:,0].values:
+                override2Names[iterator]=parc2LUT_reduced[parc2LUT_reduced.columns[1]].loc[parc2LUT_reduced.iloc[:,0]==iOverride].values[0]
+            else:
+                print (' Override request '+ str(iOverride) + ' not present in parc2' )
+        print('Labels : ' + ' '.join(override2Names) + ' will serve as overrides for parc2')
+    #coordinate the labeling schemes
+    print('coordinating atlas lookuptables')
+    combinedLut, parc1, parc2=wmaPyTools.analysisTools.coordinateLUTsAndAtlases(parc1LUT,parc2LUT,parc1,parc2)
+    
+    
+    #invert the transform you just did to get the new label values
+    if not parc1_override_labels==None and np.any(parc1_override_labels):
+        print('back converting rquested overrides for parc1 into new (coordinated) label values')
+        #create an override name holder
+        newLabels1=[[] for iOverride in parc1_override_labels ]
+        #collect the names
+        for iterator,iOverride in enumerate(override1Names):
+            if iOverride in combinedLut.iloc[:,1].values:
+                newLabels1[iterator]=combinedLut[combinedLut.columns[0]].loc[combinedLut.iloc[:,1]==iOverride].values[0]
+        #reset the input override labels
+        parc1_override_labels=newLabels1
+        print('New label values associated with parc1:' + str(newLabels1))
+        
+    #do the same for the other parcellation
+    if not parc2_override_labels==None and np.any(parc2_override_labels):
+        print('back converting rquested overrides for parc2 into new (coordinated) label values')
+        #create an override name holder
+        newLabels2=[[] for iOverride in parc2_override_labels ]
+        #collect the names
+        for iterator,iOverride in enumerate(override2Names):
+            if iOverride in combinedLut.iloc[:,1].values:
+                newLabels2[iterator]=combinedLut[combinedLut.columns[0]].loc[combinedLut.iloc[:,1]==iOverride].values[0]
+        #reset the input override labels
+        parc2_override_labels=newLabels2
+        print('New label values associated with parc2:' + str(parc2_override_labels))
+    
+    
+    #detect conflicts
+    #extract data
+    parc1Data=parc1.get_data().astype(int)
+    parc2Data=parc2.get_data().astype(int)
+    
+    #find out which one is bigger, use datasize as the guide.  Datatype shouldn't
+    #be a confound at this point because we converted to int
+    parc1DataSize=sys.getsizeof(parc1Data)
+    parc2DataSize=sys.getsizeof(parc2Data)
+    #resample to the larger one
+    print('matching data block sizes')
+    #0 values may cause a confound with this?
+    if parc1DataSize>parc2DataSize:
+        print ('parc1 size of ' + str(np.round(parc1DataSize/(1024**2))) + ' MB greater than parc2 size of ' + str(np.round(parc2DataSize/(1024**2))) + ' MB')
+        print ('resampling to parc1' )
+        parc2=resample_img(parc2,target_affine=parc1.affine,target_shape=(parc1.shape),interpolation='nearest')
+        parc2Data=parc2.get_data().astype(int)
+    elif parc2DataSize>parc1DataSize:
+        print ('parc2 size of ' + str(np.round(parc2DataSize/(1024**2))) + ' MB greater than parc1 size of ' + str(np.round(parc1DataSize/(1024**2))) + ' MB')
+        print ('resampling to parc2' )
+        parc1=resample_img(parc1,target_affine=parc2.affine,target_shape=(parc2.shape),interpolation='nearest')
+        parc1Data=parc1.get_data().astype(int)
+    elif parc1Data.shape==parc2Data.shape:
+        print ('Input parcellations same data shape, proceeding without modification')
+    else:
+        raise ValueError('Unexpected edge case detected \n both parcellations same size, but different dimensions')
+    
+    #find locations of labels
+    labelIndexes1=np.where(parc1Data)
+    labelIndexes2=np.where(parc2Data)
+    
+    #convert them to lists of lists
+    labelIndexes1_list=list(np.asarray(labelIndexes1).T)
+    labelIndexes2_list=list(np.asarray(labelIndexes2).T)
+    
+    
+    
+    conflictLocations=[list(x) for x in set(tuple(x) for x in labelIndexes1_list).intersection(set(tuple(x) for x in labelIndexes2_list))]
+    print(str(len(conflictLocations)) + ' total labeling conflicts detected')
+    print('Conflicts detected for the following locations:')
+    conflictDF=pd.DataFrame(columns=['coordinate','parc1ID','parc2ID','parcIDselected'])
+    
+    for iterator,iConflicts in enumerate(conflictLocations):
+        #enter the conflict location
+        conflictDF.at[iterator,'coordinate']=iConflicts
+        #identify the labels in each
+        parc1ID=parc1Data[iConflicts[0],iConflicts[1],iConflicts[2]]
+        parc2ID=parc2Data[iConflicts[0],iConflicts[1],iConflicts[2]]
+        #enter the information into the data frame
+        conflictDF.at[iterator,'parc1ID']=parc1ID
+        conflictDF.at[iterator,'parc2ID']=parc2ID
+        #adjudicate the victor
+        #but throw an error first if you've received inchoherent inputs
+        if not parc1_override_labels==None and  parc2_override_labels==None:
+            if parc1ID in parc1_override_labels and parc2ID in parc2_override_labels:
+                raise ValueError('Parcellation1 label ' + str(parc1ID) + ' Parcellation2 label ' + str(parc2ID) + ' both entered as overrides.  Adjudicate discrepancy and rerun')
+        
+        if not parc2_override_labels==None:
+            if parc2ID in parc2_override_labels:
+                conflictDF.at[iterator,'parcIDselected']=parc2ID
+        if not parc1_override_labels==None:
+            if parc1ID in parc1_override_labels:
+                conflictDF.at[iterator,'parcIDselected']=parc1ID
+        #note this defaults to parc1 when conflicts are not adjudicated explicitly
+        #else:
+            #this is pointless, don't do this
+            #conflictDF.at[iterator,'parcIDselected']=parc1ID
+           
+    #given that we are using the parc1 as the default, we can remove those values
+    #from the conflict DF in order to expidite the merge
+    toDeleteVec=np.zeros(len(conflictDF), dtype=bool)
+    for iConflicts in range(len(conflictDF)):
+        if conflictDF['parc1ID'].iloc[iConflicts]==conflictDF['parcIDselected'].iloc[iConflicts] or np.isnan(conflictDF['parcIDselected'].iloc[iConflicts]):
+            toDeleteVec[iConflicts]=True
+    
+    #now remove them from the dataFrame
+    toRemoveDF=conflictDF.loc[np.logical_not(toDeleteVec)]
+        
+    outData=parc1Data    
+    print(str(len(toRemoveDF)) + ' voxel labels will be changed')
+    #however, for the conflicts we have to iterate and adjudicate
+    for iterator in range(len(toRemoveDF)):
+        outData[toRemoveDF['coordinate'].iloc[iterator][0],toRemoveDF['coordinate'].iloc[iterator][1],toRemoveDF['coordinate'].iloc[iterator][2]]=toRemoveDF['parcIDselected'].iloc[iterator]
+            
+    #convert it back into a nifti
+    outParcNifti=nib.Nifti1Image(outData, parc1.affine,parc1.header)
+    #pass them out
+    return outParcNifti , combinedLut , toRemoveDF
+        
+            
+            
+#I CANT FIGURE THIS OUT RIGHT NOW
+# def resampleNoZero(img, target_affine=None, target_shape=None, interpolation='nearest', copy=True, order='F', clip=True, fill_value=0, force_resample=False):
+#     #a wrapped version of nilearn.image.resample_img with interpolation='nearest' that doesn't let 0 values influence the interpolation
+#     from nilearn.image import crop_img, resample_img
+#     import numpy as np
+#     imgData=np.asanyarray(img.dataobj)
+#     continuousReampleNifti=resample_img(img,target_affine,target_shape,interpolation='continuous' )
+#     continuousReampleData=np.asanyarray(continuousReampleNifti.dataobj)
+#     nearestReampleNifti=resample_img(img,target_affine,target_shape,interpolation='nearest' )
+#     nearestReampleData=np.asanyarray(nearestReampleNifti.dataobj)
+#     dataDiff=continuousReampleData-nearestReampleData
+    
+    
+#     #fill in with an absurd value
+#     imgData[imgData]
+    
+    
