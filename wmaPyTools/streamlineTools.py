@@ -37,26 +37,33 @@ def combineTracts(tractsORstreamlines):
         #probably a bit brittle and inelegant but, we'll do it this ugly way
             tractHolder[iterator]=iTracts
     
+
+    #get something to count the number of streamlines
+    streamsCounts=[[] for iTracts in tractHolder]
+    #create blank holder
+    completeTractsHolder=[]
     #now we have a collection of streamline inputs, lets merge them using .extend
+    for iterator,iTract in enumerate(tractHolder):
+        
+        #do a clean check for inf, because these cause all kinds of problems
+        cleanStreams=[x for x in iTract if not np.any(np.isinf(x)) ]
+        infFlags=[np.any(np.isinf(x)) for x in iTract]
+        if np.any(infFlags):
+            warnings.warn('Streamlines ' + str (list(np.where(infFlags)[0]))+ ' removed for containing inf' )
+        
+        #get the length of this
+        streamsCounts[iterator]=len(cleanStreams)
+        if iterator==0:
+            completeTractsHolder=iTract
+        else:
+            completeTractsHolder.extend(iTract)
     
-    for iterator in range(1,len(tractHolder)):
-        tractHolder[0].extend(tractHolder[iterator])
-    
-    #we are only interested in tractHolder[0]
-    #here we save the file, but then immediately delete it.  If the user 
-    #wants to save the streamlines/tractogram they can do that outside this function
-    #theoretically, if the person has a tractogram already saved named the same way
-    #this would create a problem.  I guess we just have to create a crazy name
-    #again we have to convert the streamlines with dipy because they can behave poorly?
-    #this is going to destroy the memory, but I gues it's the only way to clear poisioned metadata
-    cleanStreams=[x for x in tractHolder[0] if not np.any(np.isinf(x)) ]
-    infFlags=[np.any(np.isinf(x)) for x in tractHolder[0]]
-    warnings.warn('Streamlines ' + str (list(np.where(infFlags)[0]))+ ' removed for containing inf' )
-    outStatefulTractogram=stubbornSaveTractogram(Streamlines(cleanStreams),'tractogramToDelete.tck')
+    outStatefulTractogram=stubbornSaveTractogram(Streamlines(completeTractsHolder),'tractogramToDelete.tck')
     print (str(len(tractsORstreamlines)) + ' input tract-like objects merged into a single, ' + str(len(outStatefulTractogram.streamlines)) + ' streamline long stateful tractogram')
    
     os.remove("tractogramToDelete.tck") 
-    return outStatefulTractogram
+    return outStatefulTractogram, streamsCounts
+
 
 def dummyNiftiForStreamlines(streamlines):
     import numpy as np
@@ -722,6 +729,87 @@ def streamlinesInWindowFromMapping(streamlines,streamlineMapping,referenceNifti=
     
     return streamsListList
 
+
+# def parseInputWMC(classification):
+    
+#     import os
+#     import json
+    
+    
+#     #route it properly if it is a string 
+#     if isinstance(classification,str):
+#         #get the file extension
+#         splitFile=os.path.splitext(classification)
+#         if splitFile[1]=='.json':
+#             classificationDict='test'
+#         if splitFile[1]=='.mat':
+#             classificationDict=matWMC2dict(classification)
+#         #.mat
+
+def inputTcks_to_WMCandTCK(tcksORPaths,names=None):
+    from glob import glob
+    import os
+    import nibabel as nib
+    import numpy as np
+    
+    
+    if isinstance(tcksORPaths,str):
+        if os.path.isdir(tcksORPaths):
+            print('input directory detected')
+            tckFilePaths=glob(os.path.join(tcksORPaths,'*.tck'))
+            #set the variable to this newly generated list
+            tcksORPaths=tckFilePaths
+            
+
+        else:
+            raise Exception('singleton, non directory input not understood')
+
+    
+    streamlinesHolders=[[] for iInputs in tcksORPaths]
+    #create a holder for inferred names if necessary
+    if names==None:
+        names=[[] for iInputs in tcksORPaths]
+        meaningfulNamesFlag=np.any([isinstance(itcksORPaths,str) for itcksORPaths in tcksORPaths])
+        #I don't know what to do in mixed cases
+        #because of combineTracts(tractsORstreamlines), all we need is names
+        for iterator,itcksORPaths in enumerate(tcksORPaths):
+            if isinstance(itcksORPaths,str):
+                #get the name
+                #could cause all kinds of problems if . in name
+                nameParts=os.path.basename(itcksORPaths).split('.')
+                names[iterator]=nameParts[0]
+            else:
+                #just generate some names, I guess...
+                names[iterator]='tract_'+str(iterator)
+    #if names were passed in            
+    else:
+        meaningfulNamesFlag=True
+        #but also, maybe trust the user that the specified order is the one desired
+        namesProvidedFlag=True
+    
+    #if the names are menaingful, lets try and sort the names
+    if meaningfulNamesFlag and not namesProvidedFlag:
+        flippedStrings=[iNames[::-1] for iNames in names]
+        sortOrdering=sorted(range(len(flippedStrings)), key=lambda k: flippedStrings[k])
+        sortedNames=[names[iOrder] for iOrder in sortOrdering]
+        sortedFiles=[tcksORPaths[iOrder] for iOrder in sortOrdering]
+        #this would only ever be triggered if file paths were passed, so its safe to do this
+        tcksORPaths=sortedFiles
+        names=sortedNames
+            
+    #run the combine method/algorithm        
+    [outStatefulTractogram, streamsCounts]=combineTracts(tcksORPaths)
+    indexVec=[]
+    for iterator, iCounts in enumerate(streamsCounts):
+        indexVec.extend([iterator+1]*iCounts)
+        
+    wmc_Dict={}
+    wmc_Dict['names']=names
+    wmc_Dict['index']=indexVec
+    
+    return outStatefulTractogram, wmc_Dict
+    
+
 def wmc2tracts(inputTractogram,classification,outdir):
     """wmc2tracts(trk_file,classification,outdir):
      convert a wmc .mat + tract input into separate files for tracts 
@@ -774,7 +862,60 @@ def wmc2tracts(inputTractogram,classification,outdir):
         print('saving '+ str(len(idx_tract)) + ' streamlines for' + t_name+ ' to')
         print(out_filename)
         stubbornSaveTractogram(inputTractogram.streamlines[idx_tract],out_filename)
-        
+  
+def matWMC2dict(classification):
+    """
+    "wmc2tracts(trk_file,classification,outdir):
+     convert a .mat wmc to a dict / .json variant
+    based on @giulia-berto's
+ https://github.com/FBK-NILab/app-classifyber-segmentation/blob/1.3/wmc2trk.py
+
+    Parameters
+    ----------
+
+    classification : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    wmc_Dict: a dictionary object with "names" and "index" field, in accordance
+    with the wmc datatype
+    https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b/readme
+
+
+    """
+    from scipy.io import loadmat
+    import json
+    import numpy as np
+    
+    if isinstance(classification,str):
+        print('loading .mat input')
+        #load the .mat object
+        classification=loadmat(classification)
+        #it comes back as an eldridch horror, so parse it appropriately
+        #get the index vector
+    print('digesting .mat object')
+    indices=classification['classification'][0][0]['index'][0]
+        #get the names vector
+    tractIdentities=[str(iIdenties) for iIdenties in classification['classification'][0][0][0][0]]
+    tractNames=[]
+    for tractID in range(len(tractIdentities)):
+        #remove unncessary characters, adds unnecessary '[]'
+        t_name = tractIdentities[tractID][2:-2]
+        #standard practice: get rid of all spaces
+        tractNames.append(t_name.replace(' ', '_'))
+        #also consider using this opportunity to fix/enforce naming conventions
+    
+    
+     #create the dictionary object 
+    wmc_Dict={}
+    wmc_Dict['names']=tractNames
+    wmc_Dict['index']=indices.tolist()
+
+    print('input classification structure represents ' + str(len(wmc_Dict['names'])) + ' structures composed of ' + str(np.sum(np.greater(wmc_Dict['index'],0))) + ' out of ' + str(len(indices)) + 'total available streamlines.')
+    
+    return wmc_Dict        
+  
 def matWMC2jsonWMC(classification):
     """
     "wmc2tracts(trk_file,classification,outdir):

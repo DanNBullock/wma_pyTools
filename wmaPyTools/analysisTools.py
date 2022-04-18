@@ -9,13 +9,17 @@ def streamGeomQuantifications(tractogram):
     This function quantifies a number of streamline-based quantities
     in the same fashion as wma_tools's  ConnectomeTestQ
     
+    Note: this is iterating across streamlines, and so it is quantifying
+    properties that individual *streamlines* can have.  Tract properties would
+    be require a collection of such streamlines.
+    
     see https://github.com/DanNBullock/wma_tools#connectometestq
     for more details.
 
     Parameters
     ----------
     tractogram : TYPE
-        An input stateful tractogram
+        An input stateful tractogram or streamlines
 
     Returns
     -------
@@ -31,7 +35,15 @@ def streamGeomQuantifications(tractogram):
     #begin the iteration
     from dipy.tracking.streamline import length
     import math
-    for iStreamlines in tractogram.streamlines:
+    
+    #pull out the streamlines if necessary
+    if hasattr(tractogram,'streamlines'):
+        currentStreams=tractogram.streamlines
+    else:
+        #guess we're just assuming it's ready to go
+        currentStreams=tractogram
+    
+    for iStreamlines in currentStreams:
         #compute lengths
         streamLength=length(iStreamlines)
         firstHalfLength=length(iStreamlines[1:int(round(len(iStreamlines)/2)),:])
@@ -46,12 +58,28 @@ def streamGeomQuantifications(tractogram):
         efficiencyRatio=displacement/streamLength
         asymetryRatio=np.square((firstHalfDisp/firstHalfLength)-(secondHalfDisp/secondHalfLength))
         bioPriorCost=1/(1-asymetryRatio)
+    
+        
+        
         
         #append to dataframe
         rowVector=[streamLength, displacement, efficiencyRatio, asymetryRatio, bioPriorCost]
         rowAsSeries = pd.Series(rowVector, index = quantificationTable.columns)
         quantificationTable.append(rowAsSeries,ignore_index=True)
+        
     return quantificationTable
+
+def singleTractQuantifyProperties(tractStreams):
+    import wmaPyTools.streamlineTools 
+    
+    
+    if hasattr(tractStreams,'streamlines'):
+        currentStreams=tractStreams.streamlines
+    else:
+        #guess we're just assuming it's ready to go
+        currentStreams=tractStreams
+
+    currentStreams=orientTractUsingNeck_Robust(currentStreams)
 
 def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
     """endpointDispersionMapping(streamlines,referenceNifti,distanceParameter)
