@@ -961,7 +961,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
     """
     
     import numpy as np
-    from warnings import warning
+    from warnings import warn
     #determine whether the input vector is bool or indexes
     uniqueInputVals=np.unique(boolOrIndexesIn)
     #if the unique values are limited to some combination of ones and zeros
@@ -983,7 +983,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
         wmc_Dict['names']=[]
         #if there is a valid streamline lenth, create a blank index structure
         if isinstance(streamlinesLength,int):
-            wmc_Dict['index']=np.zeros()
+            wmc_Dict['index']=np.zeros(streamlinesLength)
         else:
             raise ValueError('Input indexes do not indicate TOTAL number of streamlines in input tract \ncCan not create new wmc structure without this information.')
         
@@ -994,11 +994,12 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
         wmc_Dict['index'][currentIndexes]=1
     
     else:
+        wmc_Dict=existingClassification
         #check to see if the name is already in there
         #if it is...
         if name in wmc_Dict['names']:
             #throw a warning that you're about to overwrite that listing
-            warning('Input name ' + name + ' detected in input classification structure \nOverwriting previous record(s)')
+            warn('Input name ' + name + ' detected in input classification structure \nOverwriting previous record(s)')
             #we have to add one because we can't use 0 indexing
             currentIndex=wmc_Dict['names'].index(name)+1
             #find the locations of where this is
