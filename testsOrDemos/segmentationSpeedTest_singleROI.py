@@ -1,6 +1,14 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
 """
+A test comparing standard DIPY select_by_rois to WMA_pyFuncs.segmentTractMultiROI
+and WMA_pyFuncs.segmentTractMultiROI_NaiveDIPY
+which utilizes a number of shortcuts to acheive a ~.5-1 order of magnitude
+speedup
+
+This particular test looks at the comparison in the particular case of a single
+ROI
+
 Created on Thu Oct  7 15:09:31 2021
 
 @author: dan
@@ -13,6 +21,10 @@ import time
 import pandas as pd
 import dipy.tracking.utils as ut
 import random
+
+#you'll need to be in the right directory for this to work
+import wmaPyTools.roiTools
+import wmaPyTools.segmentationTools
 
 # esablish path to tractogram
 pathToTestTractogram = '/media/dan/storage/data/exploreTractography/test_1M_1.tck'
@@ -30,7 +42,7 @@ imgSpaceTractVoxels = np.array(np.where(tractMask)).T
 subjectSpaceTractCoords = nib.affines.apply_affine(testT1.affine, imgSpaceTractVoxels)
 
 # create a dataframe for the output
-outputDataframe=pd.DataFrame(columns=['dipyTime','modifiedTime','dipyCount','modifiedCount','testRadius'])
+outputDataframe=pd.DataFrame(columns=['dipyTime','modifiedTime','dipyCount','modifiedCount','testRadius','operation'])
 
 #arbitrarily set the number of rois per test.
 #Increasing this beyond 2 isn't that helpful because its highly unlikely that 
@@ -52,7 +64,7 @@ for iTests in list(range(1,20)):
         # NOTE: This could be on the edge or deep in the tractogram
         testCentroid = subjectSpaceTractCoords[np.random.randint(0,len(subjectSpaceTractCoords))]
         # obtain that data array as bool
-        sphereNifti=createSphere(testRadius, testCentroid, testT1)
+        sphereNifti=wmaPyTools.roiTools.createSphere(testRadius, testCentroid, testT1)
         # add that and a True to the list vector for each
         roisData.append(sphereNifti.get_fdata().astype(bool))
         roisNifti.append(sphereNifti)
@@ -64,8 +76,7 @@ for iTests in list(range(1,20)):
     t1_start=time.process_time()
     # specify segmentation
     dipySegmented=ut.near_roi(testTractogram.streamlines, testT1.affine, roisData[0], mode='any')
-    # actually perform segmentation and get count (cant do indexes here for whatever reason)
-    if [include[0]]:
+    if include[0]:
         dipyCount=np.sum(dipySegmented)
     else:
         dipyCount=np.sum(np.logical_not(dipySegmented))
@@ -77,7 +88,7 @@ for iTests in list(range(1,20)):
     #restart time
     t1_start=time.process_time()
     #perform segmentation again, but with the modified version
-    modifiedSegmented=segmentTractMultiROI(testTractogram.streamlines, roisNifti, include, operations)
+    modifiedSegmented=wmaPyTools.segmentationTools.segmentTractMultiROI(testTractogram.streamlines, roisNifti, include, operations)
     # stop time
     t1_stop=time.process_time()
     # get the elapsed time
@@ -91,3 +102,6 @@ for iTests in list(range(1,20)):
     outputDataframe.at[iTests,'dipyCount']=dipyCount
     outputDataframe.at[iTests,'modifiedCount']=modifiedCount
     outputDataframe.at[iTests,'testRadius']=testRadius
+    outputDataframe.at[iTests,'operation']=include
+    
+outputDataframe.to_csv('singleROI.csv')
