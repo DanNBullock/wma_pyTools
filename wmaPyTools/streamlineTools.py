@@ -770,6 +770,8 @@ def inputTcks_to_WMCandTCK(tcksORPaths,names=None):
     if names==None:
         names=[[] for iInputs in tcksORPaths]
         meaningfulNamesFlag=np.any([isinstance(itcksORPaths,str) for itcksORPaths in tcksORPaths])
+        #but names weren't provided
+        namesProvidedFlag=False
         #I don't know what to do in mixed cases
         #because of combineTracts(tractsORstreamlines), all we need is names
         for iterator,itcksORPaths in enumerate(tcksORPaths):
@@ -914,7 +916,108 @@ def matWMC2dict(classification):
 
     print('input classification structure represents ' + str(len(wmc_Dict['names'])) + ' structures composed of ' + str(np.sum(np.greater(wmc_Dict['index'],0))) + ' out of ' + str(len(indices)) + 'total available streamlines.')
     
-    return wmc_Dict        
+    return wmc_Dict
+
+def updateClassification(boolOrIndexesIn,name,existingClassification=None):
+    """
+    Updates or creates a dict-based wmc-type classification structure.
+        See link below for format specification:
+        https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b/readme. 
+
+    Parameters
+    ----------
+    boolOrIndexesIn : Bool or list/array of INTs
+        Either a boolean vector or a list/array of ents.  The entries in this
+        input are presumed to indicate the streamlines corresponding to the
+        identity specified in the "name" input.
+    name : string
+        The name corresponding to the current structure.  This identity is
+        ascribed to the streamlines specified in the "boolOrIndexesIn" input.
+    existingClassification : dict, optional
+        A dictionary object with "names" and "index" field, in accordance
+        with the wmc datatype
+        https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b/readme. 
+        If one is not provided, an attempt to create a new one will be made.
+        The default is None.
+
+    Raises
+    ------
+    ValueError
+        Will throw an error if you ask it to create a new classification
+        while inputting only indexes.  The lenght of the source tractogram
+        cannot be inferred from such information.
+        
+    Warning
+        Will throw a warning if you enter a name that already exists in the 
+        classification.  Then will overwrite those entries.
+
+    Returns
+    -------
+    wmc_Dict : dict
+        A dictionary object with "names" and "index" field, in accordance
+        with the wmc datatype
+        https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b/readme
+
+    """
+    
+    import numpy as np
+    from warnings import warning
+    #determine whether the input vector is bool or indexes
+    uniqueInputVals=np.unique(boolOrIndexesIn)
+    #if the unique values are limited to some combination of ones and zeros
+    if np.any([uniqueInputVals==[0,1], uniqueInputVals==[1],uniqueInputVals==[0]]):
+        #its a bool
+        #for the sake of expediency and standardization, lets get the length
+        #and convert this to indexes
+        currentIndexes=np.where(boolOrIndexesIn)[0]
+        streamlinesLength=len(boolOrIndexesIn)
+    else:
+        #otherwise, they are indexes 
+        currentIndexes=boolOrIndexesIn
+        streamlinesLength=None 
+    
+    #determine if input classification exists
+    if existingClassification==None:
+        #need to make a new one
+        wmc_Dict={}
+        wmc_Dict['names']=[]
+        #if there is a valid streamline lenth, create a blank index structure
+        if isinstance(streamlinesLength,int):
+            wmc_Dict['index']=np.zeros()
+        else:
+            raise ValueError('Input indexes do not indicate TOTAL number of streamlines in input tract \ncCan not create new wmc structure without this information.')
+        
+        #now that we have sorted that out, we can add the name and set the indexes
+        wmc_Dict['names'].append(name)
+        #because we are creating this new, it is safe to assume that the new
+        #index for this name is 1
+        wmc_Dict['index'][currentIndexes]=1
+    
+    else:
+        #check to see if the name is already in there
+        #if it is...
+        if name in wmc_Dict['names']:
+            #throw a warning that you're about to overwrite that listing
+            warning('Input name ' + name + ' detected in input classification structure \nOverwriting previous record(s)')
+            #we have to add one because we can't use 0 indexing
+            currentIndex=wmc_Dict['names'].index(name)+1
+            #find the locations of where this is
+            currentIndexMatches=wmc_Dict['index']==currentIndex
+            #reset those entries to 0
+            wmc_Dict['index'][currentIndexMatches]=0
+            #now set the index entries with the current information
+            wmc_Dict['index'][currentIndexes]=currentIndex
+        #otherwise
+        else:
+            #add it to the list of names 
+            wmc_Dict['names'].append(name)
+            #get the new lenght of this vector
+            #we don't need to add 1 because length reflects appropriate index
+            currentIndex=len(wmc_Dict['names'])
+            wmc_Dict['index'][currentIndexes]=currentIndex
+            
+    return wmc_Dict
+    
   
 def matWMC2jsonWMC(classification):
     """
