@@ -386,7 +386,7 @@ def multiTileOverlay_wrap(overlayNifti,refAnatT1,saveDir,figName,noEmpties=True,
         if postClean:
             [os.remove(ipaths) for ipaths in sorted(glob(os.path.join(saveDir,dimStem+'_*.png')))]    
         
-def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
+def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,noEmpties=True):
     """
     
 
@@ -426,6 +426,9 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
     
     #get tract density nifti
     tractDensityNifti=ut.density_map(streamlines, refAnatT1.affine, refAnatT1.shape)
+    #apply the density threshold
+    tractDensityNifti[tractDensityNifti<(densityThreshold*np.max(tractDensityNifti))]=0
+    #regenerate the nifti
     densityNifti = nib.nifti1.Nifti1Image(tractDensityNifti, refAnatT1.affine, refAnatT1.header)
     
     #RAS reoreintation
@@ -518,20 +521,29 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,noEmpties=True):
             
             plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='antialiased',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
             curFig=plt.gcf()
+            yLims=sorted(curFig.gca().get_ylim())
+            xLims=sorted(curFig.gca().get_xlim())
+            #this changes the resolution of the figure itself, and breaks everything
+            #fix later
+            
+            #also, it's all wonky, so the min and max as well as axis orienations are flipped
+            curFig.gca().text((yLims[1])*.02, (yLims[1])*.08, dimsList[iDims] + ' = ' + str(np.round(subjectSpaceSlices[iSlices],1)), color='white', fontsize=15)
+            # bbox={'facecolor': 'white', 'alpha': 1, 'pad': 10})
+            
+            #be careful here, modifying the cbaxes  modifies the current figure
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
             plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
             
+            
             #put some text about the current dimension and slice
-            yLims=curFig.gca().get_ylim()
-            #xLims=curFig.gca().get_xlim()
-            #this changes the resolution of the figure itself, and breaks everything
-            #fix later
-            # curFig.gca().text(0, yLims[0]-1, dimsList[iDims] + ' = ' + str(subjectSpaceSlices[iSlices]),
-            # bbox={'facecolor': 'white', 'alpha': 1, 'pad': 10})
-
+        
+            
+            
             
             curFig.gca().yaxis.set_ticks_position('left')
-            curFig.gca().tick_params( colors='white')
+            curFig.gca().tick_params(colors='white')
+            
+            
             # we use *2 in order to afford room for the subsequent blended images
             figName='dim_' + str(iDims) +'_'+  str(iSlices*2).zfill(3)+'.png'
             plt.savefig(figName,bbox_inches='tight',pad_inches=0.0)
@@ -2127,14 +2139,36 @@ def colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWi
     
     return streamColors, colorLut
 
-def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=None,outdir=None,tractName=None):
+def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=None,outdir=None,tractName=None,makeGifs=True,makeTiles=True,makeFingerprints=True,makeSpagetti=True):
     """
-    
+    Create any number of image plots for the input collection of streamlines
 
     Parameters
     ----------
-    streamlines : TYPE
-        DESCRIPTION.
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence
+        A collection of streamlines presumably corresponding to a tract.
+        Unknown functionality if a random collection of streamlines is used
+    atlas : nifti1.Nifti1Image, optionalp
+        An atlas parcellation nifti which will be used in the relevant visualizations.
+        The default is None.
+    atlasLookupTable : atlasLookupTable : pandas dataframe or file loadable to pandas dataframe, optional
+        A dataframe of the atlas lookup table which includes the labels featured
+        in the atlas and their identities.  These identities will be used
+        to label the relevant plot elements. The default is None.
+    refAnatT1 : TYPE, optional
+        DESCRIPTION. The default is None.
+    outdir : TYPE, optional
+        DESCRIPTION. The default is None.
+    tractName : TYPE, optional
+        DESCRIPTION. The default is None.
+    makeGifs : TYPE, optional
+        DESCRIPTION. The default is True.
+    makeTiles : TYPE, optional
+        DESCRIPTION. The default is True.
+    makeFingerprints : TYPE, optional
+        DESCRIPTION. The default is True.
+    makeSpagetti : TYPE, optional
+        DESCRIPTION. The default is True.
 
     Returns
     -------
@@ -2145,10 +2179,13 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     import os
     import numpy as np
     import wmaPyTools.streamlineTools  
-    
+    from warnings import warning
+
     if isinstance(streamlines,str):
         streamlinesLoad=nib.streamlines.load(streamlines)
         streamlines=streamlinesLoad.streamlines
+    #orient them for plotting
+    streamlines=wmaPyTools.streamlineTools.orientAllStreamlines(streamlines)
         
     if isinstance(refAnatT1,str):
         refAnatT1=nib.load(refAnatT1)
@@ -2160,35 +2197,119 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     if tractName==None:
         tractName=str(len(streamlines))+'_streamsTract'
     
-    #determine whether te input streamlines are a coherent bundle
-    neckQuantifications=wmaPyTools.streamlineTools.bundleTest(streamlines)
+    if  makeSpagetti:
+        #plots currently work better without reference T1
+        print('creating anatomy plot')
+        streamsPlotPathName=os.path.join(outdir,'streamsPlot',tractName+'streams')
+        #make it if necessary
+        if not os.path.exists(os.path.join(outdir,'streamsPlot')):
+            os.makedirs(os.path.join(outdir,'streamsPlot'))
+        dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=streamsPlotPathName, parcNifti=atlas)
+        #dipyPlotTract(streamlines,refAnatT1=refAnatT1, tractName=os.path.join(outdir,tractName))
     
-    # if neckQuantifications['mean'] <8:
-    #     print('submitted streamlines appear to be coherent bundle via neck criterion')
-    #     streamlines=wmaPyTools.streamlineTools.orientTractUsingNeck(streamlines)
-    # else:
-    #     print('submitted streamlines DO NOT appear to be coherent bundle via neck criterion')
-    #     streamlines=wmaPyTools.streamlineTools.dipyOrientStreamlines(streamlines)
-    
-    # streamlines=wmaPyTools.streamlineTools.orientAllStreamlines(streamlines)
-    
-    #plots currently work better without reference T1
-    print('creating anatomy plot')
-    dipyPlotTract(streamlines,refAnatT1=refAnatT1, tractName=os.path.join(outdir,tractName))
+    if  makeFingerprints:   
     #we use the group variant because it normalizes by proportion and splits out the endpoints into common and uncommon 
-    #if an atlas + lookup table isn't provided, skip this
-    if np.logical_not(np.logical_or(atlas==None,atlasLookupTable==None)):
-        print('creating endpoint fingerprint plot')
-        radialTractEndpointFingerprintPlot_MultiSubj([streamlines, streamlines],[atlas, atlas],atlasLookupTable,tractName=tractName,saveDir=outdir)
+        #if an atlas + lookup table isn't provided, skip this
+        if np.logical_not(np.logical_or(atlas==None,atlasLookupTable==None)):
+            print('creating endpoint fingerprint plot')
+            #set out dir
+            fingerprintPlotDir=os.path.join(outdir,'fingerprintPlot')
+            #make it if necessary
+            if not os.path.exists(fingerprintPlotDir):
+                os.makedirs(fingerprintPlotDir)
+            
+            radialTractEndpointFingerprintPlot_Norm(streamlines,atlas,atlasLookupTable,tractName=tractName,forcePlotLabels=None,saveDir=fingerprintPlotDir,color=False)
+            #radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',forcePlotLabels=None,saveDir=None,color=False)
+            #radialTractEndpointFingerprintPlot_MultiSubj([, streamlines],[atlas, atlas],atlasLookupTable,tractName=tractName,saveDir=outdir)
+        else:
+            warning('Unable to produce fingerprint plots due to lack of appropriate inputs')
+            
+    #do the cross section gif if a reference anatomy has been provided and requested
+    if makeGifs:
+        if np.logical_not(refAnatT1==None):
+            print('creating cross section density gifs')
+            #set out dir
+            gifsDir=os.path.join(outdir,'gifs')
+            #make it if necessary
+            if not os.path.exists(gifsDir):
+                os.makedirs(gifsDir)
+            densityGifsOfTract(streamlines,refAnatT1,saveDir=gifsDir,tractName=tractName)
+        else:
+            warning('Unable to produce density gif plots due to lack of appropriate inputs')
+
+    if makeTiles: 
+        print('creating multi-tile density plots')
+        if np.logical_not(refAnatT1==None):
+            #set out dir
+            multiTileDir=os.path.join(outdir,'multiTiles')
+            #make it if necessary
+            if not os.path.exists(multiTileDir):
+                os.makedirs(multiTileDir)
+            multiTileDensity(streamlines,refAnatT1,multiTileDir,tractName,noEmpties=True)
+        else:
+            warning('Unable to produce multi-tile density plots due to lack of appropriate inputs')
+            
+    print('Plotting for ' + tractName + ' complete.')
     
-    #do the cross section gif if a reference anatomy has been provided
-    # if np.logical_not(refAnatT1==None):
-    #     print('creating cross section density gifs')
-    #     densityGifsOfTract(streamlines,refAnatT1,saveDir=outdir,tractName=tractName)
+def jsonFor_multiPlotsForTract(saveDir,tractName=None,makeGifs=True,makeTiles=True,makeFingerprints=True,makeSpagetti=True):
     
-    multiTileDensity(streamlines,refAnatT1,outdir,tractName,noEmpties=True)
+    import copy
+    import os
+    #Soichi example:
+    #{ "images": [ 
+    #               { "filename": "images/brainmask.svg", "name": "brainmask", "desc": "TODO" },
+    #               { "filename": "images/carpetplot.svg", "name": "carpetplot", "desc": "TODO" },
+    #               { "filename": "images/sampling_scheme.gif", "name": "sampling_scheme", "desc": "TODO" }
+    #            ]
+    #}    
     
     
+    #create a list to hold the fig info
+    figInfoList=[]
+    blankFigInfo={'filename': '',"name": '','desc': ''}
+    
+    #create a list for convenience
+    dimLabels=['x','y','z']
+    
+    if makeGifs:
+        gifDirStem=os.path.join(saveDir,tractName,'gifs')
+        for iDims in range(3):
+            currFigInfo=copy.deepcopy(blankFigInfo)
+            currFigInfo['filename']=os.path.join(gifDirStem + 'dim_'+str(iDims)+'.gif') 
+            currFigInfo['name']='dim_'+str(iDims)
+            currFigInfo['desc']='gif of streamline density as viewed by moving through the '+ dimLabels[iDims] +' dimension.'
+            figInfoList.append(currFigInfo)
+    if makeTiles:
+        tileDirStem=os.path.join(saveDir,tractName,'multiTiles')
+        for iDims in range(3):
+            currFigInfo=copy.deepcopy(blankFigInfo)
+            currFigInfo['filename']=os.path.join(tileDirStem + 'dim_'+str(iDims)+'.png') 
+            currFigInfo['name']='dim_'+str(iDims)
+            currFigInfo['desc']='tiled images of streamline density as viewed by moving through the '+ dimLabels[iDims] +' dimension.'
+            figInfoList.append(currFigInfo)
+    
+    if makeFingerprints:
+        fingerprintDirStem=os.path.join(saveDir,tractName,'fingerprint')
+        currFigInfo=copy.deepcopy(blankFigInfo)
+        currFigInfo['filename']=os.path.join(fingerprintDirStem, tractName+'_endpointFingerprint_Normed.svg') 
+        currFigInfo['name']=tractName+'_endpointFingerprint_Normed'
+        currFigInfo['desc']='Normed (by count) proportion of streamlines in the RAS and LPI endpoint clusters, divided into common (>1%) and uncommon (<1%) categories.'
+        figInfoList.append(currFigInfo)
+    
+    if makeSpagetti:
+        streamsPlotDirStem=os.path.join(saveDir,tractName,'streamsPlot')
+        currFigInfo=copy.deepcopy(blankFigInfo)
+        currFigInfo['filename']=os.path.join(streamsPlotDirStem, tractName+'.png') 
+        currFigInfo['name']=tractName+'.png'
+        currFigInfo['desc']='Streamline plot of ' + tractName + ', with stream body colors corresponding to proximity to endpoint cluster & distance from "neck", and endpoints colored either corresponding to atlas terminations or density'
+        figInfoList.append(currFigInfo)
+    
+    #make a new dictionary
+    outDict={}
+    outDict['images']=figInfoList
+    
+    return outDict
+
         
 def plotFullyConnectedRelations(squareformDistTable):
     """
@@ -2240,7 +2361,7 @@ def plotFullyConnectedRelations(squareformDistTable):
     
     return fig,axes
 
-def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,outDir,threshold=.01):
+def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,outDir,proportionThreshold=.01,densityThreshold=0):
     
     from dipy.tracking import utils
     import numpy as np
@@ -2271,6 +2392,8 @@ def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,ou
     #iterate across both sets of endpoints
     for iIndexes,iPairs in enumerate(keyTargets):
         #get the indexes of the relevant streams
+        print('visualising ROI ' + str(iPairs[0]) + ' to ROI ' + str(iPairs[1])  )
+        
         currentStreams=grouping[iPairs]
         name1=reducedLookupTable[nameColumnGuess].iloc[iPairs[0]]
         name2=reducedLookupTable[nameColumnGuess].iloc[iPairs[1]]
@@ -2278,5 +2401,5 @@ def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,ou
         tckName=name1+'_TO_'+name2
         # implement the thresholding
         currentProportion=len(currentStreams)/len(streamlines)
-        if currentProportion >=  threshold: 
-           multiTileDensity(streamlines[currentStreams],refAnatT1,saveDir,tckName,noEmpties=True)
+        if currentProportion >=  proportionThreshold: 
+           multiTileDensity(streamlines[currentStreams],refAnatT1,saveDir,tckName,densityThreshold,noEmpties=True)
