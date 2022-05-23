@@ -302,7 +302,7 @@ def multiROIrequestToMask(atlas,roiNums,inflateIter=0):
 
     Parameters
     ----------
-    atlas : TYPE
+    atlas : nifti1.Nifti1Image
         an atlas nifti from which the selected labels will be extracted and
         turned into a nifti ROI mask.
     roiNums : TYPE
@@ -586,6 +586,42 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     #consider throwing an error here if the output Nifti is empty
     
     return remainingROI
+
+def pointCoordsToNIFTI(coords,refNifti,radius=None):
+    
+    from dipy.core.geometry import dist_to_corner
+    import nibabel as nib
+    import numpy as np
+    #get a blank nifti for these coords
+    blankNiftiData=np.zeros(refNifti.shape, dtype=int)
+    
+    # import dipy.tracking.utils as ut
+    # lin_T, offset =ut._mapping_to_voxel(refNifti.affine)
+    # inds = ut._to_voxel_coordinates(coords, lin_T, offset)
+    
+    # #iterate across the coords and add +1 to the nifti for each coord.
+    # for iCoords in inds:
+    #     #do i have to index like this?  I can't remember
+    #     blankNiftiData[iCoords[0],iCoords[1],iCoords[2]]=blankNiftiData[iCoords[0],iCoords[1],iCoords[2]]+1
+    
+    #or
+    
+    #set the radius to the min val 
+    if radius==None:
+        #radius=dist_to_corner(refNifti.affine)
+        radius=0
+    
+    print ('creating amalgamated ROI for ' + str (len(coords)) + ' coordinates using a ' +str(radius) + ' mm radius')
+    
+    for iCoords in coords:
+        currentSphere=createSphere(radius, iCoords, refNifti, supress=True)
+        blankNiftiData=np.add(blankNiftiData,currentSphere.get_data())
+        
+    #create the output nifti
+    outNifti=nib.nifti1.Nifti1Image(blankNiftiData, refNifti.affine, header=refNifti.header)
+    
+    return outNifti
+    
 
 def alignROItoReference(inputROI,reference):
     """
