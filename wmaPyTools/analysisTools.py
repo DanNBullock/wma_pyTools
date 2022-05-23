@@ -10,8 +10,9 @@ def streamGeomQuantifications(tractogram):
     in the same fashion as wma_tools's  ConnectomeTestQ
     
     Note: this is iterating across streamlines, and so it is quantifying
-    properties that individual *streamlines* can have.  Tract properties would
-    be require a collection of such streamlines.
+    properties that individual *streamlines* can have.  _Tract properties_ would
+    be those propwerties that could be ascribed to a collection of streamlines,
+    and would thus require a collection of such streamlines.
     
     see https://github.com/DanNBullock/wma_tools#connectometestq
     for more details.
@@ -79,7 +80,12 @@ def singleTractQuantifyProperties(tractStreams):
         #guess we're just assuming it's ready to go
         currentStreams=tractStreams
 
-    currentStreams=orientTractUsingNeck_Robust(currentStreams)
+    currentStreams=wmaPyTools.streamlineTools.orientTractUsingNeck_Robust(currentStreams)
+    
+    #get the endpoints
+    wmaPyTools.streamlineTools.downsampleToEndpoints(currentStreams)
+    
+    
 
 def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
     """endpointDispersionMapping(streamlines,referenceNifti,distanceParameter)
@@ -1871,7 +1877,7 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable,reductionFactor=None):
     else:
         return voxelIndexes, cosineDistanceMatrix
     
-def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,outDir,threshold=.01,separate=False):
+def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,outDir,proportionThreshold=.01,densityThreshold=0,separate=False):
     
     from dipy.tracking import utils
     import numpy as np
@@ -1924,9 +1930,11 @@ def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,out
             #create out dataframe
             #outDataframe.loc[iIndexes]=[tckName,len(currentStreams)]
             
-            if currentProportion >=  threshold: 
+            if currentProportion >=  proportionThreshold: 
                 print(tckName)
                 densityMap=utils.density_map(streamlines[currentStreams], refAnatT1.affine, refAnatT1.shape)
+                #ap
+                densityMap[densityMap<(densityThreshold*np.max(densityMap))]=0
                 #densityHolder[:,:,:,iIndexes]=densityMap
                 outDataframe.loc[len(outDataframe)]=[tckName,len(currentStreams)]
                 densityHolder.extend([densityMap])
@@ -1952,9 +1960,12 @@ def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,out
             #create out dataframe
             #outDataframe.loc[iIndexes]=[tckName,len(currentStreams)]
             
-            if currentProportion >=  threshold: 
+            if currentProportion >=  proportionThreshold: 
                 print(tckName)
                 densityMap=utils.density_map(streamlines[currentStreams], refAnatT1.affine, refAnatT1.shape)
+                #densityHolder[:,:,:,iIndexes]=densityMap
+                densityMap[densityMap<(densityThreshold*np.max(densityMap))]=0
+                
                 #densityHolder[:,:,:,iIndexes]=densityMap
                 #outDataframe.loc[len(outDataframe)]=[tckName,len(currentStreams)]
                 #densityHolder.extend([densityMap])
