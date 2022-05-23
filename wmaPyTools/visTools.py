@@ -2179,7 +2179,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     import os
     import numpy as np
     import wmaPyTools.streamlineTools  
-    from warnings import warning
+    from warnings import warn
 
     if isinstance(streamlines,str):
         streamlinesLoad=nib.streamlines.load(streamlines)
@@ -2210,7 +2210,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
     if  makeFingerprints:   
     #we use the group variant because it normalizes by proportion and splits out the endpoints into common and uncommon 
         #if an atlas + lookup table isn't provided, skip this
-        if np.logical_not(np.logical_or(atlas==None,atlasLookupTable==None)):
+        if np.logical_and(np.any(atlas),np.any(atlasLookupTable)):
             print('creating endpoint fingerprint plot')
             #set out dir
             fingerprintPlotDir=os.path.join(outdir,'fingerprintPlot')
@@ -2222,11 +2222,11 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
             #radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,tractName='tract',forcePlotLabels=None,saveDir=None,color=False)
             #radialTractEndpointFingerprintPlot_MultiSubj([, streamlines],[atlas, atlas],atlasLookupTable,tractName=tractName,saveDir=outdir)
         else:
-            warning('Unable to produce fingerprint plots due to lack of appropriate inputs')
+            warn('Unable to produce fingerprint plots due to lack of appropriate inputs')
             
     #do the cross section gif if a reference anatomy has been provided and requested
     if makeGifs:
-        if np.logical_not(refAnatT1==None):
+        if  not np.logical_or(refAnatT1=='',refAnatT1==None):
             print('creating cross section density gifs')
             #set out dir
             gifsDir=os.path.join(outdir,'gifs')
@@ -2235,11 +2235,11 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
                 os.makedirs(gifsDir)
             densityGifsOfTract(streamlines,refAnatT1,saveDir=gifsDir,tractName=tractName)
         else:
-            warning('Unable to produce density gif plots due to lack of appropriate inputs')
+            warn('Unable to produce density gif plots due to lack of appropriate inputs')
 
     if makeTiles: 
         print('creating multi-tile density plots')
-        if np.logical_not(refAnatT1==None):
+        if  not np.logical_or(refAnatT1=='',refAnatT1==None):
             #set out dir
             multiTileDir=os.path.join(outdir,'multiTiles')
             #make it if necessary
@@ -2247,7 +2247,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
                 os.makedirs(multiTileDir)
             multiTileDensity(streamlines,refAnatT1,multiTileDir,tractName,noEmpties=True)
         else:
-            warning('Unable to produce multi-tile density plots due to lack of appropriate inputs')
+            warn('Unable to produce multi-tile density plots due to lack of appropriate inputs')
             
     print('Plotting for ' + tractName + ' complete.')
     
