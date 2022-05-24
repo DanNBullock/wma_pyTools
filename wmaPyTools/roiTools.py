@@ -202,6 +202,46 @@ def planeAtMaskBorder(inputMask,relativePosition):
     #return the planar roi you have created
     return outPlaneNifti
 
+def returnNiftiBounds(inputNifti):
+    """
+    Returns the subject space boundary coordinates of the input nifti.
+    
+
+    Parameters
+    ----------
+    inputNifti : nifti1.Nifti1Image
+        A nifti image from which you would like to obtain the subject-space
+        boundary coordinates
+
+    Returns
+    -------
+    boundingBox : np.array, 2x3
+        The first row (row 0) corresponds to the max dimension values,
+        while the second row (row 1) corresponds to the min dimension values.
+
+    """
+  
+    import itertools
+    import numpy as np
+    import nibabel as nib
+  
+    #obtain the nifti shape
+    niftiShape=inputNifti.shape
+    
+    #stack these alongside 0, the min bound in image space
+    imgBounds=np.vstack([np.asarray(niftiShape),[0,0,0]])
+    
+    #iterate to obtain all possible combinations
+    verticies=np.asarray(list(itertools.product(imgBounds[:,0], imgBounds[:,1], imgBounds[:,2])))
+   
+    #apply affine to obtain subject space coordinates
+    outCoordnates=nib.affines.apply_affine(inputNifti.affine,verticies)
+    
+    #find the min and max in each dimension, and stack acordingly
+    boundingBox=np.vstack([np.max(outCoordnates,axis=0),np.min(outCoordnates,axis=0)])
+    
+    return boundingBox
+
 def createSphere(r, p, reference, supress=True):
     """
     create a sphere of given radius at some point p in the brain mask

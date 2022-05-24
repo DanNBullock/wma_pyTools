@@ -481,10 +481,11 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
         # which may not be a good assumption if the orientation is weird
         if noEmpties:
             # + and - 1 in odrer to provide a pad
+            #NO PADDING, PADDING IS BAD
             if refAnatT1Resolution[iDims]<=overlayResolution[iDims]:
-                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims]-refAnatT1Resolution[iDims],streamDensityBoundCoords[1,iDims]+refAnatT1Resolution[iDims],refAnatT1Resolution[iDims])
+                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims],streamDensityBoundCoords[1,iDims],refAnatT1Resolution[iDims])
             else:
-                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims]-overlayResolution[iDims],streamDensityBoundCoords[1,iDims]+overlayResolution[iDims],overlayResolution[iDims])
+                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims],streamDensityBoundCoords[1,iDims],overlayResolution[iDims])
      
             
         #pick whichever input has the best resolution in this dimension
