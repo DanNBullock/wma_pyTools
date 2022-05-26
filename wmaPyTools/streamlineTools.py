@@ -911,7 +911,8 @@ def matWMC2dict(classification):
     tractNames=[]
     for tractID in range(len(tractIdentities)):
         #remove unncessary characters, adds unnecessary '[]'
-        t_name = tractIdentities[tractID][2:-2]
+        #this has been solved
+        #t_name = tractIdentities[tractID][2:-2]
         #standard practice: get rid of all spaces
         tractNames.append(t_name.replace(' ', '_'))
         #also consider using this opportunity to fix/enforce naming conventions
