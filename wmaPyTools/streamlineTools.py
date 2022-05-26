@@ -909,12 +909,12 @@ def matWMC2dict(classification):
         #this is... the worst thing ever
     tractIdentities=[str(iIdenties[0][0]) for iIdenties in classification['classification'][0][0]['names']]
     tractNames=[]
-    for tractID in range(len(tractIdentities)):
+    for iterator,inName in enumerate(tractIdentities):
         #remove unncessary characters, adds unnecessary '[]'
         #this has been solved
         #t_name = tractIdentities[tractID][2:-2]
         #standard practice: get rid of all spaces
-        tractNames.append(t_name.replace(' ', '_'))
+        tractNames.append(inName.replace(' ', '_'))
         #also consider using this opportunity to fix/enforce naming conventions
     
     
@@ -922,7 +922,8 @@ def matWMC2dict(classification):
     wmc_Dict={}
     wmc_Dict['names']=tractNames
     wmc_Dict['index']=indices.tolist()
-
+    #and the fix
+    wmc_Dict['names']=np.array(wmc_Dict['names'], dtype=np.object) 
     print('input classification structure represents ' + str(len(wmc_Dict['names'])) + ' structures composed of ' + str(np.sum(np.greater(wmc_Dict['index'],0))) + ' out of ' + str(len(indices)) + 'total available streamlines.')
     
     return wmc_Dict
