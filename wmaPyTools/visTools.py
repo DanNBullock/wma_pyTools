@@ -2205,7 +2205,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
         #make it if necessary
         if not os.path.exists(os.path.join(outdir,'streamsPlot')):
             os.makedirs(os.path.join(outdir,'streamsPlot'))
-        dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=streamsPlotPathName, parcNifti=atlas)
+        dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=streamsPlotPathName, parcNifti=None)
         #dipyPlotTract(streamlines,refAnatT1=refAnatT1, tractName=os.path.join(outdir,tractName))
     
     if  makeFingerprints:   
