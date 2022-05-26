@@ -987,7 +987,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
     if existingClassification==None:
         #need to make a new one
         wmc_Dict={}
-        wmc_Dict['names']=[]
+        
         #if there is a valid streamline lenth, create a blank index structure
         if isinstance(streamlinesLength,int):
             wmc_Dict['index']=np.zeros(streamlinesLength)
@@ -995,7 +995,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
             raise ValueError('Input indexes do not indicate TOTAL number of streamlines in input tract \ncCan not create new wmc structure without this information.')
         
         #now that we have sorted that out, we can add the name and set the indexes
-        wmc_Dict['names'].append(name)
+        wmc_Dict['names']=np.array([name])
         #because we are creating this new, it is safe to assume that the new
         #index for this name is 1
         wmc_Dict['index'][currentIndexes]=1
@@ -1008,7 +1008,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
             #throw a warning that you're about to overwrite that listing
             warn('Input name ' + name + ' detected in input classification structure \nOverwriting previous record(s)')
             #we have to add one because we can't use 0 indexing
-            currentIndex=wmc_Dict['names'].index(name)+1
+            currentIndex=np.where(wmc_Dict['names']==name)[0][0]+1
             #find the locations of where this is
             currentIndexMatches=wmc_Dict['index']==currentIndex
             #reset those entries to 0
@@ -1018,7 +1018,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
         #otherwise
         else:
             #add it to the list of names 
-            wmc_Dict['names'].append(name)
+            wmc_Dict['names']=np.append(wmc_Dict['names'],name)
             #get the new lenght of this vector
             #we don't need to add 1 because length reflects appropriate index
             currentIndex=len(wmc_Dict['names'])
