@@ -843,17 +843,19 @@ def wmc2tracts(inputTractogram,classification,outdir):
     
     if isinstance(classification,str):
         #load the .mat object
-        classification=loadmat(classification)
-        #it comes back as an eldridch horror, so parse it appropriately
-        #get the index vector
-        indices=classification['classification'][0][0]['index'][0]
-        #get the names vector
-        tractIdentities=[str(iIdenties) for iIdenties in classification['classification'][0][0][0][0]]
+        classification=matWMC2dict(classification)
+    else:
+        pass
+    
+    #it comes back as an eldridch horror, so parse it appropriately
+    #get the index vector
+    indices=classification['index']
+    #get the names vector
+    tractIdentities=classification['names']
     
     for tractID in range(len(tractIdentities)):
         #remove unncessary characters, adds unnecessary '[]'
-        t_name = tractIdentities[tractID][2:-2]
-        tract_name = t_name.replace(' ', '_')
+        tract_name = tractIdentities[tractID]
         idx_tract = np.array(np.where(indices==tractID+1))[0]
         
         #save it in the same format as the input
@@ -861,9 +863,14 @@ def wmc2tracts(inputTractogram,classification,outdir):
             out_filename=os.path.join(outdir,tract_name + '.tck')
         elif  isinstance(inputTractogram, nib.streamlines.trk.TrkFile):
             out_filename=os.path.join(outdir,tract_name + '.trk')
-        print('saving '+ str(len(idx_tract)) + ' streamlines for' + t_name+ ' to')
+        print('saving '+ str(len(idx_tract)) + ' streamlines for' + tract_name+ ' to')
         print(out_filename)
-        stubbornSaveTractogram(inputTractogram.streamlines[idx_tract],out_filename)
+        if isinstance( inputTractogram,nib.streamlines.array_sequence.ArraySequence):
+            #maybe they input just streamlines
+            stubbornSaveTractogram(inputTractogram[idx_tract],out_filename)
+        else:
+            #better hope its a stateful tractogram
+            stubbornSaveTractogram(inputTractogram.streamlines[idx_tract],out_filename)
   
 def matWMC2dict(classification):
     """
@@ -1017,6 +1024,10 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
             currentIndex=len(wmc_Dict['names'])
             wmc_Dict['index'][currentIndexes]=currentIndex
             
+    #BEFORE WE LEAVE THOUGH, we have to convert the list to an np array for some reason:
+    #https://stackoverflow.com/questions/7464632/python-to-mat-file-export-list-of-string-to-ordinar-matrix-of-chars-not-a-cell
+    
+    wmc_Dict['names']=np.array(wmc_Dict['names'], dtype=np.object)        
     return wmc_Dict
     
   
