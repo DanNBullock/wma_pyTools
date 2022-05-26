@@ -907,7 +907,7 @@ def matWMC2dict(classification):
     indices=classification['classification'][0][0]['index'][0]
         #get the names vector
         #this is... the worst thing ever
-    tractIdentities=[str(iIdenties[0][0]) for iIdenties in classification['classification'][0][0]['names']]
+    tractIdentities=[str(iIdenties[0]) for iIdenties in classification['classification'][0][0]['names'].flatten()]
     tractNames=[]
     for iterator,inName in enumerate(tractIdentities):
         #remove unncessary characters, adds unnecessary '[]'
