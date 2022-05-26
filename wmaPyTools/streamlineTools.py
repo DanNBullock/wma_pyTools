@@ -906,7 +906,8 @@ def matWMC2dict(classification):
     print('digesting .mat object')
     indices=classification['classification'][0][0]['index'][0]
         #get the names vector
-    tractIdentities=[str(iIdenties) for iIdenties in classification['classification'][0][0][0][0]]
+        #this is... the worst thing ever
+    tractIdentities=[str(iIdenties[0][0]) for iIdenties in classification['classification'][0][0]['names']]
     tractNames=[]
     for tractID in range(len(tractIdentities)):
         #remove unncessary characters, adds unnecessary '[]'
