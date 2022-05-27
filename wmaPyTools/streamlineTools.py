@@ -975,7 +975,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
     #determine whether the input vector is bool or indexes
     uniqueInputVals=np.unique(boolOrIndexesIn)
     #if the unique values are limited to some combination of ones and zeros
-    if np.any([uniqueInputVals==[0,1], uniqueInputVals==[1],uniqueInputVals==[0]]):
+    if np.any([np.array_equal(uniqueInputVals,[0,1]), np.array_equal(uniqueInputVals,[1]),np.array_equal(uniqueInputVals,[0])]):
         #its a bool
         #for the sake of expediency and standardization, lets get the length
         #and convert this to indexes
