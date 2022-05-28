@@ -1940,7 +1940,22 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     if isinstance(streamCmap, str):
         streamCmap = matplotlib.cm.get_cmap(streamCmap)
     if isinstance(neckCmap, str):
-        neckCmap = matplotlib.cm.get_cmap(neckCmap)
+        #sometimes twlight isn't avaialble.  lets think of a way around this.
+        try:
+            neckCmap = matplotlib.cm.get_cmap(neckCmap)
+        except:
+            neckCmap = matplotlib.cm.get_cmap(streamCmap)
+            #create a linspace to index into colormap
+            linspaceFill=np.linspace(0.0, 1.0, 255)
+            #use it to extract a temp colormap
+            tempColormap=neckCmap(linspaceFill)
+            #roll it by half
+            cycleRollColormap=np.roll(tempColormap,int(len(tempColormap) *.5),axis=0)
+            #now do the devilishly clever thing of flipping, adding and averaging the new colormap
+            doubleAvgCmap=np.divide(np.add(np.flip(cycleRollColormap,axis=0),cycleRollColormap),2)
+            #use that to create a new colormap           
+            neckCmap=matplotlib.colors.LinearSegmentedColormap.from_list('cycle_'+streamCmap,doubleAvgCmap,len(doubleAvgCmap))
+            
     if isinstance(endpointCmaps[0], str):
         endpointCmap1 = matplotlib.cm.get_cmap(endpointCmaps[0])
         endpointCmap2 = matplotlib.cm.get_cmap(endpointCmaps[1])
