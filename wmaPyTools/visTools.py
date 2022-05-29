@@ -1937,8 +1937,6 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     import wmaPyTools.streamlineTools
     import matplotlib
     import numpy as np
-    if isinstance(streamCmap, str):
-        streamCmap = matplotlib.cm.get_cmap(streamCmap)
     if isinstance(neckCmap, str):
         #sometimes twlight isn't avaialble.  lets think of a way around this.
         try:
@@ -1955,7 +1953,9 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
             doubleAvgCmap=np.divide(np.add(np.flip(cycleRollColormap,axis=0),cycleRollColormap),2)
             #use that to create a new colormap           
             neckCmap=matplotlib.colors.LinearSegmentedColormap.from_list('cycle_'+streamCmap,doubleAvgCmap,len(doubleAvgCmap))
-            
+    if isinstance(streamCmap, str):
+        streamCmap = matplotlib.cm.get_cmap(streamCmap)
+
     if isinstance(endpointCmaps[0], str):
         endpointCmap1 = matplotlib.cm.get_cmap(endpointCmaps[0])
         endpointCmap2 = matplotlib.cm.get_cmap(endpointCmaps[1])
