@@ -1162,14 +1162,14 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         axs[0,1]=basicRadarPlot_ax(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']),ax=axs[0,1],COLORS=firstLPIDFCommon['color'].to_list())
         axs[0,0].set_title('RAS common endpoints',size=fontsize)
         axs[0,0].set_facecolor([0,0,1,.15])
-        axs[0,1].set_title('RAS common endpoints',size=fontsize)
+        axs[0,1].set_title('LPI common endpoints',size=fontsize)
         axs[0,1].set_facecolor([1,0,0,.15])  
     else:
         axs[0,0]=basicRadarPlot_ax(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']),ax=axs[0,0])
         axs[0,1]=basicRadarPlot_ax(list(firstLPIDFCommon['labelNames']),list(firstLPIDFCommon['endpointCounts']),ax=axs[0,1])
         axs[0,0].set_title('RAS common endpoints',size=fontsize)
         axs[0,0].set_facecolor([0,0,1,.15])
-        axs[0,1].set_title('RAS common endpoints',size=fontsize)
+        axs[0,1].set_title('LPI common endpoints',size=fontsize)
         axs[0,1].set_facecolor([1,0,0,.15])  
 
 
@@ -2128,6 +2128,7 @@ def colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWi
     
     #get the endpoint identities
     M, grouping=utils.connectivity_matrix(streamlines, parcNifti.affine, label_volume=np.round(parcNifti.get_data()).astype(int),
+                            symmetric=False,
                             return_mapping=True,
                             mapping_as_streamlines=False)
     #get the keys so that you can iterate through them later
