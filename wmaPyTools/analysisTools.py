@@ -998,7 +998,9 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
         tractStreamlines=wmaPyTools.streamlineTools.orientAllStreamlines(tractStreamlines)
     
     #segment tractome into connectivity matrix from parcellation
+    #   ENDPOINT GROUP MATTERS
     M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_data().astype(int),
+                            symmetric=False,
                             return_mapping=True,
                             mapping_as_streamlines=False)
     #get the keys so that you can iterate through them later
