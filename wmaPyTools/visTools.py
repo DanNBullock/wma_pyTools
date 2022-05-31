@@ -1967,6 +1967,13 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
         endpointCmap1 = endpointCmaps[0]
         endpointCmap2 = endpointCmaps[1]
         
+    #print out the names, just because fury seems to be erroring at some point
+    print('Selected colormaps:')
+    print('NeckCmap = ' + neckCmap.name )
+    print('StreamCmap = ' + streamCmap.name )
+    print('endpointCmap1 = ' + endpointCmap1.name )
+    print('endpointCmap2 = ' + endpointCmap2.name )
+        
     #go ahead and apply the full streamline colorscheme
     streamColors = [streamCmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
     
