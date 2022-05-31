@@ -1156,6 +1156,9 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     fig.subplots_adjust(wspace=-.4,hspace=0.7)
     fig.figsize=(12, 12)
     fontsize=6
+    #TODO
+    #https://stackoverflow.com/questions/71427116/matplotlib-align-subplot-titles-to-top-of-figure
+    
     #Plot the common endpoints
     if color==True:
         axs[0,0]=basicRadarPlot_ax(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['endpointCounts']),ax=axs[0,0],COLORS=firstRASDFCommon['color'].to_list())
@@ -1207,6 +1210,7 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         print('no uncommon for LPI')    
         
     fig.suptitle(tractName+' endpoints fingerprint', fontsize=12)
+    fig.tight_layout()
     plt.show()
     #save the overarching figure
     if not saveDir == None:
