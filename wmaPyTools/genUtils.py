@@ -115,9 +115,9 @@ def parseInputSysArgs():
     #iterate across these locations
     for iArgLocations in isEquals_ArgLocations:
         #get the input value before this equals
-        priorArgInput=f'{argsIn[iArgLocations-1]=}'.split('=')[1]
+        priorArgInput=f'{argsIn[iArgLocations-1]}'
         #get the input value after this equals
-        nextArgInput=f'{argsIn[iArgLocations+1]=}'.split('=')[1]
+        nextArgInput=f'{argsIn[iArgLocations+1]}'
         isEqualsDict[priorArgInput]=nextArgInput
         #record the ones we have managed with this
         argsManaged.append(iArgLocations-1)
@@ -132,14 +132,15 @@ def parseInputSysArgs():
     for iArgLocations in hasEquals_ArgLocations:
         #determine if the first or last character is the equals
         #first char case
+        #why the zero index? to hit he first character
         if argsIn[iArgLocations][0]=='=':
             warnings.warning('Poorly formatted input detected for ' + argsIn[iArgLocations][0] + '\nRecommend more rigid structure in input')
         
             #stealing from the previous example even though it isn't exactly the same
             #because the = is on the left, we can assume the thing prior was the prior input
-            priorArgInput=f'{argsIn[iArgLocations-1]=}'.split('=')[1]
+            priorArgInput=f'{argsIn[iArgLocations-1]}'
             #get the input value after this equals
-            nextArgInput=f'{argsIn[iArgLocations]=}'.split('=')[1]
+            nextArgInput=f'{argsIn[iArgLocations]}'.split('=')[1]
             hasEqualsDict[priorArgInput]=nextArgInput
             #record the ones we have managed with this
             argsManaged.append(iArgLocations-1)
@@ -151,9 +152,9 @@ def parseInputSysArgs():
         
             #stealing from the previous example even though it isn't exactly the same
             #because the = is on the left, we can assume the thing prior was the prior input
-            priorArgInput=f'{argsIn[iArgLocations]=}'.split('=')[1]
+            priorArgInput=f'{argsIn[iArgLocations]}'.split('=')[0]
             #get the input value after this equals
-            nextArgInput=f'{argsIn[iArgLocations+1]=}'.split('=')[1]
+            nextArgInput=f'{argsIn[iArgLocations+1]}'
             hasEqualsDict[priorArgInput]=nextArgInput
             #record the ones we have managed with this
             argsManaged.append(iArgLocations)
@@ -176,7 +177,7 @@ def parseInputSysArgs():
     #iterate across these locations
     for iArgLocations in dashLeads_ArgLocations:
         #the "prior arg input" is easy to determine
-        priorArgInput=f'{argsIn[iArgLocations]=}'.split('=')[1]
+        priorArgInput=f'{argsIn[iArgLocations]}'
         #but now we have to be concerned if the next location has been already
         #taken care of OR if it is another dash location
         #if its in the managed list
@@ -184,7 +185,7 @@ def parseInputSysArgs():
             #if its not in the upcoming dashLeads locations
             if not iArgLocations+1 in dashLeads_ArgLocations:
                 #then you can set the next arg as the thing that follows
-                nextArgInput=f'{argsIn[iArgLocations+1]=}'.split('=')[1]
+                nextArgInput=f'{argsIn[iArgLocations+1]}'
                 #record the ones we have managed with this
                 argsManaged.append(iArgLocations)
                 argsManaged.append(iArgLocations+1)
