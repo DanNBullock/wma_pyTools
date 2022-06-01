@@ -1137,11 +1137,13 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     import pandas as pd
     import numpy as np
     import os
+    import sys
         
     #has to be done before matplotlib import
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
+        sys.modules.pop('matplotlib')
         import matplotlib as mpl
         mpl.use('Agg')
         # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
