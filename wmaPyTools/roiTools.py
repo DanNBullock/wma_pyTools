@@ -1024,6 +1024,9 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
     
     #first perform the island removal operation
     [noIslandAtlas,report]=removeIslandsFromAtlas(atlasNifti)
+    #just save it
+    report.to_csv('de-island_report.csv')
+    
     
     #now we need to detect the wm and bg labels
     #lots of ways we could do this, I guess
