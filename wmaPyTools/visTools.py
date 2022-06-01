@@ -1881,15 +1881,15 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
-        import matplotlib as mpl
-        mpl.use('Agg')
-        # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
-        # #borrowing from
-        # #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        # from xvfbwrapper import Xvfb
+        #import matplotlib as mpl
+        #mpl.use('Agg')
+         print('Docker execution detected\nUsing xvfbwrapper for virtual display')
+         #borrowing from
+         #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+         from xvfbwrapper import Xvfb
 
-        # vdisplay = Xvfb()
-        # vdisplay.start()
+         vdisplay = Xvfb()
+         vdisplay.start()
     #stop code    
     # if wmaPyTools.genUtils.is_docker():
     #     #borrowing from
@@ -2006,10 +2006,10 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
     croppedArray=outArray[(minVals[0]-borderPixels):(maxVals[0]+borderPixels),(minVals[1]-borderPixels):(maxVals[1]+borderPixels),:]
     
     plt.imsave(outName + '.png',croppedArray) 
-    # if wmaPyTools.genUtils.is_docker():
-    #     #borrowing from
-    #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-    #     vdisplay.stop()
+    if wmaPyTools.genUtils.is_docker():
+        #borrowing from
+        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+        vdisplay.stop()
     
     #try this?
     scene.clear()
