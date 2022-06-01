@@ -423,13 +423,15 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
-        print('Docker execution detected\nUsing xvfbwrapper for virtual display')
-        #borrowing from
-        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        from xvfbwrapper import Xvfb
+        import matplotlib as mpl
+        mpl.use('Agg')
+        # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
+        # #borrowing from
+        # #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+        # from xvfbwrapper import Xvfb
 
-        vdisplay = Xvfb()
-        vdisplay.start()
+        # vdisplay = Xvfb()
+        # vdisplay.start()
     #stop code    
     # if wmaPyTools.genUtils.is_docker():
     #     #borrowing from
@@ -604,10 +606,10 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
         [os.remove(ipaths) for ipaths in sorted(glob(dimStem+'*.png'))]
     
     #stop code    
-    if wmaPyTools.genUtils.is_docker():
-        #borrowing from
-        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        vdisplay.stop()
+    # if wmaPyTools.genUtils.is_docker():
+    #     #borrowing from
+    #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+    #     vdisplay.stop()
     
     
 def crossSectionGIFsFromOverlay(overlayNifti,refAnatT1,saveDir,figName,postClean=True):
@@ -646,13 +648,15 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
-        print('Docker execution detected\nUsing xvfbwrapper for virtual display')
-        #borrowing from
-        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        from xvfbwrapper import Xvfb
+        import matplotlib as mpl
+        mpl.use('Agg')
+        # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
+        # #borrowing from
+        # #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+        # from xvfbwrapper import Xvfb
 
-        vdisplay = Xvfb()
-        vdisplay.start()
+        # vdisplay = Xvfb()
+        # vdisplay.start()
     #stop code    
     # if wmaPyTools.genUtils.is_docker():
     #     #borrowing from
@@ -787,11 +791,11 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
 
         [os.remove(ipaths) for ipaths in sorted(glob(dimStem+'*.png'))]
         
-    #stop code    
-    if wmaPyTools.genUtils.is_docker():
-        #borrowing from
-        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        vdisplay.stop()
+    # #stop code    
+    # if wmaPyTools.genUtils.is_docker():
+    #     #borrowing from
+    #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+    #     vdisplay.stop()
 
 def densityGifsOfTract(tractStreamlines,referenceAnatomy,saveDir,tractName):
     import os
@@ -1136,13 +1140,15 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
-        print('Docker execution detected\nUsing xvfbwrapper for virtual display')
-        #borrowing from
-        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        from xvfbwrapper import Xvfb
+        import matplotlib as mpl
+        mpl.use('Agg')
+        # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
+        # #borrowing from
+        # #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+        # from xvfbwrapper import Xvfb
 
-        vdisplay = Xvfb()
-        vdisplay.start()
+        # vdisplay = Xvfb()
+        # vdisplay.start()
     #stop code    
     # if wmaPyTools.genUtils.is_docker():
     #     #borrowing from
@@ -1281,10 +1287,10 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         fig.savefig(tractName+'_endpointFingerprint_Normed.svg',dpi=800,bbox_inches='tight')
     plt.close() 
     
-    if wmaPyTools.genUtils.is_docker():
-        #borrowing from
-        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        vdisplay.stop()
+    # if wmaPyTools.genUtils.is_docker():
+    #     #borrowing from
+    #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+    #     vdisplay.stop()
 
     
 def basicRadarPlot(labels,values, metaValues=None,COLORS=None):
@@ -1885,13 +1891,15 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
-        print('Docker execution detected\nUsing xvfbwrapper for virtual display')
-        #borrowing from
-        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        from xvfbwrapper import Xvfb
+        import matplotlib as mpl
+        mpl.use('Agg')
+        # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
+        # #borrowing from
+        # #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+        # from xvfbwrapper import Xvfb
 
-        vdisplay = Xvfb()
-        vdisplay.start()
+        # vdisplay = Xvfb()
+        # vdisplay.start()
 
     
     
@@ -1988,10 +1996,10 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
     croppedArray=outArray[(minVals[0]-borderPixels):(maxVals[0]+borderPixels),(minVals[1]-borderPixels):(maxVals[1]+borderPixels),:]
     
     plt.imsave(outName + '.png',croppedArray) 
-    if wmaPyTools.genUtils.is_docker():
-        #borrowing from
-        #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        vdisplay.stop()
+    # if wmaPyTools.genUtils.is_docker():
+    #     #borrowing from
+    #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+    #     vdisplay.stop()
     
     #try this?
     scene.clear()
