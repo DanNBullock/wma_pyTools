@@ -1926,7 +1926,7 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
         vdisplay.stop()
     
     #try this?
-    scene.exit()
+    scene.clear()
     
     if not parcNifti==None:
         colorLut.to_csv(outName+'.csv')
