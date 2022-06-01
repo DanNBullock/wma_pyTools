@@ -273,4 +273,25 @@ def cmdORconfig_input():
     # funtion(*args,**kwargs)
     # funtion(*positionalArgs,**nonPositionalArgs)
     return positionalArgs,nonPositionalArgs
-     
+
+
+def is_docker():
+    """
+    Determines if current script is being executed in a docker environment
+    
+    Taken from:
+    https://stackoverflow.com/questions/43878953/how-does-one-detect-if-one-is-running-within-a-docker-container-within-python
+    Returns
+    -------
+    TYPE
+        DESCRIPTION.
+
+    """
+    import os
+    path = '/proc/self/cgroup'
+    return (
+        os.path.exists('/.dockerenv') or
+        os.path.isfile(path) and any('docker' in line for line in open(path)) or
+        os.path.exists('/singularity') or #I don't know if this one or the next one triggers it
+        os.path.exists('/.singularity.d') 
+    )
