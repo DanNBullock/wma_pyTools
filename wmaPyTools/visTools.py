@@ -1144,8 +1144,11 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
         sys.modules.pop('matplotlib')
-        import matplotlib as mpl
-        mpl.use('Agg')
+        import matplotlib 
+        #trying workaround described here:
+        #https://github.com/matplotlib/matplotlib/issues/18022
+        import matplotlib.backends
+        matplotlib.use('Agg')
         # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
         # #borrowing from
         # #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
