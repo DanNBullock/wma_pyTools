@@ -413,13 +413,8 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
     from glob import glob
     import os
     from nilearn.image import reorder_img  
-    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-    from matplotlib import figure
-    from nilearn.image import crop_img, resample_img 
-    import matplotlib.pyplot as plt
-    import dipy.tracking.utils as ut
-    import wmaPyTools.roiTools  
     
+    #has to be done before matplotlib import
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
@@ -438,6 +433,12 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
     #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
     #     vdisplay.stop()
     
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    from matplotlib import figure
+    from nilearn.image import crop_img, resample_img 
+    import matplotlib.pyplot as plt
+    import dipy.tracking.utils as ut
+    import wmaPyTools.roiTools    
     
     #Crop initial T1
     #crop the anatomy back down in case it has gotten overly widened
@@ -639,12 +640,8 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     from glob import glob
     import os
     from nilearn.image import reorder_img  
-    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
-    from matplotlib import figure
-    from nilearn.image import crop_img, resample_img 
-    import matplotlib.pyplot as plt
-    import wmaPyTools.roiTools  
-    
+        
+    #has to be done before matplotlib import
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
@@ -663,7 +660,13 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
     #     vdisplay.stop()
     
+    from mpl_toolkits.axes_grid1.inset_locator import inset_axes
+    from matplotlib import figure
+    from nilearn.image import crop_img, resample_img 
+    import matplotlib.pyplot as plt
+    import wmaPyTools.roiTools  
     
+   
     #resample crop (doesn't seem to work)
     #[refAnatT1,overlayNifti]=dualCropNifti(refAnatT1,overlayNifti)
     #ok, but if we assume that the overlay is *always* going to be smaller than the 
@@ -1134,9 +1137,8 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     import pandas as pd
     import numpy as np
     import os
-    from matplotlib import pyplot as plt
-    import wmaPyTools.analysisTools  
-    
+        
+    #has to be done before matplotlib import
     #check to see if in docker container
     import wmaPyTools.genUtils
     if wmaPyTools.genUtils.is_docker():
@@ -1155,6 +1157,9 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
     #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
     #     vdisplay.stop()
     
+    from matplotlib import pyplot as plt
+    import wmaPyTools.analysisTools  
+  
      
     #just use this to get the column names, you can't be sure that all the names
     #are there
@@ -1870,6 +1875,28 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     #now lets crop it a bit
     
 def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=None):
+    
+        
+    #has to be done before matplotlib import
+    #check to see if in docker container
+    import wmaPyTools.genUtils
+    if wmaPyTools.genUtils.is_docker():
+        import matplotlib as mpl
+        mpl.use('Agg')
+        # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
+        # #borrowing from
+        # #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+        # from xvfbwrapper import Xvfb
+
+        # vdisplay = Xvfb()
+        # vdisplay.start()
+    #stop code    
+    # if wmaPyTools.genUtils.is_docker():
+    #     #borrowing from
+    #     #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
+    #     vdisplay.stop()
+    
+    
     import numpy as np
     from fury import actor, window
     import matplotlib
@@ -1885,24 +1912,7 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
 
     if not refAnatT1==None:
         if isinstance(refAnatT1,str):
-            refAnatT1=nib.load(refAnatT1)
-            
-    # TODO 
-    #check to see if in docker container
-    import wmaPyTools.genUtils
-    if wmaPyTools.genUtils.is_docker():
-        import matplotlib as mpl
-        mpl.use('Agg')
-        # print('Docker execution detected\nUsing xvfbwrapper for virtual display')
-        # #borrowing from
-        # #https://github.com/brainlife/app-wmc_figures/blob/76c4cf6448a72299f2d70195f9177b75e3310934/main.py#L32-L38
-        # from xvfbwrapper import Xvfb
-
-        # vdisplay = Xvfb()
-        # vdisplay.start()
-
-    
-    
+            refAnatT1=nib.load(refAnatT1) 
 
     scene = window.Scene()
     scene.clear()
