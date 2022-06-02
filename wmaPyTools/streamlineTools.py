@@ -993,7 +993,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
         
         #if there is a valid streamline lenth, create a blank index structure
         if isinstance(streamlinesLength,int):
-            wmc_Dict['index']=np.zeros(streamlinesLength)
+            wmc_Dict['index']=np.zeros(streamlinesLength,dtype=int)
         else:
             raise ValueError('Input indexes do not indicate TOTAL number of streamlines in input tract \ncCan not create new wmc structure without this information.')
         
@@ -1696,6 +1696,50 @@ def orientAllStreamlines(tractStreamlines):
     print( str(flipCount) + ' of ' + str(len(tractStreamlines)) + ' streamlines flipped')
 
     return  tractStreamlines
+
+def wmc_from_DIPY_connectome(grouping,lookupTable):
+    """
+    Generates a wmc-type classification structure
+    https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b/readme
+    from the output of dipy.tracking.utils.connectivity_matrix
+
+    Parameters
+    ----------
+    grouping : dict, output of dipy.tracking.utils.connectivity_matrix
+        The direct dictionary output of the grouping return object from
+        dipy.tracking.utils.connectivity_matrix
+    lookupTable : pandas.DataFrame
+        A lookup table derived either from wmaPyTools.analysisTools.reduceAtlasAndLookupTable
+        or wmaPyTools.genUtils.parcJSON_to_LUT, but probably the former, given
+        the requirements of dipy.tracking.utils.connectivity_matrix
+
+    Returns
+    -------
+    classification : a dictionary object with "names" and "index" field, in accordance
+    with the wmc datatype
+    https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b/readme
+
+    """
+    import numpy as np
+    import itertools
+    #ugly way to get max index value from grouping
+    #np.max(grouping[list(grouping.keys())])
+    maxStreamIndex=np.max(list(itertools.chain(*[grouping[ikeys] for ikeys in list(grouping.keys())])))
+    #remember, zero indexing
+        
+    for iterator,iConnections in enumerate(list( grouping.keys())):
+        boolvec=np.zeros(maxStreamIndex+1,dtype=bool)
+        currentName1=lookupTable['labelNames'].loc[lookupTable['labelNumber']==iConnections[0]].to_list()[0]
+        currentName2=lookupTable['labelNames'].loc[lookupTable['labelNumber']==iConnections[1]].to_list()[0]
+        connectionName=currentName1 + '_to_' + currentName2
+        currentIndexes=grouping[iConnections]
+        boolvec[currentIndexes]=True
+        if not 'classification' in locals():
+            classification=updateClassification(boolvec,connectionName,existingClassification=None)
+        else:
+            classification=updateClassification(boolvec,connectionName,existingClassification=classification)
+        
+    return classification
 
 def downsampleToEndpoints(streamlines):
     """
