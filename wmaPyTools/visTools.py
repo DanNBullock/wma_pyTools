@@ -568,7 +568,9 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
             # we use *2 in order to afford room for the subsequent blended images
             figName='dim_' + str(iDims) +'_'+  str(iSlices*2).zfill(3)+'.png'
             plt.savefig(figName,bbox_inches='tight',pad_inches=0.0)
-            plt.clf()
+            #this only clears
+            #plt.clf()
+            plt.close()
                 
     import os        
     from PIL import Image
@@ -768,6 +770,7 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
             figName='dim_' + str(iDims) +'_'+  str(iSlices*2).zfill(3)+'.png'
             plt.savefig(figName,bbox_inches='tight',pad_inches=0.0)
             plt.clf()
+            plt.close()
             
     import os        
     from PIL import Image
