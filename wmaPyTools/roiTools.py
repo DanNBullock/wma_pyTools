@@ -1142,7 +1142,7 @@ def removeIslandsFromAtlas(atlasNifti):
 
 
     # atlasData=np.round(atlas.get_data()).astype(int)
-    # #COSIDER REPLACING ALL OR MSOT OF THIS WITH
+    # #COSIDER REPLACING ALL OR MOST OF THIS WITH
     #Doesn't seem to work?
     # relabelConnectedData=scipy.ndimage.measurements.label(atlasData.astype(bool))
 
