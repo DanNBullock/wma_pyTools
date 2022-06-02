@@ -540,7 +540,7 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
             [unique, counts] = np.unique(overlayData, return_counts=True)
             backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
             
-            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='antialiased',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='kaiser',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
             curFig=plt.gcf()
             yLims=sorted(curFig.gca().get_ylim())
             xLims=sorted(curFig.gca().get_xlim())
