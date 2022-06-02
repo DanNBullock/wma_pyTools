@@ -296,3 +296,25 @@ def is_docker():
         os.path.exists('/singularity') or #I don't know if this one or the next one triggers it
         os.path.exists('/.singularity.d') 
     )
+
+def parcJSON_to_LUT(pathOrDict):
+    import json
+    import pandas as pd
+    if isinstance(pathOrDict,str):
+        with open(pathOrDict) as label_json:
+            label_dict_list = json.load(label_json)
+    else:
+        #just assume it's been loaded already and is a list?  I guess
+        pass
+    
+    #create a dataframe
+    lookupTable=pd.DataFrame(columns=['labelNumber' , 'labelNames'])
+    
+    for iterator,iLabels in enumerate(label_dict_list):
+        currVals=[iLabels['voxel_value'],iLabels['name']]
+        toAppendSeries=pd.Series(currVals, index=lookupTable.columns)
+        lookupTable=lookupTable.append(toAppendSeries,ignore_index=True)
+    
+    return lookupTable
+        
+            
