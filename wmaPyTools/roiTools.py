@@ -880,6 +880,127 @@ def subjectSpaceMaskBoundaryCoords(maskNifti):
     
 #     return outNifti1, outNifti2
 
+def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=[]):
+    """
+    Removes island label values from atlas iteratively across values present.
+    Important for when extracted atlas labels are being used as anatomical 
+    markers.  Instead of using erosion, we'll use scipy.ndimage.measurements.label
+    
+    Potentially faster ways of doing this in other packages.
+    
+    Parameters
+    ----------
+    atlasNifti : string path to file loadable via nib.load or nifti-like object
+        A multi label atlas/parc, with integer based labels.  Will load if string
+        is passed
+    ignoreLabelsRequest :  list of int, optional
+        The number of inflate iterations you would like to perform. If no value
+        is passed, no inflation is performedThe default is 0.
+
+    Returns
+    -------
+    atlasNiftiOut : TYPE
+        The input atlas nifti, but with islands removed
+    removalReport : TYPE
+        A pandas based table indicating the number of islands found, their total
+        volume, and the pre and post voxel count for each label
+
+    """
+
+    #scipy.ndimage.measurements.labeled_comprehension?        
+
+    import nibabel as nib
+    from scipy.ndimage.measurements import label
+    import numpy as np
+    import copy
+    import pandas as pd
+    #because it unnecessarily warns about things
+    pd.options.mode.chained_assignment = None
+    
+    if isinstance(atlasNifti,str):
+        atlas=nib.load(atlasNifti)
+    else:
+        atlas=atlasNifti
+    
+    #by default we ignore the background
+    ignoreLabelsRequest.append(0)
+    #just in case they included 0 or repeats
+    ignoreLabels=np.unique(ignoreLabelsRequest)
+
+    #do something to ensure that it is int based
+    atlasData=np.round( np.asanyarray(atlas.dataobj)).astype(int)
+    
+    #create a seprate object to begin de-islanding
+    noIslandData=copy.deepcopy(atlasData)
+    
+    #get counts of the unique lables
+    [labels,counts]=np.unique(atlasData, return_counts=True)
+    
+    #create a report of the island removal process
+    removalReport=pd.DataFrame(columns=['labelVal','startVoxCount','islandCount','totalIslandVox','endVoxCount'])
+    removalReport['labelVal']=labels
+    removalReport['startVoxCount']=counts
+    
+    
+    for labelIterator,iLabels in enumerate(labels):
+        #we don't want to do 0
+        if not iLabels in ignoreLabels:
+            #label the distinct elements of the parcellation matching the current label
+            labeled_array, num_features = label(atlasData==iLabels)
+            #get the counts for these elements
+            [curr_labels,curr_counts]=np.unique(labeled_array, return_counts=True)
+
+            #always ignore 0, add 1 because you're ignoring it
+            maxSizeIndex=np.where(curr_counts[1:]==np.max(curr_counts[1:]))[0][0]+1
+            #create a mask of the locations to be zeroed out
+            currIslandMask=np.logical_and(labeled_array>0,labeled_array!=maxSizeIndex)
+            
+            #compute and populate the data for the report
+            #-2 because we don't include 0 or the largest island
+            removalReport['islandCount'].loc[removalReport['labelVal']==iLabels]=len(curr_counts)-2
+            removalReport['totalIslandVox'].loc[removalReport['labelVal']==iLabels]=np.sum(currIslandMask)
+            
+            #use the mask to set the relevant voxels to 0
+            noIslandData[currIslandMask]=0
+            
+            #count the new total voxel count for this label
+            removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=np.sum(noIslandData==iLabels)
+            print(removalReport.loc[removalReport['labelVal']==iLabels])
+    
+    #now populate data for the lables we didn't modify
+    for iLabels in ignoreLabels:
+            labeled_array, num_features = label(atlasData==iLabels)
+            #get the counts for these elements
+            [curr_labels,curr_counts]=np.unique(labeled_array, return_counts=True)
+
+            #always ignore 0, add 1 because you're ignoring it
+            maxSizeIndex=np.where(curr_counts[1:]==np.max(curr_counts[1:]))[0][0]+1
+            #create a mask of the locations to be zeroed out
+            currIslandMask=np.logical_and(labeled_array>0,labeled_array!=maxSizeIndex)
+            
+            #compute and populate the data for the report
+            #-2 because we don't include 0 or the largest island
+            removalReport['islandCount'].loc[removalReport['labelVal']==iLabels]=len(curr_counts)-2
+            removalReport['totalIslandVox'].loc[removalReport['labelVal']==iLabels]=np.sum(currIslandMask)
+            
+            #use the mask to set the relevant voxels to 0
+            #except we arent changing these
+            #noIslandData[currIslandMask]=0
+            
+            #count the new total voxel count for this label
+            removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=np.sum(noIslandData==iLabels)
+            
+    #now prepare the nifti output
+    atlasNiftiOut=nib.Nifti1Image(noIslandData, atlas.affine, atlas.header)
+    
+    return atlasNiftiOut,removalReport
+  
+        
+            
+
+    
+    
+
 def removeIslandsFromAtlas(atlasNifti):
     """
     Removes island label values from atlas iteratively across values present.
