@@ -1370,7 +1370,7 @@ def inflateAtlas(atlasNifti,iterations):
     #create a report of the island removal process
     for iterator,iLabels in enumerate(labels):
         removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=counts[iterator]
-        removalReport['changeCount'].loc[removalReport['labelVal']==iLabels]=removalReport['startVoxCount'].loc[removalReport['labelVal']]-counts[iterator]
+        removalReport['changeCount'].loc[removalReport['labelVal']==iLabels]=removalReport['startVoxCount'].loc[removalReport['labelVal']==iLabels]-counts[iterator]
     
     inflatedAtlas=nib.Nifti1Image(atlasData, atlas.affine, atlas.header)
     
