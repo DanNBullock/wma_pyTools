@@ -1729,8 +1729,8 @@ def wmc_from_DIPY_connectome(grouping,lookupTable):
         
     for iterator,iConnections in enumerate(list( grouping.keys())):
         boolvec=np.zeros(maxStreamIndex+1,dtype=bool)
-        currentName1=lookupTable['labelNames'].loc[lookupTable['labelNumber']==iConnections[0]].to_list()[0]
-        currentName2=lookupTable['labelNames'].loc[lookupTable['labelNumber']==iConnections[1]].to_list()[0]
+        currentName1=lookupTable['labelNames'].iloc[iConnections[0]]
+        currentName2=lookupTable['labelNames'].iloc[iConnections[1]]
         connectionName=currentName1 + '_TO_' + currentName2
         currentIndexes=grouping[iConnections]
         boolvec[currentIndexes]=True
