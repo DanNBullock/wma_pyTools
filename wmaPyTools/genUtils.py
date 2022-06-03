@@ -380,120 +380,180 @@ def bl_conmat_fromDIPYandParc(M,lookupTable,outdir):
 
       
     
-        
+#NO, WE'RE NOT DOING THIS.        
 
-def conmat_to_JGFZ(arrayORcsv,indexIn,labelIn):
-    import os
-    from collections import OrderedDict
-    import json
-    import numpy as np
-    from glob import glob
-    import sys
+# def conmat_to_JGFZ(arrayORcsv,indexIn,labelIn):
+#     import os
+#     from collections import OrderedDict
+#     import json
+#     import numpy as np
+#     from glob import glob
+#     import sys
     
-    try:
-        import jgf
-    except:
-        import requests
-        #download it and then later delete it
-        response=requests.get('https://github.com/filipinascimento/jgf/archive/refs/tags/0.2.1.tar.gz')
-        open("jgf.tar.gz", "wb").write(response.content)
-        import tarfile
-        jgfDownload=tarfile.open('jgf.tar.gz')
-        jgfDownload.extractall('./jgf')
-        jgfDownload.close()
-        sys.path.append('jgf')
-        import jgf
-  
+#     #stolen from:
+#     # https://github.com/filipinascimento/bl-conmat2network/blob/0.2/main.py
+    
+#     #load or parse input connectivity
+#     if isinstance(arrayORcsv,np.ndarray):
+#         conMatrix=arrayORcsv
+#     elif isinstance(arrayORcsv,str):
+#         #if it's a directory, as is the case with the conventional conmat standard
+#         if os.path.isdir(arrayORcsv):
+#             #throw a value error if there are multiple or no csvs in here
+#             csvPaths=glob(os.path.join(arrayORcsv,'*.csv'))
+#             if not len(csvPaths) == 1:
+#                 ValueError('Specific Csv file not found on provided path')
+#             else:
+#                 conMatrix=np.loadtxt(csvPaths[0],delimiter=",")
+#         #if its a (csv) file
+#         if os.path.isfile(arrayORcsv):
+#             conMatrix=np.loadtxt(arrayORcsv,delimiter=",")
+        
+#     #load or parse input index and label files
+#     if isinstance(indexIn,dict):
+#         indexDict=indexIn
+#     elif isinstance(indexIn,str):
+#         with open(indexIn, "r") as indexJson:
+#             indexDict = json.load(indexJson)    
+    
+#     if isinstance(labelIn,dict):
+#         labelDict=labelIn
+#     elif isinstance(labelIn,str):
+#         with open(labelIn, "r") as labelJson:
+#             labelDict = json.load(labelJson)
+    
+#     #prep outfile paths
+#     outputDirectory = "output"
+#     if not os.path.exists(outputDirectory):
+#     		os.makedirs(outputDirectory)
+#     outputFile = os.path.join(outputDirectory,"network.json.gz")
+    
+#     if not os.path.exists(outputDirectory):
+#     		os.makedirs(outputDirectory)
+    
+#     matrices = []
+#     networkProperties = []
+#     labels = []
+#     #should only be one, but ok
+#     #if it's a singleton dict, convert it to a list
+#     if isinstance(indexDict,dict):
+#         indexDict=[indexDict]
+    
+#     for entry in indexDict:
+#     	entryFilename = entry["filename"]
+#     	networkPropertiesDictionary = entry.copy()
+    	
+#     	label = ""
+#     	if("name" in entry):
+#     		label = entry["name"]
+#     		del networkPropertiesDictionary["name"]
+#     	del networkPropertiesDictionary["filename"]
+    
+#     	#adjacencyMatrix = loadCSVMatrix(os.path.join(CSVDirectory, entryFilename))
+#     	matrices.append(conMatrix)
+    
+    
+#     	if(len(labelDict)>len(conMatrix)):
+#     		for key,value in labelDict[0].items():
+#     			networkPropertiesDictionary["extra_"+key] = value
+#     		labelDataHasHeader = True
+    	
+#     	networkProperties.append(networkPropertiesDictionary)
+#     	labels.append(label)
+#     #shouldn't this be computed on a per matrix basis in case they are different?
+#     #https://github.com/filipinascimento/bl-conmat2network/blob/977d5d2a8a32b3dbef0ffea28e926e193b2657d7/main.py#L67-L76
+#     #whatever
+    
+#     if(len(labelDict)>len(matrices[0])):
+#     	labelDict = labelDict[1:]
+    
+#     nodesProperties = OrderedDict()
+#     if(len(labelDict)>0):
+#     		for nodeIndex,labelInformation in enumerate(labelDict):
+#     			for key,value in labelInformation.items():
+#     				if(key not in nodesProperties):
+#     					nodesProperties[key] = OrderedDict()
+#     				nodesProperties[key][nodeIndex] = value
+    
+    
+#     #stolen from:
+#     #https://github.com/filipinascimento/jgf/blob/6558ba152937bdb4814190e4c1a89c7ade5bdfaf/jgf/conmat.py#L140
+#     #because I don't need an additional packaged dependancy to just do one thing
+#     def _JGFAddGraphAttribute(graph,key,value):
+#     	if(key in _nonMetaGraphAttributes):
+#     		graph[key] = value
+#     	else:
+#     		if ("metadata" not in graph):
+#     			graph["metadata"] = OrderedDict()
+#     		graph["metadata"][key] = value
+    
+#     def save1(graphs,filename="",compressed=None):
+#     	"""
+#     	Writes a list of JXNF – Json compleX Network Format – dictionaries to 
+#     	a JGF(Z) – Json Graph Format (gZipped) – file.
+    	
+#     	Parameters
+#     	----------
+#     	graphs : list of dict
+#     			List of dictionaries in JXNF.
+#     	filename : str or file handle
+#     			Path to the file or a file handle to be used as output.
+#     	compressed : bool
+#     			If true, the input file will be interpreted as being compressed.
+#     			If not provided, this will be guessed from the file extension.
+#     			Use '.jgfz' for compressed files.
+#     	"""
+    	
+#     	shallCleanupHandler = False;
+#     	if(isinstance(filename, str)):
+#     		shallCleanupHandler = True
+#     		if(compressed is None):
+#     			fileExtension = os.path.splitext(filename)[1]
+#     			if(fileExtension==".jgfz"):
+#     				compressed = True
+#     			else:
+#     				compressed = False
+#     		if(compressed):
+#     			filehandler = gzip.open(filename,"wt")
+#     		else:
+#     			filehandler = open(filename,"wt")
+#     	else:
+#     		shallCleanupHandler=False
+#     		if(compressed is None):
+#     			compressed = False
+#     		filehandler = filename
+    
+#     	if(not isinstance(graphs, list)):
+#     		if(isinstance(graphs, dict)):
+#     			graphs = [graphs]
+#     		else:
+#     			raise TypeError(f"Argument graphs must be of type dict or a list of dicts, not {type(graphs)}")
+    
+#     	exportGraphs = []
+#     	for graph in graphs:
+#     		exportGraphs.append(_convertToJGFEntry(graph))
+    	
+#     	exportJSON={}
+#     	if(len(graphs)==1):
+#     		exportJSON["graph"] = exportGraphs[0]
+#     	else:
+#     		exportJSON["graphs"] = exportGraphs
+    	
+#     	json.dump(exportJSON,filehandler,cls=NumpyEncoder)
+#     	if(shallCleanupHandler):
+#     		filehandler.close()
 
     
-    #stolen from:
-    # https://github.com/filipinascimento/bl-conmat2network/blob/0.2/main.py
+#     jgf.conmat.save(matrices,outputFile, compressed=True,
+#     	label=labels,
+#     	networkProperties=networkProperties,
+#     	nodeProperties=nodesProperties)
     
-    #load or parse input connectivity
-    if isinstance(arrayORcsv,np.ndarray):
-        conMatrix=arrayORcsv
-    elif isinstance(arrayORcsv,str):
-        #if it's a directory, as is the case with the conventional conmat standard
-        if os.path.isdir(arrayORcsv):
-            #throw a value error if there are multiple or no csvs in here
-            csvPaths=glob(os.path.join(arrayORcsv,'*.csv'))
-            if not len(csvPaths) == 1:
-                ValueError('Specific Csv file not found on provided path')
-            else:
-                conMatrix=np.loadtxt(csvPaths[0],delimiter=",")
-        #if its a (csv) file
-        if os.path.isfile(arrayORcsv):
-            conMatrix=np.loadtxt(arrayORcsv,delimiter=",")
-        
-    #load or parse input index and label files
-    if isinstance(indexIn,dict):
-        indexDict=indexIn
-    elif isinstance(arrayORcsv,str):
-        with open(indexIn, "r") as indexJson:
-            indexDict = json.load(indexJson)    
-    
-    if isinstance(labelIn,dict):
-        labelDict=labelIn
-    elif isinstance(labelIn,str):
-        with open(indexIn, "r") as labelJson:
-            labelDict = json.load(labelJson)
-    
-    #prep outfile paths
-    outputDirectory = "output"
-    if not os.path.exists(outputDirectory):
-    		os.makedirs(outputDirectory)
-    outputFile = os.path.join(outputDirectory,"network.json.gz")
-    
-    if not os.path.exists(outputDirectory):
-    		os.makedirs(outputDirectory)
-    
-    matrices = []
-    networkProperties = []
-    labels = []
-    #should only be one, but ok
-    for entry in indexDict:
-    	entryFilename = entry["filename"]
-    	networkPropertiesDictionary = entry.copy()
-    	
-    	label = ""
-    	if("name" in entry):
-    		label = entry["name"]
-    		del networkPropertiesDictionary["name"]
-    	del networkPropertiesDictionary["filename"]
-    
-    	#adjacencyMatrix = loadCSVMatrix(os.path.join(CSVDirectory, entryFilename))
-    	matrices.append(conMatrix)
-    
-    
-    	if(len(labelDict)>len(conMatrix)):
-    		for key,value in labelDict[0].items():
-    			networkPropertiesDictionary["extra_"+key] = value
-    		labelDataHasHeader = True
-    	
-    	networkProperties.append(networkPropertiesDictionary)
-    	labels.append(label)
-    
-    if(labelDataHasHeader):
-    	labelDict = labelDict[1:]
-    
-    nodesProperties = OrderedDict()
-    if(len(labelDict)>0):
-    		for nodeIndex,labelInformation in enumerate(labelDict):
-    			for key,value in labelInformation.items():
-    				if(key not in nodesProperties):
-    					nodesProperties[key] = OrderedDict()
-    				nodesProperties[key][nodeIndex] = value
-    
-    jgf.conmat.save(matrices,outputFile, compressed=True,
-    	label=labels,
-    	networkProperties=networkProperties,
-    	nodeProperties=nodesProperties)
-    
-    #cleanup
-    #I'll not be installing unnecessary packages.
-    if os.file.exists('jgf.tar.gz'):
-        os.remove('jgf.tar.gz')
-    if os.path.isdir('jgf'):
-        os.remove('jgf')
+#     #cleanup
+#     #I'll not be installing unnecessary packages.
+#     if os.file.exists('jgf.tar.gz'):
+#         os.remove('jgf.tar.gz')
+#     if os.path.isdir('jgf'):
+#         os.remove('jgf')
         
             
