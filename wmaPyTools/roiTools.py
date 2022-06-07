@@ -967,7 +967,7 @@ def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=[]):
             removalReport['totalIslandVox'].loc[removalReport['labelVal']==iLabels]=np.sum(currIslandMask)
             
             #use the mask to set the relevant voxels to 0
-            #noIslandData[currIslandMask]=0
+            noIslandData[currIslandMask]=0
             
             #count the new total voxel count for this label
             removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=np.sum(noIslandData==iLabels)
