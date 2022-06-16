@@ -430,82 +430,82 @@ def smoothStreamlines(tractogram):
         
     return tractogram
 
-def cullViaClusters(clusters,tractogram,streamThresh):
-    #cullViaClusters(clusters,tractogram,streamThresh)
-    #
-    #This function culls streamlines from a tractogram
-    #based on the number of streamlines in their clusters
-    #
-    # INPUTS
-    #
-    # clusters: the output cluster object from quickbundles
-    #
-    # tractogram: a tractogram associated with the input clusters object
-    #
-    #streamThresh:  the minimum number of streamlines in a cluster bundle
-    #               needed to survive the culling process
-    #
-    # OUTPUTS
-    #
-    # tractogram: the cleaned tractogram
-    #
-    # culledTractogram: a tractogram containing those streamlines which have
-    # been culled.
-    #
-    # begin code    
-    import numpy as np
-    import copy
-    #apparently this can cause some issues on linux machines with dtype u21?
-    clustersSurviveThresh=np.greater(np.asarray(list(map(len, clusters))),streamThresh)
-    survivingStreams=[]
-    for iclusters in clusters[clustersSurviveThresh]:
-        survivingStreams=survivingStreams + iclusters.indices
-    culledStreamIndicies=list(set(list(range(1,len(tractogram.streamlines))))-set(survivingStreams))
-    culledTractogram=copy.deepcopy(tractogram)
-    culledTractogram.streamlines=culledTractogram.streamlines[culledStreamIndicies]
-    #cull those streamlines
-    #don't know what to do about those warnings
-    tractogram.streamlines=tractogram.streamlines[survivingStreams]
-    return tractogram, culledTractogram
+# def cullViaClusters(clusters,tractogram,streamThresh):
+#     #cullViaClusters(clusters,tractogram,streamThresh)
+#     #
+#     #This function culls streamlines from a tractogram
+#     #based on the number of streamlines in their clusters
+#     #
+#     # INPUTS
+#     #
+#     # clusters: the output cluster object from quickbundles
+#     #
+#     # tractogram: a tractogram associated with the input clusters object
+#     #
+#     #streamThresh:  the minimum number of streamlines in a cluster bundle
+#     #               needed to survive the culling process
+#     #
+#     # OUTPUTS
+#     #
+#     # tractogram: the cleaned tractogram
+#     #
+#     # culledTractogram: a tractogram containing those streamlines which have
+#     # been culled.
+#     #
+#     # begin code    
+#     import numpy as np
+#     import copy
+#     #apparently this can cause some issues on linux machines with dtype u21?
+#     clustersSurviveThresh=np.greater(np.asarray(list(map(len, clusters))),streamThresh)
+#     survivingStreams=[]
+#     for iclusters in clusters[clustersSurviveThresh]:
+#         survivingStreams=survivingStreams + iclusters.indices
+#     culledStreamIndicies=list(set(list(range(1,len(tractogram.streamlines))))-set(survivingStreams))
+#     culledTractogram=copy.deepcopy(tractogram)
+#     culledTractogram.streamlines=culledTractogram.streamlines[culledStreamIndicies]
+#     #cull those streamlines
+#     #don't know what to do about those warnings
+#     tractogram.streamlines=tractogram.streamlines[survivingStreams]
+#     return tractogram, culledTractogram
 
 
-def qbCullStreams(tractogram,qbThresh,streamThresh):
-    #qbCullStreams(tractogram,qbThresh,streamThresh)
-    #
-    #this function uses dipy quickbundles to filter out streamlines which exhibt
-    #unusual/extremely uncommon trajectories using a interstreamline distance
-    #measure
-    #
-    # INPUTS
-    #
-    # tractogram: an input tractogram to be cleaned
-    #
-    # qbThresh: the distance parameter to be used for the quickbundles algorithm
-    #
-    #streamThresh:  the minimum number of streamlines in a cluster bundle
-    #               needed to survive the culling process
-    # OUTPUTS
-    #
-    # tractogram: the cleaned tractogram
-    #
-    # culledTractogram: a tractogram containing those streamlines which have
-    # been culled.
-    # 
-    # Begin code
-    from dipy.segment.clustering import QuickBundles
-    #get the number of input streamlines
-    inputStreamNumber=len(tractogram.streamlines)
-    #good default value for quick clustering
-    #qbThresh=15
-    #perform quickBundles
-    qb = QuickBundles(threshold=qbThresh)
-    clusters = qb.cluster(tractogram.streamlines)
-    #perform cull
-    [outTractogram,culledTractogram]=cullViaClusters(clusters,tractogram,streamThresh)
-    #report cull count
-    numberCulled=inputStreamNumber-len(outTractogram.streamlines)
-    print(str(numberCulled) + ' streamlines culled')
-    return outTractogram, culledTractogram
+# def qbCullStreams(tractogram,qbThresh,streamThresh):
+#     #qbCullStreams(tractogram,qbThresh,streamThresh)
+#     #
+#     #this function uses dipy quickbundles to filter out streamlines which exhibt
+#     #unusual/extremely uncommon trajectories using a interstreamline distance
+#     #measure
+#     #
+#     # INPUTS
+#     #
+#     # tractogram: an input tractogram to be cleaned
+#     #
+#     # qbThresh: the distance parameter to be used for the quickbundles algorithm
+#     #
+#     #streamThresh:  the minimum number of streamlines in a cluster bundle
+#     #               needed to survive the culling process
+#     # OUTPUTS
+#     #
+#     # tractogram: the cleaned tractogram
+#     #
+#     # culledTractogram: a tractogram containing those streamlines which have
+#     # been culled.
+#     # 
+#     # Begin code
+#     from dipy.segment.clustering import QuickBundles
+#     #get the number of input streamlines
+#     inputStreamNumber=len(tractogram.streamlines)
+#     #good default value for quick clustering
+#     #qbThresh=15
+#     #perform quickBundles
+#     qb = QuickBundles(threshold=qbThresh)
+#     clusters = qb.cluster(tractogram.streamlines)
+#     #perform cull
+#     [outTractogram,culledTractogram]=cullViaClusters(clusters,tractogram,streamThresh)
+#     #report cull count
+#     numberCulled=inputStreamNumber-len(outTractogram.streamlines)
+#     print(str(numberCulled) + ' streamlines culled')
+#     return outTractogram, culledTractogram
 
 def dipyOrientStreamlines(streamlines):
     """
@@ -529,23 +529,83 @@ def dipyOrientStreamlines(streamlines):
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
     import numpy as np
     import dipy.tracking.streamline as streamline
+    import wmaPyTools.analysisTools
    
     
-    feature = ResampleFeature(nb_points=60)
-    metric = AveragePointwiseEuclideanMetric(feature)
+    # feature = ResampleFeature(nb_points=60)
+    # metric = AveragePointwiseEuclideanMetric(feature)
 
-    qb = QuickBundles(threshold=2,metric=metric, max_nb_clusters = len(streamlines)/100)
-    cluster = qb.cluster(streamlines)
-    print(str(len(cluster)) + ' clusters generated for input with ' + str(len(streamlines)) + ' streamlines')
+    # qb = QuickBundles(threshold=2,metric=metric, max_nb_clusters = len(streamlines)/100)
+    # cluster = qb.cluster(streamlines)
+    # print(str(len(cluster)) + ' clusters generated for input with ' + str(len(streamlines)) + ' streamlines')
+            
+    cluster=quickbundlesClusters(streamlines, thresholds=[30,20,10,5],nb_points=50,verbose=True)
     
-    for iBundles in range(len(cluster)):
-        streamIndexes=list(cluster[iBundles].indices)
-        orientedStreams=streamline.orient_by_streamline(streamlines[streamIndexes], cluster[iBundles].centroid)
-        for iStreams in range(len(streamIndexes)):
-            if not np.all(streamlines[streamIndexes[iStreams]][0,:]==orientedStreams[iStreams][0,:]):
-                streamlines[streamIndexes[iStreams]]= streamlines[streamIndexes[iStreams]][::-1]
+    for iBundles in cluster:
+        [orientedStreams, clusterIndexes]=orientDipyCluster(iBundles)
+        
+        #ok, now this is super ugly/iffy
+        for streamsIterator,iIndex in enumerate(clusterIndexes):
+            streamlines[iIndex]=orientedStreams[streamsIterator]
+               
+        # streamIndexes=list(cluster[iBundles].indices)
+        # curCentroid=cluster[iBundles].centroid
+        # #but you have to make sure that this is oriented correctly
+        # centroidNeck=curCentroid[int(np.round(len(curCentroid)/2))-3:int(np.round(len(curCentroid)/2))+3,:]
+        # deltas=wmaPyTools.analysisTools.cumulativeTraversalStream(centroidNeck)
+        
+        # maxTraversalDim=np.where(np.max(deltas)==deltas)[0][0]
+        # #get the current endpoints
+        # endpoint1=centroidNeck[0,:]
+        # endpoint2=centroidNeck[-1,:]
+    
+        # #if the coordinate of endpoint1 in the max traversal dimension
+        # #is less than the coordinate of endpoint1 in the max traversal dimension
+        # #flip it
+        # if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
+        #     curCentroid= curCentroid[::-1]
+
+        # orientedStreams=streamline.orient_by_streamline(streamlines[streamIndexes], curCentroid)
+        # for iStreams in range(len(streamIndexes)):
+        #     if not np.all(streamlines[streamIndexes[iStreams]][0,:]==orientedStreams[iStreams][0,:]):
+        #         streamlines[streamIndexes[iStreams]]= streamlines[streamIndexes[iStreams]][::-1]
 
     return streamlines
+
+def orientDipyCluster(cluster):
+    import numpy as np
+    import wmaPyTools.analysisTools
+    
+    import dipy.tracking.streamline as streamline
+    
+    streamIndexes=list(cluster.indices)
+    curCentroid=cluster.centroid
+    #but you have to make sure that this is oriented correctly
+    centroidNeck=curCentroid[int(np.round(len(curCentroid)/2))-3:int(np.round(len(curCentroid)/2))+3,:]
+    deltas=wmaPyTools.analysisTools.cumulativeTraversalStream(centroidNeck)
+    
+    maxTraversalDim=np.where(np.max(deltas)==deltas)[0][0]
+    #get the current endpoints
+    endpoint1=centroidNeck[0,:]
+    endpoint2=centroidNeck[-1,:]
+
+    #if the coordinate of endpoint1 in the max traversal dimension
+    #is less than the coordinate of endpoint1 in the max traversal dimension
+    #flip it
+    if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
+        curCentroid= curCentroid[::-1]
+
+    orientedStreams=streamline.orient_by_streamline(cluster.refdata, curCentroid)
+    
+    #I don't think I need this any more
+    # refStreams=cluster.refdata
+    # for iStreams in range(len(streamIndexes)):
+    #     if not np.all(streamlines[streamIndexes[iStreams]][0,:]==orientedStreams[iStreams][0,:]):
+    #         streamlines[streamIndexes[iStreams]]= streamlines[streamIndexes[iStreams]][::-1]
+    
+    #would I rather do this in place?
+    return orientedStreams, cluster.indices
+    
 
 def bundleTest(streamlines):
     """
@@ -1080,7 +1140,7 @@ def matWMC2jsonWMC(classification):
     outJson=json.dumps(wmc_Dict)
     return outJson
 
-def stubbornSaveTractogram(streamlines,savePath):
+def stubbornSaveTractogram(streamlines,savePath=None):
     """
     Why shouuld i supply a reference nifti?
     
@@ -1122,8 +1182,8 @@ def stubbornSaveTractogram(streamlines,savePath):
     #statefulTractogramOut=StatefulTractogram(voxStreams, dummyNifti, Space.VOX)
     #note we have to force a conversion here
     statefulTractogramOut=StatefulTractogram(Streamlines(streamlines), dummyNifti, Space.RASMM)
-    
-    save_tractogram(statefulTractogramOut,savePath, bbox_valid_check=False)
+    if not savePath==None:
+        save_tractogram(statefulTractogramOut,savePath, bbox_valid_check=False)
     return statefulTractogramOut
 
 def orientTractUsingNeck(streamlines,refAnatT1=None,surpressReport=False):
@@ -1537,6 +1597,8 @@ def orientTractUsingNeck_Robust(streamlines,refAnatT1=None,surpressReport=False)
     return streamlines
 
 
+
+
 def flipStreamstoAB_OrientOnce(streamlines, aheadNodes, behindNodes,surpressReport=False):
     """
     
@@ -1778,6 +1840,9 @@ def downsampleToEndpoints(streamlines):
 
     return endpointsAsStreams 
 
+ 
+    
+
 def orientTractUsingNeck_multi(streamlines):
     """
     
@@ -1800,12 +1865,8 @@ def orientTractUsingNeck_multi(streamlines):
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
     import numpy as np
    
-    
-    feature = ResampleFeature(nb_points=100)
-    metric = AveragePointwiseEuclideanMetric(feature)
+    cluster=quickbundlesClusters(streamlines,nb_pts=50)
 
-    qb = QuickBundles(threshold=2,metric=metric, max_nb_clusters = len(streamlines)/100)
-    cluster = qb.cluster(streamlines)
     
     for iBundles in range(len(cluster)):
         streamIndexes=list(cluster[iBundles].indices)
@@ -1905,3 +1966,63 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
   
     return streamlines
 
+def quickbundlesClusters(streamlines, **kwargs):
+    """
+    (quickly?, via qbx_and_merge?) perform a quick-bundling of an input
+    collection of streamlines, 
+    Parameters
+    ----------
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence
+        The input streamlines 
+    **kwargs : keyword arguments for the qbx_and_merge
+        Currently only supports [thresholds] and [nb_pts]
+        See dipy.segment.bundles.qbx_and_merge for more details
+    Returns
+    -------
+    clusters : dipy.segment.clustering.ClusterMapCentroid
+        The clusters resulting from the quickBundle-ification of the input 
+        streamlines
+    """
+    from dipy.segment.bundles import qbx_and_merge
+    from dipy.tracking.streamline import Streamlines
+    
+    #fill in parameters if they are there.
+    if not 'thresholds' in kwargs.keys():
+        thresholds = [30,20,10,5]
+    if not 'nb_points' in kwargs.keys():
+        nb_pts=20
+    if not 'verbose' in kwargs.keys():
+        verbose=False
+    #perform the quick, iterave bundling
+    clusters=qbx_and_merge(streamlines,thresholds , nb_pts, select_randomly=None, rng=None, verbose=verbose)
+    
+    return clusters
+
+def cullViaClusters(clusters,streamlines,streamThresh):
+    import itertools
+    import numpy as np
+    #get the cluster lengths
+    clusterLengths=[len(iCluster) for iCluster in clusters]
+    
+    #find which have meet the thresh criterion
+    clustersSurviveThresh=np.greater(clusterLengths,streamThresh)
+    
+    #get a list of the clusters
+    survivingClusters=list(itertools.compress(clusters,clustersSurviveThresh))
+    #get the indexes of the streamlines from each
+    survivingClusterLists=[iCluster.indices for iCluster in survivingClusters]
+    #cat them all together
+    survivingStreamsIndicies=list(itertools.chain(*survivingClusterLists))
+    
+    #find the obverse of the surviving stream set
+    culledStreamIndicies=list(set(list(range(0,len(streamlines))))-set(survivingStreamsIndicies))
+
+    return survivingStreamsIndicies, culledStreamIndicies
+
+def cullStreamsByBundling(streamlines,streamThresh,qbThresholds=[30,20,10,5],qbResmaple=50):
+    
+    clusters=quickbundlesClusters(streamlines, thresholds=qbThresholds,nb_points=qbResmaple,verbose=True)
+    
+    survivingStreamsIndicies, culledStreamIndicies=cullViaClusters(clusters,streamlines,streamThresh)
+    
+    return survivingStreamsIndicies, culledStreamIndicies
