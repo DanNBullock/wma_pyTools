@@ -1245,6 +1245,266 @@ def reduceLUTtoAvail(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColum
         reducedLookUpTable=reducedLookUpTable[[columnBestGuess,labelColumnGuess]]
     
     return reducedLookUpTable
+
+def volParcMeasures(parcNifti,lookupTable=None):
+    """
+    Produces a pandas DataFrame with the computed metrics for the input
+    parcellation.  A python replacement for 
+    https://github.com/DanNBullock/wma_tools/blob/master/Atlas_tools/bsc_computeAtlasStats_v2.m
+
+    Parameters
+    ----------
+    parcNifti : nifti-type input, int-based
+        The input parcellation.  If a string is input, will be loaded.
+    lookupTable : string path to lookup table or pd.DataFrame, optional
+        The lookup table coresponding ot the input parcellation Nifti. This is
+        where the names of ROIs will be derived from.  If this is not input 
+        unique names will not be assigned to ROIs in the output datatable.
+        If a string is passed it wil be loaded.  To convert brainlife .json-
+        style lookup tables use wmaPyTools.genUtils.parcJSON_to_LUT.
+        The default is None.
+
+    Returns
+    -------
+    tableStart : pandas.DataFrame
+        The output metrics computed for the input parcellation iloc[0]
+        contains information about the 'whole_brain' parcellation (treated as
+        uniorm mask), while the remaining rows contain information about each
+        individual ROI
+
+    """
+    
+    import sys
+    import nibabel as nib
+    import numpy as np
+    import pandas as pd
+    from warnings import warn
+    import wmaPyTools.roiTools
+    from dipy.tracking.utils import  seeds_from_mask
+    
+    if isinstance(parcNifti,str):
+        parcNifti=nib.load(parcNifti)
+        
+    #get the data as an array
+    parcData=np.asanyarray(parcNifti.dataobj)
+    
+    #get the unique labels
+    uniqueLabels=np.unique(parcData)
+    
+    #ensure that these are all int
+    intCheckBool=['int' in str(type(iLabels)) for iLabels in uniqueLabels]
+    if np.any(np.logical_not(intCheckBool)):
+        warn('\nNon int input detected in input parcellation labels\nAttempting conversion to int\nMay lead to unpredictability')
+        uniqueLabels=np.round(uniqueLabels).astype(int)
+        parcData=np.round(parcData).astype(int)
+    
+    #lets go ahead and remove 0
+    if 0 in uniqueLabels:
+        uniqueLabels=np.delete(uniqueLabels,0)
+        
+    #create the table with the relevant column headers
+    #cheat and use reduce remove to produce a more reliable LUT
+    if isinstance(lookupTable,str):
+        #load it if necessary
+        lookupTable=pd.read_csv(lookupTable)
+        [reducedNifti,reducedLookupTable]=reduceAtlasAndLookupTable(parcNifti,lookupTable,removeAbsentLabels=True,reduceRenameColumns=True)
+    elif  isinstance(lookupTable,pd.DataFrame):
+        #no need to load it
+        [reducedNifti,reducedLookupTable]=reduceAtlasAndLookupTable(parcNifti,lookupTable,removeAbsentLabels=True,reduceRenameColumns=True)
+    else:
+        #guess you're not making a reduced lookup table, hope this doesn't cause any problems
+        pass
+            
+    #columns=['roi_name','roi_label','mm_vol','brain_vol_proportion','centroid_x','centroid_y','centroid_z','medial_border','lateralBorder','anteriorBorder','posteriorBorder','superiorBorder','inferiorBorder','boxyness','island_num','centroid_azimuth','centroid_elevation','centroid_distance']
+
+    #whole brain stats
+    wholeParcMask=nib.Nifti1Image(np.asarray(parcData>0).astype(int),parcNifti.affine,parcNifti.header)
+    tableStart=maskStats(wholeParcMask)
+    #Fill in info for whole brain
+    tableStart['roi_name'].iloc[0]='whole_brain'
+    tableStart['roi_label'].iloc[0]=np.inf
+    tableStart['brain_vol_proportion'].iloc[0]=1
+    tableStart['roi_name'].iloc[0]='whole_brain'
+    tableStart['centroid_azimuth'].iloc[0]=0
+    tableStart['centroid_elevation'].iloc[0]=0
+    tableStart['centroid_distance'].iloc[0]=0
+     
+    #now iterate across the ROS themselves
+    print('Computing metrics for ' +str(len(uniqueLabels)) + ' totaling ' + str(np.round(tableStart['mm_vol'].iloc[0])) + ' mm^3')
+    for iterator,iUniqueLabels in enumerate(uniqueLabels):
+        
+        #current label number
+        currLabelNum=iUniqueLabels
+        
+        if isinstance( reducedLookupTable,pd.DataFrame):
+            #find the name that matches the current numerical label
+            currentName=reducedLookupTable[reducedLookupTable.columns[1]].loc[reducedLookupTable[reducedLookupTable.columns[0]]==iUniqueLabels].values[0]
+        else:
+            currentName='not_available'
+            
+        sys.stdout.write('Computing label ' + str(currLabelNum)+ ' : ' +  currentName + ' \r')
+        sys.stdout.flush()
+        
+        currentMask=wmaPyTools.roiTools.multiROIrequestToMask(parcNifti,iUniqueLabels,inflateIter=0)
+        
+        newRow=maskStats(currentMask)
+        
+        newRow['roi_name'].iloc[0]=currentName
+        newRow['roi_label'].iloc[0]=currLabelNum
+        newRow['brain_vol_proportion'].iloc[0]=newRow['mm_vol'].iloc[0]/tableStart['mm_vol'].loc[tableStart['roi_name']=='whole_brain']
+   
+        #get azimuth and elevation
+        wholeBrainCentroid=tableStart[['centroid_x','centroid_y','centroid_z']].loc[tableStart['roi_name']=='whole_brain'].values[0]
+        currentCentroid=newRow[['centroid_x','centroid_y','centroid_z']].iloc[0].values
+        [radius,elevation,azimuth]= cart2sph(wholeBrainCentroid,currentCentroid)
+
+        newRow['centroid_azimuth'].iloc[0]=azimuth
+        newRow['centroid_elevation'].iloc[0]=elevation
+        newRow['centroid_distance'].iloc[0]=radius
+        
+        #now cat the tables
+        tableStart=pd.concat([tableStart,newRow],ignore_index=True)
+    
+    print('parcellation metrics computation complete')
+    print(tableStart)
+    
+    return tableStart
+
+def cart2sph(coord1,coord2):
+    """
+    Computes spherical coordinates for coord2 relative to coord1
+
+    Parameters
+    ----------
+    coord1 : np.array
+        Coordinate to be treated as sphere centroid
+    coord2 : np.array
+        DESCRIPTION.
+
+    Returns
+    -------
+    r : float
+        The radius (e.g. distance) of the spherical coordinate
+    elev : float, degrees
+        The elevation (in degrees) of the spherical coordinate
+    az: float, degrees
+        The azimuth (in degrees) of the spherical coordinate
+
+    """
+    import numpy as np
+    import math
+    displacement=np.subtract(coord1,coord2)
+    XsqPlusYsq = displacement[0]**2 + displacement[1]**2
+    r = np.sqrt(XsqPlusYsq + displacement[2]**2)
+    #previously
+    #https://stackoverflow.com/questions/4116658/faster-numpy-cartesian-to-spherical-coordinate-conversion
+    #elev = m.atan2(z,m.sqrt(XsqPlusYsq))     # theta
+    #az = m.atan2(y,x)
+    #np.arctan equivalent:      
+    elev = np.arctan(displacement[2]/np.sqrt(XsqPlusYsq))     # theta
+    az = np.arctan(displacement[1]/displacement[0])                           # phi
+    return r,math.degrees(elev),math.degrees(az)
+
+
+def maskStats(maskNifti):
+    """
+    Computes the following metrics/characteristics for an input nifti mask
+    
+    - volume
+    - centroid coordinates
+    - bounding box coordinates
+    - 'boxyness' ( #https://github.com/DanNBullock/wma_tools/blob/e380162e46b3526ed538c6ff071131f960bb0284/Atlas_tools/bsc_computeAtlasStats_v2.m#L100-L108)
+    - number of disconnected components (island_num)
+
+    NOTE: a number of table columns / fields are created which are not filled
+    in.  These require reference to the whole-brain parcellation, and are
+    filled in with wmaPyTools.analysisTools.volParcMeasures
+
+    Parameters
+    ----------
+    maskNifti : nifti-type mask (boolean or [0,1] int)
+        An input mask nifti for which the metrics are to be computed.
+
+    Returns
+    -------
+    maskMetricsDF : pd.DataFrame, single row
+        A single row pandas dataframe with the metrics computed for the input 
+        mask
+
+    """
+    
+    
+    import pandas as np
+    import numpy as np
+    import nibabel as nib
+    import numpy as np
+    import pandas as pd
+    from warnings import warn
+    import wmaPyTools.roiTools
+    from dipy.tracking.utils import  seeds_from_mask
+    from scipy.ndimage.measurements import label
+    
+    columns=['roi_name','roi_label','mm_vol','brain_vol_proportion','centroid_x','centroid_y','centroid_z','medial_border','lateralBorder','anteriorBorder','posteriorBorder','superiorBorder','inferiorBorder','boxyness','island_num','centroid_azimuth','centroid_elevation','centroid_distance']
+    
+    maskMetricsDF=pd.DataFrame(columns=columns)
+    
+    currMaskData=np.asanyarray(maskNifti.dataobj)
+    
+    voxelVol=np.prod(maskNifti.header.get_zooms())
+    
+    currentmmVol=voxelVol*np.sum(currMaskData==1)
+    
+    #get the mask itself
+    currentMask=wmaPyTools.roiTools.multiROIrequestToMask(maskNifti,1,inflateIter=0)
+    
+    currMaskData=np.asanyarray(currentMask.dataobj)
+    
+    seedCoords=seeds_from_mask(currMaskData, currentMask.affine, density=(2, 2, 2))
+    
+    #detect if cross hemispheric
+    #if there's a non trivial number across the midline
+    hemiThresh=.2
+    if np.sum(seedCoords[:,0]>0)/len(seedCoords) > hemiThresh and np.sum(seedCoords[:,0]>0)/len(seedCoords) < 1 - hemiThresh:
+        interHemiBool=True
+    else:
+        interHemiBool=False
+
+    roiCentroid=np.mean(seedCoords,axis=0)
+    #get the relative borders and their relevant locations
+    relativeLocationTerms=['superior','inferior','medial','lateral','anterior','posterior']
+    dimList=[2,2,0,0,1,1]
+    borderHolder=np.zeros(len(dimList))
+    for iterator,iTerms in enumerate(relativeLocationTerms):
+        #conditional switch to left right for interhemi labels
+        if interHemiBool and iTerms==relativeLocationTerms[2]:
+            iTerms='left'
+        elif interHemiBool and iTerms==relativeLocationTerms[3]:
+            iTerms='right'
+        else:
+            #do nothing
+            pass
+        
+        borderROI=wmaPyTools.roiTools.planarROIFromAtlasLabelBorder(maskNifti,1, iTerms)
+        borderROIBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(borderROI)
+        meanCoords=np.mean(borderROIBoundCoords,axis=0)
+        borderHolder[iterator]=meanCoords[dimList[iterator]]
+
+    #boxyness computation
+    #see this for explanation:
+    #https://github.com/DanNBullock/wma_tools/blob/e380162e46b3526ed538c6ff071131f960bb0284/Atlas_tools/bsc_computeAtlasStats_v2.m#L100-L108
+    boundBoxVol=abs(borderHolder[0]-borderHolder[1])*abs(borderHolder[2]-borderHolder[3])*abs(borderHolder[4]-borderHolder[5])
+            
+    boxyness=currentmmVol/boundBoxVol
+    
+    [labeled_array, num_features]=label(currMaskData)
+    
+    #I think we've filled in everything we can for now.  Make the table
+    
+    #['roi_name','roi_label','mm_vol','brain_vol_proportion','centroid_x','centroid_y','centroid_z','medial_border','lateralBorder','anteriorBorder','posteriorBorder','superiorBorder','inferiorBorder','boxyness','island_num','centroid_azimuth','centroid_elevation','centroid_distance']
+    
+    rowList=['TBD','TBD',currentmmVol,'TBD',roiCentroid[0],roiCentroid[1],roiCentroid[2],borderHolder[2],borderHolder[3],borderHolder[4],borderHolder[5],borderHolder[0],borderHolder[1],boxyness,num_features,'TBD','TBD','TBD']
+    maskMetricsDF.loc[0]=rowList
+    return maskMetricsDF
     
 
 def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColumns=True):
