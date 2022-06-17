@@ -111,6 +111,10 @@ def findTractNeckNode(streamlines, refAnatT1=None):
     import dipy.tracking.utils as ut
     from scipy.ndimage import gaussian_filter
     import nibabel as nib
+    import itertools
+    
+    #TODO 
+    #fix this, its too slow
     
     #lets presuppose that the densest point in the density mask ocurrs within
     #the neck.  Thus we need a
@@ -119,28 +123,52 @@ def findTractNeckNode(streamlines, refAnatT1=None):
         tractMask=ut.density_map(streamlines, dummyNifti.affine, dummyNifti.shape)
     else:
         tractMask=ut.density_map(streamlines, refAnatT1.affine, refAnatT1.shape)
-    #we smooth it just in case there are weird local maxima
-    #that sigma may need to be worked on
-    smoothedDensity=gaussian_filter(np.square(tractMask),sigma=3)
-    #now find the max point
-    maxDensityLoc=np.asarray(np.where(smoothedDensity==np.max(smoothedDensity)))
-    #pick the first one arbitrarily in case there are multiple
-    maxDensityImgCoord=maxDensityLoc[:,0]
-    #get the coordinate in subject space
-    if refAnatT1==None:
-        subjCoord = nib.affines.apply_affine(dummyNifti.affine,maxDensityImgCoord)
+        
+    #BEFORE WE SMOOTH
+    #run a sanity check to ensure that there's some sort of overlap between the streamlines
+    #if the density is NOT only 1
+    if not np.array_equal(np.unique(tractMask),np.array([0,1])):    
+
+        #we smooth it just in case there are weird local maxima
+        #that sigma may need to be worked on
+        smoothedDensity=gaussian_filter(np.square(tractMask),sigma=3)
+        #now find the max point
+        maxDensityLoc=np.asarray(np.where(smoothedDensity==np.max(smoothedDensity)))
+        #pick the first one arbitrarily in case there are multiple
+        maxDensityImgCoord=maxDensityLoc[:,0]
+        #get the coordinate in subject space
+        if refAnatT1==None:
+            subjCoord = nib.affines.apply_affine(dummyNifti.affine,maxDensityImgCoord)
+        else:
+            subjCoord = nib.affines.apply_affine(refAnatT1.affine,maxDensityImgCoord)
     else:
-        subjCoord = nib.affines.apply_affine(refAnatT1.affine,maxDensityImgCoord)
-    
+        #how else should we approximate this
+        #just take the average of the inner half of the streamlines, I guess
+        coordsToAverage=[[] for iStreams in streamlines]
+        for iterator,iStreams in enumerate(streamlines):
+            #yes it will be slightly biased due to odd numbers, but whatever,
+            #no need to overengineer this at the moment
+            #TODO way to overengineer: take the weighted average
+            #with the weight being the absolute value of the distance from
+            #the middle node index
+            #these fibers should be culled anyways
+            curLength=len(iStreams)
+            curHalfLength=np.round(curLength*.5).astype(int)
+            curQuarter=np.round(curHalfLength*.5).astype(int)
+            #get the middle half
+            coordsToAverage[iterator]=iStreams[curQuarter:curQuarter+curHalfLength,:]
+        #average them, I guess
+        subjCoord=np.mean(np.vstack(np.asarray(list(itertools.chain(*coordsToAverage)))),axis=0)
+                
 
     #iterate across streamlines
-    neckNodeIndexVecOut=[]
-    for iStreamline in range(len(streamlines)):
+    neckNodeIndexVecOut=np.zeros(len(streamlines),dtype=int)
+    for iterator,iStreamline in enumerate(streamlines):
         #distances for all nodes 
-        curNodesDist = cdist(streamlines[iStreamline], np.atleast_2d(subjCoord), 'euclidean')
+        curNodesDist = cdist(iStreamline, np.atleast_2d(subjCoord), 'euclidean')
         #presumably the nodes most directly tangent to the highest density point would be the neck?
-        neckNodeIndexVecOut.append(np.where(curNodesDist==np.min(curNodesDist))[0].astype(int))
-
+        neckNodeIndexVecOut[iterator]=np.argmin(curNodesDist)
+        
     return neckNodeIndexVecOut
 
 def removeStreamlineOutliersAtNeck(streamlines,cutStDev):
@@ -541,8 +569,11 @@ def dipyOrientStreamlines(streamlines):
             
     cluster=quickbundlesClusters(streamlines, thresholds=[30,20,10,5],nb_points=50,verbose=True)
     
+    #create the dummy nifti here to save time
+    dummyNifti=wmaPyTools.roiTools.dummyNiftiForStreamlines(cluster.refdata)
+    
     for iBundles in cluster:
-        [orientedStreams, clusterIndexes]=orientDipyCluster(iBundles)
+        [orientedStreams, clusterIndexes]=orientDipyCluster(iBundles,dummyNifti)
         
         #ok, now this is super ugly/iffy
         for streamsIterator,iIndex in enumerate(clusterIndexes):
@@ -572,16 +603,31 @@ def dipyOrientStreamlines(streamlines):
 
     return streamlines
 
-def orientDipyCluster(cluster):
+def orientDipyCluster(cluster,refNifti=None):
     import numpy as np
     import wmaPyTools.analysisTools
+    from scipy.spatial.distance import cdist
     
     import dipy.tracking.streamline as streamline
     
     streamIndexes=list(cluster.indices)
+    clusterStreams=cluster.refdata[streamIndexes]
     curCentroid=cluster.centroid
     #but you have to make sure that this is oriented correctly
-    centroidNeck=curCentroid[int(np.round(len(curCentroid)/2))-3:int(np.round(len(curCentroid)/2))+3,:]
+    
+    #find the neck for this tract
+    neckNodes=findTractNeckNode(clusterStreams,refAnatT1=refNifti)
+    #get the neck coords for each
+    neckCoords=[iStream[neckNodes[iterator],:] for iterator,iStream in enumerate(clusterStreams)]
+    #mean neck coord
+    meanNeckCord=np.mean(np.asarray(neckCoords),axis=0)
+    #find the cetroid node closest to this
+    nodeDistances=cdist(curCentroid,np.atleast_2d(meanNeckCord))
+    
+    centroidNeckNode=np.argmin(nodeDistances)
+    #get safe neck nodes to index
+    safeNeckNodes=list(set(list(range(len(curCentroid)))).intersection(set(range(centroidNeckNode-3,centroidNeckNode+3))))
+    centroidNeck=curCentroid[safeNeckNodes,:]
     deltas=wmaPyTools.analysisTools.cumulativeTraversalStream(centroidNeck)
     
     maxTraversalDim=np.where(np.max(deltas)==deltas)[0][0]
@@ -595,7 +641,7 @@ def orientDipyCluster(cluster):
     if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
         curCentroid= curCentroid[::-1]
 
-    orientedStreams=streamline.orient_by_streamline(cluster.refdata, curCentroid)
+    orientedStreams=streamline.orient_by_streamline(clusterStreams, curCentroid)
     
     #I don't think I need this any more
     # refStreams=cluster.refdata
@@ -1987,11 +2033,11 @@ def quickbundlesClusters(streamlines, **kwargs):
     from dipy.tracking.streamline import Streamlines
     
     #fill in parameters if they are there.
-    if not 'thresholds' in kwargs.keys():
+    if not 'thresholds' in locals():
         thresholds = [30,20,10,5]
-    if not 'nb_points' in kwargs.keys():
+    if not 'nb_points' in locals():
         nb_pts=20
-    if not 'verbose' in kwargs.keys():
+    if not 'verbose' in locals():
         verbose=False
     #perform the quick, iterave bundling
     clusters=qbx_and_merge(streamlines,thresholds , nb_pts, select_randomly=None, rng=None, verbose=verbose)
