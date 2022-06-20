@@ -2118,7 +2118,7 @@ def dipyPlotTract_setColors(streamlines, streamColors, refAnatT1=None, tractName
     
 
     
-def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=2.5,endpointCmaps=['winter','autumn']):
+def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=2.5,endpointCmaps=['winter_','autumn_r']):
     """
     
 
@@ -2216,7 +2216,7 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     #specify the nodes
     end1CmapNodes=list(range(end1CmapStart,end1CmapStart+end1NodeNum))
     #use an intersect with the main body to ensure that all the nodes are within the right range
-    end1CmapNodes=list(set(end1CmapNodes).intersection(bodyCmapNodes))
+    end1CmapNodes=list(sorted(list(set(end1CmapNodes).intersection(bodyCmapNodes))))
     end1CmapDict={}
     end1CmapDict['cmap']=endpointCmaps[0]
     end1CmapDict['nodes']=end1CmapNodes
@@ -2229,16 +2229,25 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     end2CmapStart=streamLength-end2NodeNum
     end2CmapNodes=list(range(end2CmapStart,end2CmapStart+end2NodeNum))
     #use an intersect with the main body to ensure that all the nodes are within the right range
-    end2CmapNodes=list(set(end2CmapNodes).intersection(bodyCmapNodes))
+    end2CmapNodes=list(sorted(list(set(end2CmapNodes).intersection(bodyCmapNodes))))
     end2CmapDict={}
     end2CmapDict['cmap']=endpointCmaps[1]
     end2CmapDict['nodes']=end2CmapNodes
+    #reverse the endpoint 2 cmap nodes so that they are colored correctly
+    #don't do this, just set the colormap to _r in the input
+    #end2CmapDict['nodes']=list(reversed(end2CmapNodes))
     
     #ALL COMPONENT STREAMLINE CMAP ARRAYS GENERATED
-    #now create a dictionary holder for all of them
+    #remove competing nodes in accordance with ranked preference
+    #body is lowest priority, remove everything from that
+    [bodyCmapDict['nodes'].remove(iNode) for iNode in list(set(bodyCmapDict['nodes']).intersection(set().union(*[neckCmapDict['nodes'],end1CmapDict['nodes'],end2CmapDict['nodes']])))]
+    #now remove neck nodes from endpoint areas
+    [end1CmapDict['nodes'].remove(iNode) for iNode in list(set(end1CmapDict['nodes']).intersection(set().union(*[neckCmapDict['nodes']])))]
+    [end2CmapDict['nodes'].remove(iNode) for iNode in list(set(end2CmapDict['nodes']).intersection(set().union(*[neckCmapDict['nodes']])))]
+    #should be done
     
     #list of dicts?
-    cmapDicts=[bodyCmapDict,neckCmapDict,end1CmapDict,end2CmapDict]
+    cmapDicts=[neckCmapDict,end1CmapDict,end2CmapDict,bodyCmapDict]
     
     return cmapDicts
 
@@ -2247,6 +2256,8 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
     Digests a number of potentially competing colormaps into a single,
     composite 3-D array.  The conflicts can be adjudicated, and the colormaps
     can thus be merged, with wmaPyTools.visTools.blendCompetingColormaps
+    
+    Uses alpha value to impose a fading at the tips of the colormaps
     
 
     Parameters
@@ -2314,11 +2325,57 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
             raise ValueError('Unparsable colormap entered for colormap dictionary ' + str(iCounter))   
             
         #get the current node indexes
-        currNodes=iCmaps['nodes']
-        #get the colormappings for each of the requested nodes
-        selectedNodesCmap=currCmap(range(len(currNodes)))
-        #assign these to the blank colormap
-        currentCmap[currNodes,:]=selectedNodesCmap
+        if len(iCmaps['nodes'])>0:
+            currNodes=iCmaps['nodes']
+            #ok but  also get lead blend and lag blend sections
+            leadBlendNodes=sorted(list(set(list(range(np.min(currNodes)-len(currNodes),np.min(currNodes)))).intersection(set(allNodes))))
+            lagBlendNodes=sorted(list(set(list(range(np.max(currNodes)+1,np.max(currNodes)+len(currNodes)))).intersection(set(allNodes))))
+            
+            #get the colormappings for each of the requested nodes
+            #previously:
+            #selectedNodesCmap=currCmap(range(len(currNodes)))
+            #but actually, what you want is to treat the cmap as a range from [0:1]
+            #so, to borrow from colorGradientForStreams, you actually need to use something like
+            #np.array(range(nodeNumber))/nodeNumber
+            #cmapSampleLocations=np.array(np.arange((len(currNodes)))/len(currNodes)
+            cmapSampleLocations=np.linspace(0,1,num=len(currNodes))
+            selectedNodesCmap=currCmap(cmapSampleLocations)
+            #get thhe lead and lag blend colors
+            leadBlendColor=selectedNodesCmap[0,:]
+            lagBlendColor=selectedNodesCmap[-1,:]
+            #create the weight vecs
+            leadBlendWeights=np.linspace(0,1,num=len(leadBlendNodes))
+            lagBlendWeights=np.linspace(0,1,num=len(lagBlendNodes))
+            #create an array for each of these
+            #lead
+            try:
+                leadBlendColorArray=np.vstack([leadBlendColor]*len(leadBlendNodes))
+                leadBlendColorArray[:,3]=leadBlendWeights
+            except:
+                leadBlendColorArray=[]
+            #lag:
+            try:
+                lagBlendColorArray=np.vstack([lagBlendColor]*len(lagBlendNodes))
+                lagBlendColorArray[:,3]=lagBlendWeights
+            except:
+                lagBlendColorArray=[]
+            
+            #assign these to the blank colormap
+            currentCmap[currNodes,:]=selectedNodesCmap
+            #lead lag
+            try:
+                currentCmap[leadBlendNodes,:]=leadBlendColorArray
+            except:
+                pass
+            try:
+                currentCmap[lagBlendNodes,:]=lagBlendColorArray
+            except:
+                pass
+        else:
+            #currentCmap is already empty, so this doesn't matter
+            pass
+        
+        
         #set this in the output holder
         colorMapsHold[iCounter]=currentCmap
     
@@ -2326,6 +2383,93 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
     stackedCmaps=np.stack(colorMapsHold,axis=2)
     
     return stackedCmaps
+
+def blendCompetingColormaps_preWeight(stackedColormaps):
+    """
+    Blends competing color mappings together.
+    
+    NOTE: colormaps should be of same size
+
+    Parameters
+    ----------
+    stackedColormaps : list or np.array
+        A list or array of element colormappings.  element colormappings should be for the same entities
+        and should thus all be of same length.  As np.array, colormaps should
+        be stacked along the last (e.g. third, [2]) dimension
+
+    Raises
+    ------
+    ValueError
+        If a list of color arrays of different sizes are input, will raise error.
+        Will also raise error if color dimension (e.g. second, [1])) is not
+        RGB or RGBA sized
+
+    Returns
+    -------
+    weightedRGB : np.array
+        An RGB np.array, with the colors blended (equally, when competing).
+        N elements long where N is the length of the original input.
+
+    """
+    
+    import numpy as np
+    import itertools
+    import copy
+    
+    if isinstance(stackedColormaps ,list):
+        #check to make sure that all are the same length
+        assert len(np.unique([len(iInputMaps) for iInputMaps in stackedColormaps]))==1, 'Input list of colormaps contains maps of different lengths'
+        #if it passes this check, go aheas and make an array
+        stackedColormaps=np.stack(stackedColormaps,axis=2)
+        
+    #check to make sure that the second dimension (i.e. [1]) is either
+    #length 3 (e.g. RGB) or length 4 (e.g. RGBA); add a column if it is length 3
+    
+    #get the shape of the input stackedColormaps
+    mapsArrayShape=stackedColormaps.shape
+    #do a check for this criterion
+    #if it is RGB
+    if mapsArrayShape[1]==3:
+        #add a column to the second dimension
+        stackedColormaps=np.pad(stackedColormaps,[(0,0),(0,1),(0,0)])
+        #ok, but now you have to go through and make sure the weights are right
+        #for each colormap, begin by iterating across the colormaps
+        for iMaps in range(mapsArrayShape[2]):
+            #now, within that colormap iterate across the nodes
+            for iNodes in range(mapsArrayShape[0]):
+                #get the RGB value for the current node
+                currNodeRGB=stackedColormaps[iNodes,0:3,iMaps]
+                #look, yes, it's a bad assumption, but we're just going to 
+                #assume that an RGB of (0,0,0), i.e. black, is not something
+                #that would actually be done, and is to be treated as the
+                #"default" unassigned value
+                #multiple ways to do this, all == 0, sum ==0 (they can't be negative), etc
+                if np.sum(currNodeRGB) ==0:
+                    #if it sums to 0, and is thus "black", and presumably unassigned
+                    #set the weight to 0
+                    stackedColormaps[iNodes,3,iMaps]=0
+                else:
+                #if any color whatsoever is assigned, set the initial weight to full (e.g. 1)
+                    stackedColormaps[iNodes,3,iMaps]=1
+    elif mapsArrayShape[1]==4: 
+        pass
+        #this is the desired condition, do nothing
+    else:
+        #if this is triggered, it means that the input color array stack's 2nd ([1])
+        #dimension is NEITHER 3 or 4 in length.  This probably means it isn't structured
+        #such that this is the RGB or RGBA dimension.  As such, throw an error.
+        raise ValueError('Input color array dimension 2 (aka [1]) is not 3 (RGB) or 4 (RGBA) in length \n(do your array dimensions represent [nodes, RGB,cmaps]?)')
+    
+     
+    weights=np.stack([stackedColormaps[:,3,:]]*3,axis=1)
+    #do the weighted mean
+    weightedRGB=np.average(stackedColormaps[:,0:3,:],axis=2,weights=weights)
+
+    #TODO
+    #maybe add some sort of conditional modification for RGB vs RGBA output?
+
+    return weightedRGB
+    
 
 def blendCompetingColormaps(stackedColormaps):
     """
@@ -2357,6 +2501,7 @@ def blendCompetingColormaps(stackedColormaps):
     
     import numpy as np
     import itertools
+    import copy
     
     if isinstance(stackedColormaps ,list):
         #check to make sure that all are the same length
@@ -2458,13 +2603,13 @@ def blendCompetingColormaps(stackedColormaps):
         deltaDirections[locations]=    deltaContestant[iDeltas]                      
     
     #lets go ahead and copy this just in case
-    weightModifiedCmaps=stackedColormaps    
+    weightModifiedCmaps=copy.deepcopy(stackedColormaps) 
     
     #now comes the complicated part: using and adjudicating this
     for iDeltas,changeNode in enumerate(changeLocations):
         
         #if the color is disappearing
-        if deltaDirections[iDeltas] == -1:
+        if deltaDirections[iDeltas] > 0:
             #which cmaps is/are disapearing
             fadingOut=deltaMaps[iDeltas]
             fadingIn=list(set(contestants[changeNode]).difference(set(fadingOut)))
@@ -2486,7 +2631,7 @@ def blendCompetingColormaps(stackedColormaps):
             boundNodes=list(range(minBound,minBound+boundSpan))
         
         #if the color is appearing
-        elif deltaDirections[iDeltas]  == 1:
+        elif deltaDirections[iDeltas]  < 0:
             fadingIn=deltaMaps[iDeltas]
             fadingOut=list(set(contestants[changeNode]).difference(set(fadingIn)))
             #find bounds, this is either the start of the vector, or the preceding appearnace (positive)
@@ -2514,6 +2659,7 @@ def blendCompetingColormaps(stackedColormaps):
         for iFadingOutCmaps in fadingOut:
             #[node indexes,alphaweights,cMaps]
             weightModifiedCmaps[boundNodes,3,iFadingOutCmaps]=np.multiply(weightModifiedCmaps[boundNodes,3,iFadingOutCmaps],fadeOutWeights)
+            
     #pick out the RGB array and weights, remember it excludes top for some dern reason
     RGBarray=weightModifiedCmaps[:,0:3,:]
     #stretch the weights so that each color channel has its own weight array
@@ -2685,7 +2831,7 @@ def bandedStreamCmap(streamline, neckNode,streamCmap='seismic', neckLengthMM=10 
     
     stackedColorMaps=stackedElementColorAssignments(len(streamline),colorDicts)
     
-    blendedStreamColorMap=blendCompetingColormaps(stackedColorMaps)
+    blendedStreamColorMap=blendCompetingColormaps_preWeight(stackedColorMaps)
     
     return blendedStreamColorMap
     
@@ -2699,7 +2845,7 @@ def orientAndColormapStreams(streamlines):
     import tqdm
     #test run = 542.348 seconds
     
-    clusters=wmaPyTools.streamlineTools.quickbundlesClusters(streamlines, thresholds=[32,16,8,3],nb_points=50,verbose=True)
+    clusters=wmaPyTools.streamlineTools.quickbundlesClusters(streamlines, thresholds=[40,20,10],nb_pts=100,verbose=True)
     
     
     #TODO
@@ -2712,7 +2858,7 @@ def orientAndColormapStreams(streamlines):
         #streamlines=streamlines[survivingIndexes]
     dummyNifti=wmaPyTools.streamlineTools.dummyNiftiForStreamlines(clusters.refdata)
     
-    outColormaps=[[] for iStreams in streamlines]
+    outColormaps=[[] for iStreams in clusters.refdata]
     for iClusters in tqdm.tqdm(clusters):
         
         #orient the cluster
@@ -2724,7 +2870,7 @@ def orientAndColormapStreams(streamlines):
         
         currentCmaps=[[] for istreams in orientedStreams]
         for iterator,iStream in enumerate(orientedStreams):
-            currentCmaps[iterator]=  bandedStreamCmap(iStream,neckNodes[iterator],streamCmap='seismic', neckLengthMM=5 ,neckCmap='twilight' ,endCapLengthMM=2.5,endpointCmaps=['winter','autumn'])
+            currentCmaps[iterator]=  bandedStreamCmap(iStream,neckNodes[iterator],streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=5,endpointCmaps=['winter_r','autumn'])
         #test run = 320.004 seconds .0.009 per
         
         for iterator,iStreamIndexes in enumerate(clusterIndexes):
@@ -2732,7 +2878,7 @@ def orientAndColormapStreams(streamlines):
             outColormaps[iStreamIndexes]=currentCmaps[iterator]
         
     return streamlines, outColormaps
-    
+
 
 def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twilight' ,endpointCmaps=['winter','autumn']):
     """
@@ -2771,17 +2917,7 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
         try:
             neckCmap = matplotlib.cm.get_cmap(neckCmap)
         except:
-            neckCmap = matplotlib.cm.get_cmap(streamCmap)
-            #create a linspace to index into colormap
-            linspaceFill=np.linspace(0.0, 1.0, 255)
-            #use it to extract a temp colormap
-            tempColormap=neckCmap(linspaceFill)
-            #roll it by half
-            cycleRollColormap=np.roll(tempColormap,int(len(tempColormap) *.5),axis=0)
-            #now do the devilishly clever thing of flipping, adding and averaging the new colormap
-            doubleAvgCmap=np.divide(np.add(np.flip(cycleRollColormap,axis=0),cycleRollColormap),2)
-            #use that to create a new colormap           
-            neckCmap=matplotlib.colors.LinearSegmentedColormap.from_list('cycle_'+streamCmap,doubleAvgCmap,len(doubleAvgCmap))
+            neckCmap = invertDivergentCmap(matplotlib.cm.get_cmap(streamCmap),overlapProportion=.5)
     if isinstance(streamCmap, str):
         streamCmap = matplotlib.cm.get_cmap(streamCmap)
 
@@ -2813,86 +2949,250 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     lookDistance=np.round(lookDistanceMM/avgNodeDistance).astype(int)
     aheadNodes=np.zeros(len(streamlines)).astype(int)
     behindNodes=np.zeros(len(streamlines)).astype(int)
+    neckWindow=[[] for iStreams in streamlines]
 
     neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
     
-    for iStreamlines in range(len(streamlines)):
+    for iStreamIndexes,iStreamlines in enumerate(streamlines):
         #A check to make sure you've got room to do this indexing on both sides
-        if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
-            aheadNodes[iStreamlines]=(neckNodes[iStreamlines]+lookDistance)
-            behindNodes[iStreamlines]=(neckNodes[iStreamlines]-lookDistance)
-            #otherwise do the best you can
-        else:
-            #if there's a limit to how many nodes are available ahead, do the best you can
-            spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
-            if spaceAhead<=lookDistance:
-                aheadWindow=spaceAhead-1
-            else:
-                aheadWindow=lookDistance
-            #if there's a limit to how many nodes are available behind, do the best you can
-            spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
-            if spaceBehind<=lookDistance:
-                behindWindow=spaceBehind-1
-            else:
-                behindWindow=lookDistance
-           
-            #append the relevant values
-            aheadNodes[iStreamlines]=neckNodes[iStreamlines]+aheadWindow
-            behindNodes[iStreamlines]=neckNodes[iStreamlines]-behindWindow
+        currentStreamNodeIndexes=list(range(len(iStreamlines)))
+        #get the theoretical targets for each set, ahead and behind
+        currAheadNodes=list(range(neckNodes[iStreamIndexes],neckNodes[iStreamIndexes]+lookDistance))
+        currBehindNodes=list(range(neckNodes[iStreamIndexes]-lookDistance,neckNodes[iStreamIndexes]))
+        #find the safe intersection of these with the available nodes
+        currAheadNodes=list(set(currAheadNodes).intersection(set( currentStreamNodeIndexes)))
+        currBehindNodes=list(set(currBehindNodes).intersection(set(currentStreamNodeIndexes)))
+        neckWindow[iStreamIndexes]=list(set(currAheadNodes).union(set(currBehindNodes)))
+        #for old code
+        aheadNodes[iStreamIndexes]=np.max(neckWindow[iStreamIndexes])
+        behindNodes[iStreamIndexes]=np.min(neckWindow[iStreamIndexes])
+   
+        
+        
+
     
     #create some arrays to use for blending
     #could proably clean up discreapancy between using len of arrayas and the lookdistance
-    whiteArray=np.ones([np.round(lookDistance).astype(int),4])
-    blendWeightsArray=np.asarray([np.arange(np.round(lookDistance).astype(int))/len(whiteArray),np.flip(np.arange(np.round(lookDistance).astype(int))/len(whiteArray))])
+    whiteArray=np.ones([lookDistance,4])
+    #hat the heck is this?
+    #creates an ascending descending weights aray
+    blendWeightsArray=np.asarray([np.arange(lookDistance)/lookDistance,np.flip(np.arange(lookDistance)/lookDistance)])
     blendWeightsArray=np.stack([blendWeightsArray]*4,axis=-1)
     #make a long array too for blending
-    longBlendWeightsArray=np.asarray([np.arange(np.round(lookDistance).astype(int))/np.round(lookDistance).astype(int),np.flip(np.arange(np.round(lookDistance).astype(int))/np.round(lookDistance).astype(int))])
+    #don't actualy undersstand this as it is the same length as the blend
+    longBlendWeightsArray=np.asarray([np.arange(lookDistance)/lookDistance,np.flip(np.arange(lookDistance)/lookDistance)])
     longBlendWeightsArray=np.stack([longBlendWeightsArray]*4,axis=-1)
     
     
     #do the endpoints
-    for iStreamlines in range(len(streamlines)):
+    for iStreamIndexes,iStreamlines in enumerate(streamlines):
         #do the neck
-        streamColors[iStreamlines][behindNodes[iStreamlines]:aheadNodes[iStreamlines]]=neckCmap(np.array(range(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))/(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))
+        streamColors[iStreamIndexes][neckWindow[iStreamIndexes]]=neckCmap(np.linspace(0,1,num=len(neckWindow[iStreamIndexes])))
         #but also blend it a bit
         #don't need to do an if check, because streamlines can always be shorter
         #if len(streamlines[iStreamlines])
         #ok, so what we are doing here: blending the existing streamline color with white using a weighed average along the streamline
+        #NOTE: this presumes that a white-tipped colormap is being used for th neck.
+        #it would actually be more accurate to pick the min and max of the neck colormap and use that
         #this turned out extremely nice, so lets also do it for the endpoints as well
         #if there's room, don't bother with it otherwise
-        if 0<=behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):
-            behindColors=streamColors[iStreamlines][behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):behindNodes[iStreamlines]]
+        if 0<=behindNodes[iStreamIndexes]-lookDistance:
+            targetIndexes=list(range(behindNodes[iStreamIndexes]-lookDistance,behindNodes[iStreamIndexes]))
+            behindColors=streamColors[iStreamIndexes][targetIndexes]
             blendColorsStack=np.asarray([behindColors,whiteArray])
             blendedReplacement=np.average(blendColorsStack,axis=0,weights=np.flip(blendWeightsArray,axis=1))
-            streamColors[iStreamlines][behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):behindNodes[iStreamlines]]=blendedReplacement
+            streamColors[iStreamIndexes][targetIndexes]=blendedReplacement
         #now do the other side
         #if there's room, don't bother with it otherwise
-        if len(streamColors[iStreamlines])>=aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int)):
-            aheadColors=streamColors[iStreamlines][aheadNodes[iStreamlines]:aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int))]
+        if len(streamColors[iStreamIndexes])>=aheadNodes[iStreamIndexes]+lookDistance:
+            targetIndexes=list(range(behindNodes[iStreamIndexes]-lookDistance,behindNodes[iStreamIndexes]))
+            aheadColors=streamColors[iStreamIndexes][targetIndexes]
             blendColorsStack=np.asarray([aheadColors,whiteArray])
             blendedReplacement=np.average(blendColorsStack,axis=0,weights=blendWeightsArray)
-            streamColors[iStreamlines][aheadNodes[iStreamlines]:aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int))]=blendedReplacement
+            streamColors[iStreamIndexes][targetIndexes]=blendedReplacement
         
         #also, this will recolor the streamlines if they had a neck point near the end of the streamline
         #do endpoints 1
         #no need to flip in order to ensure correct sequencing, apprently?
-        end1Colors=streamColors[iStreamlines][0:lookDistance]
+        end1Colors=streamColors[iStreamIndexes][0:lookDistance]
         #you know, like a telomere
         newEndpoint1Cap=np.flip(endpointCmap1(np.linspace(0,1,num=lookDistance)),axis=0)
         blendColorsStack=np.asarray([end1Colors,newEndpoint1Cap])
         blendedReplacement=np.average(blendColorsStack,axis=0,weights=longBlendWeightsArray)
-        streamColors[iStreamlines][0:lookDistance]=blendedReplacement
+        streamColors[iStreamIndexes][0:lookDistance]=blendedReplacement
         #do endpoints 2
         #we do need to flip here in order to get sequecning at end of streamline correct
         #actually it was for the other one
-        end2Colors=streamColors[iStreamlines][-(lookDistance+1):-1]
+        end2Colors=streamColors[iStreamIndexes][-(lookDistance+1):-1]
         #you know, like a telomere
         newEndpoint2Cap=endpointCmap2(np.linspace(0,1,num=lookDistance))
         blendColorsStack=np.asarray([end2Colors,newEndpoint2Cap])
         blendedReplacement=np.average(blendColorsStack,axis=0,weights=np.flip(longBlendWeightsArray,axis=1))
-        streamColors[iStreamlines][-(lookDistance+1):-1]=blendedReplacement
+        streamColors[iStreamIndexes][-(lookDistance+1):-1]=blendedReplacement
     
     return streamColors
+    
+
+# def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twilight' ,endpointCmaps=['winter','autumn']):
+#     """
+#     OLD VERSION
+#     Computes and implements a colormapping for an input collection of streamlines
+#     applies a separate colormap at the "neck" of the tract, and also
+#     applies separate color maps at the endpoints of the tract.
+    
+#     NOTE:  DOES NOT REORIENT THE TRACT BEFORE DOING THIS.  PREORIENT THE
+#     STREAMLINES BEFORE APPLYING THIS FUNCTION
+
+#     Parameters
+#     ----------
+#     streamlines : collection of streamlines
+#         The streamlines for which the colormapping (for each streamline) is to
+#         be computed,
+#     streamCmap : string, specifying matplotlib colormap (or colormap itself), optional
+#         The colormap for the overall streamline. The default is 'seismic'.
+#     neckCmap : string, specifying matplotlib colormap (or colormap itself), optional, optional
+#         The colormap that is specific to the neck. The default is 'twilight'.
+#     endpointCmaps : string, specifying matplotlib colormap (or colormap itself), optional, optional
+#         The colormap that is specific to the endpoints. The default is ['winter','autumn'].
+
+#     Returns
+#     -------
+#     streamColors : a list of lists, with foats inside
+#         For each node of each streamline, this list of list contains the color
+#         value for that node.
+
+#     """
+    
+#     import wmaPyTools.streamlineTools
+#     import matplotlib
+#     import numpy as np
+#     if isinstance(neckCmap, str):
+#         #sometimes twlight isn't avaialble.  lets think of a way around this.
+#         try:
+#             neckCmap = matplotlib.cm.get_cmap(neckCmap)
+#         except:
+#             neckCmap = matplotlib.cm.get_cmap(streamCmap)
+#             #create a linspace to index into colormap
+#             linspaceFill=np.linspace(0.0, 1.0, 255)
+#             #use it to extract a temp colormap
+#             tempColormap=neckCmap(linspaceFill)
+#             #roll it by half
+#             cycleRollColormap=np.roll(tempColormap,int(len(tempColormap) *.5),axis=0)
+#             #now do the devilishly clever thing of flipping, adding and averaging the new colormap
+#             doubleAvgCmap=np.divide(np.add(np.flip(cycleRollColormap,axis=0),cycleRollColormap),2)
+#             #use that to create a new colormap           
+#             neckCmap=matplotlib.colors.LinearSegmentedColormap.from_list('cycle_'+streamCmap,doubleAvgCmap,len(doubleAvgCmap))
+#     if isinstance(streamCmap, str):
+#         streamCmap = matplotlib.cm.get_cmap(streamCmap)
+
+#     if isinstance(endpointCmaps[0], str):
+#         endpointCmap1 = matplotlib.cm.get_cmap(endpointCmaps[0])
+#         endpointCmap2 = matplotlib.cm.get_cmap(endpointCmaps[1])
+#     else:
+#         endpointCmap1 = endpointCmaps[0]
+#         endpointCmap2 = endpointCmaps[1]
+        
+#     #print out the names, just because fury seems to be erroring at some point
+#     print('Selected colormaps:')
+#     print('NeckCmap = ' + neckCmap.name )
+#     print('StreamCmap = ' + streamCmap.name )
+#     print('endpointCmap1 = ' + endpointCmap1.name )
+#     print('endpointCmap2 = ' + endpointCmap2.name )
+        
+#     #go ahead and apply the full streamline colorscheme
+#     streamColors = [streamCmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
+    
+#     #steal come code from orientTractUsingNeck to color the neck
+#     #lets aim for a realspace distance when orienting our streamlines
+#     #we'll arbitrarily say 5 for the moment
+#     #we'll assume that all streamlines have the same internode distance
+#     #it's a TERRIBLE assumption, but really, people who violate it are the ones in error...
+#     avgNodeDistance=np.mean(np.sqrt(np.sum(np.square(np.diff(streamlines[0],axis=0)),axis=1)))
+#     lookDistanceMM=2.5
+#     #find the number of nodes this is equivalent to
+#     lookDistance=np.round(lookDistanceMM/avgNodeDistance).astype(int)
+#     aheadNodes=np.zeros(len(streamlines)).astype(int)
+#     behindNodes=np.zeros(len(streamlines)).astype(int)
+
+#     neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
+    
+#     for iStreamlines in range(len(streamlines)):
+#         #A check to make sure you've got room to do this indexing on both sides
+#         if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)>lookDistance):
+#             aheadNodes[iStreamlines]=(neckNodes[iStreamlines]+lookDistance)
+#             behindNodes[iStreamlines]=(neckNodes[iStreamlines]-lookDistance)
+#             #otherwise do the best you can
+#         else:
+#             #if there's a limit to how many nodes are available ahead, do the best you can
+#             spaceAhead=np.abs(neckNodes[iStreamlines]-len(streamlines[iStreamlines]))
+#             if spaceAhead<=lookDistance:
+#                 aheadWindow=spaceAhead-1
+#             else:
+#                 aheadWindow=lookDistance
+#             #if there's a limit to how many nodes are available behind, do the best you can
+#             spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))
+#             if spaceBehind<=lookDistance:
+#                 behindWindow=spaceBehind-1
+#             else:
+#                 behindWindow=lookDistance
+           
+#             #append the relevant values
+#             aheadNodes[iStreamlines]=neckNodes[iStreamlines]+aheadWindow
+#             behindNodes[iStreamlines]=neckNodes[iStreamlines]-behindWindow
+    
+#     #create some arrays to use for blending
+#     #could proably clean up discreapancy between using len of arrayas and the lookdistance
+#     whiteArray=np.ones([np.round(lookDistance).astype(int),4])
+#     blendWeightsArray=np.asarray([np.arange(np.round(lookDistance).astype(int))/len(whiteArray),np.flip(np.arange(np.round(lookDistance).astype(int))/len(whiteArray))])
+#     blendWeightsArray=np.stack([blendWeightsArray]*4,axis=-1)
+#     #make a long array too for blending
+#     longBlendWeightsArray=np.asarray([np.arange(np.round(lookDistance).astype(int))/np.round(lookDistance).astype(int),np.flip(np.arange(np.round(lookDistance).astype(int))/np.round(lookDistance).astype(int))])
+#     longBlendWeightsArray=np.stack([longBlendWeightsArray]*4,axis=-1)
+    
+    
+#     #do the endpoints
+#     for iStreamlines in range(len(streamlines)):
+#         #do the neck
+#         streamColors[iStreamlines][behindNodes[iStreamlines]:aheadNodes[iStreamlines]]=neckCmap(np.array(range(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))/(aheadNodes[iStreamlines]-behindNodes[iStreamlines]))
+#         #but also blend it a bit
+#         #don't need to do an if check, because streamlines can always be shorter
+#         #if len(streamlines[iStreamlines])
+#         #ok, so what we are doing here: blending the existing streamline color with white using a weighed average along the streamline
+#         #this turned out extremely nice, so lets also do it for the endpoints as well
+#         #if there's room, don't bother with it otherwise
+#         if 0<=behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):
+#             behindColors=streamColors[iStreamlines][behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):behindNodes[iStreamlines]]
+#             blendColorsStack=np.asarray([behindColors,whiteArray])
+#             blendedReplacement=np.average(blendColorsStack,axis=0,weights=np.flip(blendWeightsArray,axis=1))
+#             streamColors[iStreamlines][behindNodes[iStreamlines]-(np.round(lookDistance).astype(int)):behindNodes[iStreamlines]]=blendedReplacement
+#         #now do the other side
+#         #if there's room, don't bother with it otherwise
+#         if len(streamColors[iStreamlines])>=aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int)):
+#             aheadColors=streamColors[iStreamlines][aheadNodes[iStreamlines]:aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int))]
+#             blendColorsStack=np.asarray([aheadColors,whiteArray])
+#             blendedReplacement=np.average(blendColorsStack,axis=0,weights=blendWeightsArray)
+#             streamColors[iStreamlines][aheadNodes[iStreamlines]:aheadNodes[iStreamlines]+(np.round(lookDistance).astype(int))]=blendedReplacement
+        
+#         #also, this will recolor the streamlines if they had a neck point near the end of the streamline
+#         #do endpoints 1
+#         #no need to flip in order to ensure correct sequencing, apprently?
+#         end1Colors=streamColors[iStreamlines][0:lookDistance]
+#         #you know, like a telomere
+#         newEndpoint1Cap=np.flip(endpointCmap1(np.linspace(0,1,num=lookDistance)),axis=0)
+#         blendColorsStack=np.asarray([end1Colors,newEndpoint1Cap])
+#         blendedReplacement=np.average(blendColorsStack,axis=0,weights=longBlendWeightsArray)
+#         streamColors[iStreamlines][0:lookDistance]=blendedReplacement
+#         #do endpoints 2
+#         #we do need to flip here in order to get sequecning at end of streamline correct
+#         #actually it was for the other one
+#         end2Colors=streamColors[iStreamlines][-(lookDistance+1):-1]
+#         #you know, like a telomere
+#         newEndpoint2Cap=endpointCmap2(np.linspace(0,1,num=lookDistance))
+#         blendColorsStack=np.asarray([end2Colors,newEndpoint2Cap])
+#         blendedReplacement=np.average(blendColorsStack,axis=0,weights=np.flip(longBlendWeightsArray,axis=1))
+#         streamColors[iStreamlines][-(lookDistance+1):-1]=blendedReplacement
+    
+#     return streamColors
     
 def colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWindowMM=2.5):
     """
@@ -3267,13 +3567,13 @@ def makePrettyStreamsPlot(streamlines, fileName, smoothBool=True,cullBool=True):
         tempTractogram=wmaPyTools.streamlineTools.smoothStreamlines(tempTractogram)
     
     if cullBool:
-        [survivingStreamsIndicies, culledStreamIndicies]= wmaPyTools.streamlineTools.cullStreamsByBundling(tempTractogram.streamlines,5,qbThresholds=[30,20,10,5],qbResmaple=50)
+        [survivingStreamsIndicies, culledStreamIndicies]= wmaPyTools.streamlineTools.cullStreamsByBundling(tempTractogram.streamlines,5,qbThresholds=[32,16,8,3],qbResmaple=50)
  
     #ok, now we need to orient the bundle and get the per-cluster color coding    
         
         
-    [streamlinesToPlot, outColormaps]=orientAndColormapStreams(streamlines[survivingStreamsIndicies])
+    [streamlinesToPlot, outColormaps]=orientAndColormapStreams(tempTractogram.streamlines[survivingStreamsIndicies])
     
-    tractName='/media/dan/storage/gitDir/testData/testPlot'
-    dipyPlotTract_clean(streamlinesToPlot, outColormaps, refAnatT1=None, tractName=tractName)
+    fileName='/media/dan/storage/gitDir/testData/testPlot'
+    dipyPlotTract_setColors(streamlinesToPlot, outColormaps, refAnatT1=None, tractName=fileName)
 
