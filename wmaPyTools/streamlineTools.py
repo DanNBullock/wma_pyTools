@@ -131,7 +131,11 @@ def findTractNeckNode(streamlines, refAnatT1=None):
 
         #we smooth it just in case there are weird local maxima
         #that sigma may need to be worked on
-        smoothedDensity=gaussian_filter(np.square(tractMask),sigma=3)
+        #The move to float thouls fix things
+        smoothedDensity=tractMask.astype(float)
+        #for iSmooths in range(1):
+        smoothedDensity=gaussian_filter(np.square(smoothedDensity),3)
+            
         #now find the max point
         maxDensityLoc=np.asarray(np.where(smoothedDensity==np.max(smoothedDensity)))
         #pick the first one arbitrarily in case there are multiple
@@ -567,7 +571,7 @@ def dipyOrientStreamlines(streamlines):
     # cluster = qb.cluster(streamlines)
     # print(str(len(cluster)) + ' clusters generated for input with ' + str(len(streamlines)) + ' streamlines')
             
-    cluster=quickbundlesClusters(streamlines, thresholds=[30,20,10,5],nb_points=50,verbose=True)
+    cluster=quickbundlesClusters(streamlines, thresholds=[30,20,10,5],nb_pts=50,verbose=True)
     
     #create the dummy nifti here to save time
     dummyNifti=wmaPyTools.roiTools.dummyNiftiForStreamlines(cluster.refdata)
@@ -2012,7 +2016,7 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
   
     return streamlines
 
-def quickbundlesClusters(streamlines, **kwargs):
+def quickbundlesClusters(streamlines, thresholds = [30,20,10,5], nb_pts=20,verbose=False):
     """
     (quickly?, via qbx_and_merge?) perform a quick-bundling of an input
     collection of streamlines, 
@@ -2032,13 +2036,14 @@ def quickbundlesClusters(streamlines, **kwargs):
     from dipy.segment.bundles import qbx_and_merge
     from dipy.tracking.streamline import Streamlines
     
-    #fill in parameters if they are there.
-    if not 'thresholds' in locals():
-        thresholds = [30,20,10,5]
-    if not 'nb_points' in locals():
-        nb_pts=20
-    if not 'verbose' in locals():
-        verbose=False
+    #this didn't work, and was causing all kinds of problems
+    # #fill in parameters if they are there.
+    # if not 'thresholds' in locals():
+    #     thresholds = [30,20,10,5]
+    # if not 'nb_points' in locals():
+    #     nb_pts=20
+    # if not 'verbose' in locals():
+    #     verbose=False
     #perform the quick, iterave bundling
     clusters=qbx_and_merge(streamlines,thresholds , nb_pts, select_randomly=None, rng=None, verbose=verbose)
     
