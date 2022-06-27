@@ -2207,6 +2207,7 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     
     neckCmapDict['nodes']=neckCmapNodes
     
+    
     #endpoints 1
     #basically the same thing as neck, but less complicated
     #find the number of nodes this is equivalent to
@@ -2219,6 +2220,10 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     end1CmapNodes=list(sorted(list(set(end1CmapNodes).intersection(bodyCmapNodes))))
     end1CmapDict={}
     end1CmapDict['cmap']=endpointCmaps[0]
+    #do a check to ensure it is avaialble
+    if not end1CmapDict['cmap'] in matplotlib.pyplot.colormaps():
+        end1CmapDict['cmap']=RGB_to_maxBright_colormap( matplotlib.cm.get_cmap(bodyCmapDict['cmap'])(.0)).reversed()
+    #set the nodes
     end1CmapDict['nodes']=end1CmapNodes
     
     #endpoints 1
@@ -2232,6 +2237,8 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     end2CmapNodes=list(sorted(list(set(end2CmapNodes).intersection(bodyCmapNodes))))
     end2CmapDict={}
     end2CmapDict['cmap']=endpointCmaps[1]
+    if not end2CmapDict['cmap'] in matplotlib.pyplot.colormaps():
+        end2CmapDict['cmap']=RGB_to_maxBright_colormap( matplotlib.cm.get_cmap(bodyCmapDict['cmap'])(1.0))
     end2CmapDict['nodes']=end2CmapNodes
     #reverse the endpoint 2 cmap nodes so that they are colored correctly
     #don't do this, just set the colormap to _r in the input
@@ -2302,7 +2309,7 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
     availableColormaps=matplotlib.pyplot.colormaps()
     #TODO
     #how do I do this better?
-    assert np.all([isinstance(iRequestedMap,matplotlib.colors.Colormap) or iRequestedMap in availableColormaps for iRequestedMap in cmapsAssigned ]), 'Not all requested colormaps available in available version of matplotlib'
+    assert np.all([np.any([isinstance(iRequestedMap,matplotlib.colors.Colormap), isinstance(iRequestedMap,matplotlib.colors.LinearSegmentedColormap), iRequestedMap in availableColormaps]) for iRequestedMap in cmapsAssigned ]), 'Not all requested colormaps available in available version of matplotlib'
     
     #checks complete
     #now do the actual assignments
@@ -2789,9 +2796,81 @@ def cycleRollColormap(cmap,cycleAmount=.5):
     cycleRolledCmap=matplotlib.colors.LinearSegmentedColormap.from_list('cycle_'+cmap.name,cycleRolledColorVals,len(cycleRolledColorVals))
 
     return cycleRolledCmap
-     
+
+def RGB_to_maxBright_colormap(RGBval):
+    """
+    Creates a colormap running from the provided color value to the "brightest"
+    version of that color 
+
+    Parameters
+    ----------
+    RGBval : RGB triplet, either int or float
+        DESCRIPTION.
+
+    Returns
+    -------
+    brightCmap : matplotlib.colors.LinearSegmentedColormap
+        A colormap running from the provided color value to the "brightest"
+        version of that color
+
+    """
     
+    import matplotlib
+    import colorsys
+    import numpy as np
+    #import webcolors
     
+    #for first draft, just assume it is RGB and not RGBA
+    #but do ensure that it is converted to the approprite int val
+    #detect the input type, i.e. list vs array
+    #WORKAROUND: if we just go ahead and convert a list to an array, the
+    #next check does the conversion for us
+    #Actually, this is all completely unnecessary
+    #actualy, on third thought, lets force float so we can be more precise
+    #force to array
+    RGBval=np.asarray(RGBval)
+    #detect the input dtype
+    if 'int' in str(RGBval.dtype):
+        RGBint=RGBval
+        RGBval=np.divide(RGBval,255)
+    elif 'float' in str(RGBval.dtype):
+        RGBint=np.multiply(RGBval,255).astype(int)
+        #this is the desired dtype
+        pass
+   
+    #ok now convert to 
+    hsvColor=colorsys.rgb_to_hsv(RGBval[0],RGBval[1],RGBval[2])
+    #ok, now create a linspace from the provided "Value" value (aka brightness) to the max brightness
+    sampleNum=1000 #arbitrary but sufficient
+    brightnessSpace=np.linspace(hsvColor[2],1,sampleNum)
+    saturationSpace=np.linspace(hsvColor[1],1,sampleNum)
+    #create a 3d colorArray using the provided HSV as the template
+    cmapColorSpace=np.vstack([hsvColor]*1000)
+    #set the brightness values with the linspace you generated
+    cmapColorSpace[:,2]=brightnessSpace
+    cmapColorSpace[:,1]=saturationSpace
+    #now convert back to rgb
+    rgbBrightBackConvert=np.asarray([colorsys.hsv_to_rgb(iVals[0],iVals[1],iVals[2]) for iVals in cmapColorSpace])
+    #try and find a name for this span
+    #this doesn't seem to work
+    # colorName=[]
+    # startColorIndex=0
+    # while colorName==[] and startColorIndex<=sampleNum:
+    #     try:
+    #         print(startColorIndex)
+    #         curIntColor=np.multiply(rgbBrightBackConvert[startColorIndex,:],255).astype(int)
+    #         print(str(curIntColor))
+    #         colorName=webcolors.rgb_to_name(curIntColor, spec='css3')
+    #         print(colorName)
+    #     except:
+    #         #iterate
+    #         startColorIndex=startColorIndex+1
+    
+    intName='_'.join([str(iVal) for iVal in RGBint])+'to_bright'
+    brightCmap=matplotlib.colors.LinearSegmentedColormap.from_list(intName,rgbBrightBackConvert,len(rgbBrightBackConvert))
+
+    return brightCmap
+
 def bandedStreamCmap(streamline, neckNode,streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=2.5,endpointCmaps=['winter','autumn']):
     """
     Computes and generates a banded colormap for a given streamline.  See
@@ -2837,7 +2916,25 @@ def bandedStreamCmap(streamline, neckNode,streamCmap='seismic', neckLengthMM=10 
     
 
     
-def orientAndColormapStreams(streamlines):
+def orientAndColormapStreams(streamlines, **kwargs):
+    """
+    
+
+    Parameters
+    ----------
+    streamlines : TYPE
+        DESCRIPTION.
+    *kwargs : TYPE
+        DESCRIPTION.
+
+    Returns
+    -------
+    streamlines : TYPE
+        DESCRIPTION.
+    outColormaps : TYPE
+        DESCRIPTION.
+
+    """
     import wmaPyTools.streamlineTools
     import wmaPyTools.roiTools
     import numpy as np
@@ -2845,11 +2942,49 @@ def orientAndColormapStreams(streamlines):
     import tqdm
     #test run = 542.348 seconds
     
-    clusters=wmaPyTools.streamlineTools.quickbundlesClusters(streamlines, thresholds=[40,20,10],nb_pts=100,verbose=True)
+    print(kwargs)
     
+    #set all the kwargs
+    if not 'thresholds' in kwargs.keys():
+        thresholds=[40,20,10]
+    else:
+        thresholds=kwargs['thresholds']
+        
+    if not 'nb_pts' in kwargs.keys():
+        nb_pts=100
+    else:
+        nb_pts=kwargs['nb_pts']
     
-    #TODO
-    #throw a warning here if a lot of small clusters are detected
+    if not 'streamCmap' in kwargs.keys():
+        streamCmap='seismic'
+    else:
+        streamCmap=kwargs['streamCmap']
+        
+    if not 'neckLengthMM' in kwargs.keys():
+        neckLengthMM=10
+    else:
+        neckLengthMM=kwargs['neckLengthMM']
+        
+    if not 'neckCmap' in kwargs.keys():
+        neckCmap='twilight'
+    else:
+        neckCmap=kwargs['neckCmap']
+        
+    if not 'endCapLengthMM' in kwargs.keys():
+        endCapLengthMM=5
+    else:
+        endCapLengthMM=kwargs['endCapLengthMM']
+        
+    if not 'endpointCmaps' in kwargs.keys():
+        endpointCmaps=['winter_r','autumn']
+    else:
+        endpointCmaps=kwargs['endpointCmaps']
+        
+    #can make this shorter by having a default kwargs dict
+    #default_kwargs={'nb_pts':100'thresholds'=[40,20,10],'endpointCmaps':['winter_r','autumn']
+        
+    clusters=wmaPyTools.streamlineTools.quickbundlesClusters(streamlines, thresholds=thresholds,nb_pts=nb_pts)
+    
     clusterLens=[len(icluster.indices) for icluster in clusters]
     if np.sum(np.less(clusterLens,5))/len(clusterLens)>.3:
         warnings.warn('Extreme proportion of small bundles detected: ' + str(np.sum(np.less(clusterLens,5))/len(clusterLens))+ ' \n recomend cleaning via wmaPyTools.streamlineTools.cullStreamsByBundling to avoid long processing time')
@@ -2870,7 +3005,7 @@ def orientAndColormapStreams(streamlines):
         
         currentCmaps=[[] for istreams in orientedStreams]
         for iterator,iStream in enumerate(orientedStreams):
-            currentCmaps[iterator]=  bandedStreamCmap(iStream,neckNodes[iterator],streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=5,endpointCmaps=['winter_r','autumn'])
+            currentCmaps[iterator]=  bandedStreamCmap(iStream,neckNodes[iterator],streamCmap=streamCmap, neckLengthMM=neckLengthMM ,neckCmap=neckCmap ,endCapLengthMM=endCapLengthMM,endpointCmaps=endpointCmaps)
         #test run = 320.004 seconds .0.009 per
         
         for iterator,iStreamIndexes in enumerate(clusterIndexes):
@@ -3572,8 +3707,8 @@ def makePrettyStreamsPlot(streamlines, fileName, smoothBool=True,cullBool=True):
     #ok, now we need to orient the bundle and get the per-cluster color coding    
         
         
-    [streamlinesToPlot, outColormaps]=orientAndColormapStreams(tempTractogram.streamlines[survivingStreamsIndicies])
+    [streamlinesToPlot, outColormaps]=orientAndColormapStreams(tempTractogram.streamlines[survivingStreamsIndicies],endpointCmaps=['foo','foo'])
     
-    fileName='/media/dan/storage/gitDir/testData/testPlot'
+    fileName='/media/dan/storage/gitDir/testData/testPlot2'
     dipyPlotTract_setColors(streamlinesToPlot, outColormaps, refAnatT1=None, tractName=fileName)
 
