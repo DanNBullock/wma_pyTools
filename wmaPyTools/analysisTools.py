@@ -1351,7 +1351,7 @@ def volParcMeasures(parcNifti,lookupTable=None):
         
         newRow['roi_name'].iloc[0]=currentName
         newRow['roi_label'].iloc[0]=currLabelNum
-        newRow['brain_vol_proportion'].iloc[0]=newRow['mm_vol'].iloc[0]/tableStart['mm_vol'].loc[tableStart['roi_name']=='whole_brain']
+        newRow['brain_vol_proportion'].iloc[0]=newRow['mm_vol'].iloc[0]/tableStart['mm_vol'].loc[tableStart['roi_name']=='whole_brain'].values[0]
    
         #get azimuth and elevation
         wholeBrainCentroid=tableStart[['centroid_x','centroid_y','centroid_z']].loc[tableStart['roi_name']=='whole_brain'].values[0]
@@ -1368,7 +1368,7 @@ def volParcMeasures(parcNifti,lookupTable=None):
     print('parcellation metrics computation complete')
     print(tableStart)
     
-    return tableStart
+    return tableStart.round(4)
 
 def cart2sph(coord1,coord2):
     """
