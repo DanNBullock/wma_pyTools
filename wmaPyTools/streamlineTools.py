@@ -2072,7 +2072,7 @@ def cullViaClusters(clusters,streamlines,streamThresh):
 
 def cullStreamsByBundling(streamlines,streamThresh,qbThresholds=[30,20,10,5],qbResmaple=50):
     
-    clusters=quickbundlesClusters(streamlines, thresholds=qbThresholds,nb_points=qbResmaple,verbose=True)
+    clusters=quickbundlesClusters(streamlines, thresholds=qbThresholds,nb_pts=qbResmaple,verbose=True)
     
     survivingStreamsIndicies, culledStreamIndicies=cullViaClusters(clusters,streamlines,streamThresh)
     
