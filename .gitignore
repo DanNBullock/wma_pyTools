@@ -1,0 +1,6 @@
+*.png
+*.nii.gz
+*.svg
+*.eps
+#?
+afine.txt

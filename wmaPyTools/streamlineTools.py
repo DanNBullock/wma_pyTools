@@ -2016,10 +2016,10 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
   
     return streamlines
 
-def quickbundlesClusters(streamlines, thresholds = [30,20,10,5], nb_pts=20,verbose=False):
+def quickbundlesClusters(streamlines, thresholds = [30,20,10,5], nb_pts=100,verbose=False):
     """
     (quickly?, via qbx_and_merge?) perform a quick-bundling of an input
-    collection of streamlines, 
+    collection of streamlines.  Perhaps an unnecessary wrapper.
     Parameters
     ----------
     streamlines : nibabel.streamlines.array_sequence.ArraySequence
@@ -2050,8 +2050,58 @@ def quickbundlesClusters(streamlines, thresholds = [30,20,10,5], nb_pts=20,verbo
     return clusters
 
 def cullViaClusters(clusters,streamlines,streamThresh):
+    """
+    Determine from an input collection of streamlines which ought to be culled
+    in accordance with how "unique" the trajectory of individual streamlines
+    are, as assessed by the number of streamlines they are bundled with using
+    DIPY's quickbundles.
+    
+    Returns indexes for both the surviving and (to be) culled streamlines.  As
+    such, does not actually perform the streamline cull itself, which would
+    be performed with cullStreamsByBundling
+
+    Parameters
+    ----------
+    clusters : ClusterMapCentroid object of dipy.segment.clustering module
+        Output clustring of dipy's quickbundles, e.g. from quickbundlesClusters
+    streamlines : nib.streamlines.array_sequence.ArraySequence
+        The source streamlines. Technically redundant with clusters._refdata.
+        Will be removed in future versions
+    streamThresh : int. Positive, greater than 0
+        The *minimum* number of streamlines needed in a quick bundles cluster
+        in order for *all* of the streamlines in that cluster to survive
+        the culling process.  All streamlines in all clusters having fewer than
+        this number will be interpreted as being excessively distinct from
+        other trajectories in the input collection of streamlines and will be
+        removed.
+
+    Returns
+    -------
+    survivingStreamsIndicies : list of int
+        The indexes of the surviving / filtered streamlines.
+        set(survivingStreamsIndicies).union(culledStreamIndicies)==range(len(clusters._refdata))==range(len(streamlines))
+    culledStreamIndicies : list of int
+        The indexes of the culled / (to be) removed streamlines.
+        set(survivingStreamsIndicies).union(culledStreamIndicies)==range(len(clusters._refdata))==range(len(streamlines))
+
+    """
+
     import itertools
     import numpy as np
+    import nibabel as nib
+    import dipy
+    
+    #implement robustness for case in which streamlines instead of cluster
+    #is passed.  Implicitly, this would indicate the user's desire to perform
+    #clustering inside this function, instead of performing it ahead of time.
+    #could be sensible in a case where you wouldn't be using the clustering 
+    #information for other purposes.
+    if isinstance(clusters, nib.streamlines.array_sequence.ArraySequence):
+        clusters=quickbundlesClusters(streamlines, thresholds=[30,20,10,5],nb_pts=100)
+    elif isinstance(clusters, dipy.segment.clustering.ClusterMapCentroid):
+        pass
+        #do nothing, it's in the format that is needed
+    
     #get the cluster lengths
     clusterLengths=[len(iCluster) for iCluster in clusters]
     
@@ -2066,14 +2116,159 @@ def cullViaClusters(clusters,streamlines,streamThresh):
     survivingStreamsIndicies=list(itertools.chain(*survivingClusterLists))
     
     #find the obverse of the surviving stream set
-    culledStreamIndicies=list(set(list(range(0,len(streamlines))))-set(survivingStreamsIndicies))
+    culledStreamIndicies=list(set(list(range(0,len(clusters._refdata))))-set(survivingStreamsIndicies))
 
     return survivingStreamsIndicies, culledStreamIndicies
 
-def cullStreamsByBundling(streamlines,streamThresh,qbThresholds=[30,20,10,5],qbResmaple=50):
+def manualSelectStreams_byEndpoint(streamlines,parc,lookupTable,targetLabels):
+    """
+    Determines which streamlines end in the requested collections of endpoints.
+    In other words, reduces the output of 
+    dipy.tracking.utils.connectivity_matrix to the indexes of *only* the
+    streamlines terminating in each of the specified collections of termination
+    areas.
     
-    clusters=quickbundlesClusters(streamlines, thresholds=qbThresholds,nb_pts=qbResmaple,verbose=True)
+    Returns a dictionary of classification structures such that each key-value
+    pair corresponds to the requested label value(s) and the streamline indexes 
+    associated with those termination areas.
+
+    Parameters
+    ----------
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence
+        The streamlines that are to be considered
+    parc : nibabel.nifti1.Nifti1Image or compatible
+        The parcellation to be used for dipy's utils.connectivity_matrix
+    lookupTable : csv or pandas.DataFrame
+        The lookup table for the associated parc
+    targetLabels : list of (int or list of int)
+        The requested termination areas whose streamline endpoint associations
+        are to be determined.  Each element of the list is treated as a
+        separate request, and has a corresponding output classification
+        structure.
+
+    Raises
+    ------
+    ValueError
+        Raises a value error of any of the requested labels are not found in
+        the input parcellation
+
+    Returns
+    -------
+    outClassificationDicts : dict
+        A dictionary of classification structures such that each key-value
+        pair corresponds to the requested label value(s) and the streamline
+        indexes associated with those termination areas.
+
+    """
     
-    survivingStreamsIndicies, culledStreamIndicies=cullViaClusters(clusters,streamlines,streamThresh)
     
-    return survivingStreamsIndicies, culledStreamIndicies
+    import numpy as np
+    from dipy.tracking.utils import reduce_labels
+    from dipy.tracking import utils
+    import wmaPyTools.analysisTools
+    import itertools
+    
+    #throw an error at the outset if the requested labels aren't in the provided table
+    #get the unique label indexes requested
+    uniqueRequestLabels=np.unique(targetLabels)
+    #find out which labels are avaialbe in the input parc
+    availableLabels=np.unique(np.asanyarray(parc.dataobj))
+    #find which were requested but not avaialbe
+    requestedButNotFound=list(set(list(uniqueRequestLabels))-set(list(availableLabels)) )
+    if len(requestedButNotFound)>0:
+        raise ValueError('Requested indexes: \n '+ requestedButNotFound + '\n not found in input parcellation.' )
+    
+    #perform initial dipy based endpoint analysis
+    #begin by reducing the input atlas
+    [renumberedAtlasNifti,reducedLookupTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(parc,lookupTable,removeAbsentLabels=True)
+    #then do the endpoint connectivity matrix
+    M, grouping=utils.connectivity_matrix(streamlines, np.round(renumberedAtlasNifti.affine,2), label_volume=renumberedAtlasNifti.get_data().astype(int),
+                            symmetric=False,
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    #from the DIPY connectivity dictionary structure, obtain all of the keys
+    #these keys are the indexes of *existing* connections, as indexed by
+    #their *reduced* index number. The value pairings for these are the
+    #streamline indexes    
+    groupingKeys=grouping.keys()
+    
+    outClassificationDicts={}
+
+    for iIterator,iSubdivisions in enumerate(targetLabels):
+        
+        #if iSubdivisions is a singleton, convert it to a list
+        if isinstance(iSubdivisions,int):
+            iSubdivisions=[iSubdivisions]
+        
+        #convert the requested label, presumably from the original parcellation,
+        #to the reduced version
+        currReducedIndexes=[reducedLookupTable.index[reducedLookupTable['#No.']==iIndexes].values[0] for iIndexes in iSubdivisions]
+        
+        #get the name or names for the current request, could be multiple
+        #so cat them together with and to obtain a name for this streamline collection
+        #find the entries in the lookup table
+        names=reducedLookupTable['LabelName:'].iloc[currReducedIndexes].values
+        #join them all together
+        namesJoined='_and_'.join(names)
+        
+        #iterate across the keys and determine if any match the current subdivision
+        keyBoolVec=np.zeros(len(groupingKeys),dtype=bool)
+        for iKeyIndex,iKeyPairs in enumerate(groupingKeys):
+            keyBoolVec[iKeyIndex]=iKeyPairs[0] in iSubdivisions or iKeyPairs[1] in iSubdivisions
+        
+        #extract the connectivity matrix keys that meet this criterion
+        validKeys=list(itertools.compress(groupingKeys,keyBoolVec))
+        
+        #extract the list of streamline indexes for each of these keys
+        indexLists=[grouping[iKey] for iKey in validKeys]
+        
+        #cat them all together, but be sure to get the unique values, as it
+        #is possible in cases where multiple labels have been entered for this
+        #iSubdivisions that *both* endpoint areas have been chosen, and thus
+        #the a streamline index might show up more than once
+        allStreamIndicies=np.unique(list(itertools.chain(*indexLists)))
+        
+        #now that we have the unique indexes for this, we need to create a WMC
+        #structure
+        #because we are creating a new wmc for each iSubdivisions requested, we
+        #need to create a boolean vector mask of the input streamlines for the
+        #current indexes
+        currentBoolVec=np.zeros(len(streamlines),dtype=bool)
+        #do I need to do it this way?
+        currentBoolVec[allStreamIndicies]=[True]*len(allStreamIndicies)
+        #currentBoolVec[allStreamIndicies]=True
+        currentClassificationStructure=updateClassification(currentBoolVec,namesJoined,existingClassification=None)
+        
+        outClassificationDicts[iSubdivisions]=currentClassificationStructure
+    
+    return outClassificationDicts
+
+# def cullStreamsByBundling(streamlines,streamThresh,qbThresholds=[30,20,10,5],qbResmaple=100):
+#     """
+#     Actually perform the streamline cull 
+
+#     Parameters
+#     ----------
+#     streamlines : TYPE
+#         DESCRIPTION.
+#     streamThresh : TYPE
+#         DESCRIPTION.
+#     qbThresholds : TYPE, optional
+#         DESCRIPTION. The default is [30,20,10,5].
+#     qbResmaple : TYPE, optional
+#         DESCRIPTION. The default is 100.
+
+#     Returns
+#     -------
+#     survivingStreamsIndicies : TYPE
+#         DESCRIPTION.
+#     culledStreamIndicies : TYPE
+#         DESCRIPTION.
+
+#     """
+    
+#     clusters=quickbundlesClusters(streamlines, thresholds=qbThresholds,nb_pts=qbResmaple,verbose=True)
+    
+#     survivingStreamsIndicies, culledStreamIndicies=cullViaClusters(clusters,streamlines,streamThresh)
+    
+#     return survivingStreamsIndicies, culledStreamIndicies
