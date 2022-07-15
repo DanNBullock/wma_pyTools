@@ -111,6 +111,10 @@ def findTractNeckNode(streamlines, refAnatT1=None):
     import dipy.tracking.utils as ut
     from scipy.ndimage import gaussian_filter
     import nibabel as nib
+    import itertools
+    
+    #TODO 
+    #fix this, its too slow
     
     #lets presuppose that the densest point in the density mask ocurrs within
     #the neck.  Thus we need a
@@ -119,28 +123,56 @@ def findTractNeckNode(streamlines, refAnatT1=None):
         tractMask=ut.density_map(streamlines, dummyNifti.affine, dummyNifti.shape)
     else:
         tractMask=ut.density_map(streamlines, refAnatT1.affine, refAnatT1.shape)
-    #we smooth it just in case there are weird local maxima
-    #that sigma may need to be worked on
-    smoothedDensity=gaussian_filter(np.square(tractMask),sigma=3)
-    #now find the max point
-    maxDensityLoc=np.asarray(np.where(smoothedDensity==np.max(smoothedDensity)))
-    #pick the first one arbitrarily in case there are multiple
-    maxDensityImgCoord=maxDensityLoc[:,0]
-    #get the coordinate in subject space
-    if refAnatT1==None:
-        subjCoord = nib.affines.apply_affine(dummyNifti.affine,maxDensityImgCoord)
+        
+    #BEFORE WE SMOOTH
+    #run a sanity check to ensure that there's some sort of overlap between the streamlines
+    #if the density is NOT only 1
+    if not np.array_equal(np.unique(tractMask),np.array([0,1])):    
+
+        #we smooth it just in case there are weird local maxima
+        #that sigma may need to be worked on
+        #The move to float thouls fix things
+        smoothedDensity=tractMask.astype(float)
+        #for iSmooths in range(1):
+        smoothedDensity=gaussian_filter(np.square(smoothedDensity),3)
+            
+        #now find the max point
+        maxDensityLoc=np.asarray(np.where(smoothedDensity==np.max(smoothedDensity)))
+        #pick the first one arbitrarily in case there are multiple
+        maxDensityImgCoord=maxDensityLoc[:,0]
+        #get the coordinate in subject space
+        if refAnatT1==None:
+            subjCoord = nib.affines.apply_affine(dummyNifti.affine,maxDensityImgCoord)
+        else:
+            subjCoord = nib.affines.apply_affine(refAnatT1.affine,maxDensityImgCoord)
     else:
-        subjCoord = nib.affines.apply_affine(refAnatT1.affine,maxDensityImgCoord)
-    
+        #how else should we approximate this
+        #just take the average of the inner half of the streamlines, I guess
+        coordsToAverage=[[] for iStreams in streamlines]
+        for iterator,iStreams in enumerate(streamlines):
+            #yes it will be slightly biased due to odd numbers, but whatever,
+            #no need to overengineer this at the moment
+            #TODO way to overengineer: take the weighted average
+            #with the weight being the absolute value of the distance from
+            #the middle node index
+            #these fibers should be culled anyways
+            curLength=len(iStreams)
+            curHalfLength=np.round(curLength*.5).astype(int)
+            curQuarter=np.round(curHalfLength*.5).astype(int)
+            #get the middle half
+            coordsToAverage[iterator]=iStreams[curQuarter:curQuarter+curHalfLength,:]
+        #average them, I guess
+        subjCoord=np.mean(np.vstack(np.asarray(list(itertools.chain(*coordsToAverage)))),axis=0)
+                
 
     #iterate across streamlines
-    neckNodeIndexVecOut=[]
-    for iStreamline in range(len(streamlines)):
+    neckNodeIndexVecOut=np.zeros(len(streamlines),dtype=int)
+    for iterator,iStreamline in enumerate(streamlines):
         #distances for all nodes 
-        curNodesDist = cdist(streamlines[iStreamline], np.atleast_2d(subjCoord), 'euclidean')
+        curNodesDist = cdist(iStreamline, np.atleast_2d(subjCoord), 'euclidean')
         #presumably the nodes most directly tangent to the highest density point would be the neck?
-        neckNodeIndexVecOut.append(np.where(curNodesDist==np.min(curNodesDist))[0].astype(int))
-
+        neckNodeIndexVecOut[iterator]=np.argmin(curNodesDist)
+        
     return neckNodeIndexVecOut
 
 def removeStreamlineOutliersAtNeck(streamlines,cutStDev):
@@ -430,82 +462,82 @@ def smoothStreamlines(tractogram):
         
     return tractogram
 
-def cullViaClusters(clusters,tractogram,streamThresh):
-    #cullViaClusters(clusters,tractogram,streamThresh)
-    #
-    #This function culls streamlines from a tractogram
-    #based on the number of streamlines in their clusters
-    #
-    # INPUTS
-    #
-    # clusters: the output cluster object from quickbundles
-    #
-    # tractogram: a tractogram associated with the input clusters object
-    #
-    #streamThresh:  the minimum number of streamlines in a cluster bundle
-    #               needed to survive the culling process
-    #
-    # OUTPUTS
-    #
-    # tractogram: the cleaned tractogram
-    #
-    # culledTractogram: a tractogram containing those streamlines which have
-    # been culled.
-    #
-    # begin code    
-    import numpy as np
-    import copy
-    #apparently this can cause some issues on linux machines with dtype u21?
-    clustersSurviveThresh=np.greater(np.asarray(list(map(len, clusters))),streamThresh)
-    survivingStreams=[]
-    for iclusters in clusters[clustersSurviveThresh]:
-        survivingStreams=survivingStreams + iclusters.indices
-    culledStreamIndicies=list(set(list(range(1,len(tractogram.streamlines))))-set(survivingStreams))
-    culledTractogram=copy.deepcopy(tractogram)
-    culledTractogram.streamlines=culledTractogram.streamlines[culledStreamIndicies]
-    #cull those streamlines
-    #don't know what to do about those warnings
-    tractogram.streamlines=tractogram.streamlines[survivingStreams]
-    return tractogram, culledTractogram
+# def cullViaClusters(clusters,tractogram,streamThresh):
+#     #cullViaClusters(clusters,tractogram,streamThresh)
+#     #
+#     #This function culls streamlines from a tractogram
+#     #based on the number of streamlines in their clusters
+#     #
+#     # INPUTS
+#     #
+#     # clusters: the output cluster object from quickbundles
+#     #
+#     # tractogram: a tractogram associated with the input clusters object
+#     #
+#     #streamThresh:  the minimum number of streamlines in a cluster bundle
+#     #               needed to survive the culling process
+#     #
+#     # OUTPUTS
+#     #
+#     # tractogram: the cleaned tractogram
+#     #
+#     # culledTractogram: a tractogram containing those streamlines which have
+#     # been culled.
+#     #
+#     # begin code    
+#     import numpy as np
+#     import copy
+#     #apparently this can cause some issues on linux machines with dtype u21?
+#     clustersSurviveThresh=np.greater(np.asarray(list(map(len, clusters))),streamThresh)
+#     survivingStreams=[]
+#     for iclusters in clusters[clustersSurviveThresh]:
+#         survivingStreams=survivingStreams + iclusters.indices
+#     culledStreamIndicies=list(set(list(range(1,len(tractogram.streamlines))))-set(survivingStreams))
+#     culledTractogram=copy.deepcopy(tractogram)
+#     culledTractogram.streamlines=culledTractogram.streamlines[culledStreamIndicies]
+#     #cull those streamlines
+#     #don't know what to do about those warnings
+#     tractogram.streamlines=tractogram.streamlines[survivingStreams]
+#     return tractogram, culledTractogram
 
 
-def qbCullStreams(tractogram,qbThresh,streamThresh):
-    #qbCullStreams(tractogram,qbThresh,streamThresh)
-    #
-    #this function uses dipy quickbundles to filter out streamlines which exhibt
-    #unusual/extremely uncommon trajectories using a interstreamline distance
-    #measure
-    #
-    # INPUTS
-    #
-    # tractogram: an input tractogram to be cleaned
-    #
-    # qbThresh: the distance parameter to be used for the quickbundles algorithm
-    #
-    #streamThresh:  the minimum number of streamlines in a cluster bundle
-    #               needed to survive the culling process
-    # OUTPUTS
-    #
-    # tractogram: the cleaned tractogram
-    #
-    # culledTractogram: a tractogram containing those streamlines which have
-    # been culled.
-    # 
-    # Begin code
-    from dipy.segment.clustering import QuickBundles
-    #get the number of input streamlines
-    inputStreamNumber=len(tractogram.streamlines)
-    #good default value for quick clustering
-    #qbThresh=15
-    #perform quickBundles
-    qb = QuickBundles(threshold=qbThresh)
-    clusters = qb.cluster(tractogram.streamlines)
-    #perform cull
-    [outTractogram,culledTractogram]=cullViaClusters(clusters,tractogram,streamThresh)
-    #report cull count
-    numberCulled=inputStreamNumber-len(outTractogram.streamlines)
-    print(str(numberCulled) + ' streamlines culled')
-    return outTractogram, culledTractogram
+# def qbCullStreams(tractogram,qbThresh,streamThresh):
+#     #qbCullStreams(tractogram,qbThresh,streamThresh)
+#     #
+#     #this function uses dipy quickbundles to filter out streamlines which exhibt
+#     #unusual/extremely uncommon trajectories using a interstreamline distance
+#     #measure
+#     #
+#     # INPUTS
+#     #
+#     # tractogram: an input tractogram to be cleaned
+#     #
+#     # qbThresh: the distance parameter to be used for the quickbundles algorithm
+#     #
+#     #streamThresh:  the minimum number of streamlines in a cluster bundle
+#     #               needed to survive the culling process
+#     # OUTPUTS
+#     #
+#     # tractogram: the cleaned tractogram
+#     #
+#     # culledTractogram: a tractogram containing those streamlines which have
+#     # been culled.
+#     # 
+#     # Begin code
+#     from dipy.segment.clustering import QuickBundles
+#     #get the number of input streamlines
+#     inputStreamNumber=len(tractogram.streamlines)
+#     #good default value for quick clustering
+#     #qbThresh=15
+#     #perform quickBundles
+#     qb = QuickBundles(threshold=qbThresh)
+#     clusters = qb.cluster(tractogram.streamlines)
+#     #perform cull
+#     [outTractogram,culledTractogram]=cullViaClusters(clusters,tractogram,streamThresh)
+#     #report cull count
+#     numberCulled=inputStreamNumber-len(outTractogram.streamlines)
+#     print(str(numberCulled) + ' streamlines culled')
+#     return outTractogram, culledTractogram
 
 def dipyOrientStreamlines(streamlines):
     """
@@ -529,23 +561,101 @@ def dipyOrientStreamlines(streamlines):
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
     import numpy as np
     import dipy.tracking.streamline as streamline
+    import wmaPyTools.analysisTools
    
     
-    feature = ResampleFeature(nb_points=60)
-    metric = AveragePointwiseEuclideanMetric(feature)
+    # feature = ResampleFeature(nb_points=60)
+    # metric = AveragePointwiseEuclideanMetric(feature)
 
-    qb = QuickBundles(threshold=2,metric=metric, max_nb_clusters = len(streamlines)/100)
-    cluster = qb.cluster(streamlines)
-    print(str(len(cluster)) + ' clusters generated for input with ' + str(len(streamlines)) + ' streamlines')
+    # qb = QuickBundles(threshold=2,metric=metric, max_nb_clusters = len(streamlines)/100)
+    # cluster = qb.cluster(streamlines)
+    # print(str(len(cluster)) + ' clusters generated for input with ' + str(len(streamlines)) + ' streamlines')
+            
+    cluster=quickbundlesClusters(streamlines, thresholds=[30,20,10,5],nb_pts=50,verbose=True)
     
-    for iBundles in range(len(cluster)):
-        streamIndexes=list(cluster[iBundles].indices)
-        orientedStreams=streamline.orient_by_streamline(streamlines[streamIndexes], cluster[iBundles].centroid)
-        for iStreams in range(len(streamIndexes)):
-            if not np.all(streamlines[streamIndexes[iStreams]][0,:]==orientedStreams[iStreams][0,:]):
-                streamlines[streamIndexes[iStreams]]= streamlines[streamIndexes[iStreams]][::-1]
+    #create the dummy nifti here to save time
+    dummyNifti=wmaPyTools.roiTools.dummyNiftiForStreamlines(cluster.refdata)
+    
+    for iBundles in cluster:
+        [orientedStreams, clusterIndexes]=orientDipyCluster(iBundles,dummyNifti)
+        
+        #ok, now this is super ugly/iffy
+        for streamsIterator,iIndex in enumerate(clusterIndexes):
+            streamlines[iIndex]=orientedStreams[streamsIterator]
+               
+        # streamIndexes=list(cluster[iBundles].indices)
+        # curCentroid=cluster[iBundles].centroid
+        # #but you have to make sure that this is oriented correctly
+        # centroidNeck=curCentroid[int(np.round(len(curCentroid)/2))-3:int(np.round(len(curCentroid)/2))+3,:]
+        # deltas=wmaPyTools.analysisTools.cumulativeTraversalStream(centroidNeck)
+        
+        # maxTraversalDim=np.where(np.max(deltas)==deltas)[0][0]
+        # #get the current endpoints
+        # endpoint1=centroidNeck[0,:]
+        # endpoint2=centroidNeck[-1,:]
+    
+        # #if the coordinate of endpoint1 in the max traversal dimension
+        # #is less than the coordinate of endpoint1 in the max traversal dimension
+        # #flip it
+        # if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
+        #     curCentroid= curCentroid[::-1]
+
+        # orientedStreams=streamline.orient_by_streamline(streamlines[streamIndexes], curCentroid)
+        # for iStreams in range(len(streamIndexes)):
+        #     if not np.all(streamlines[streamIndexes[iStreams]][0,:]==orientedStreams[iStreams][0,:]):
+        #         streamlines[streamIndexes[iStreams]]= streamlines[streamIndexes[iStreams]][::-1]
 
     return streamlines
+
+def orientDipyCluster(cluster,refNifti=None):
+    import numpy as np
+    import wmaPyTools.analysisTools
+    from scipy.spatial.distance import cdist
+    
+    import dipy.tracking.streamline as streamline
+    
+    streamIndexes=list(cluster.indices)
+    clusterStreams=cluster.refdata[streamIndexes]
+    curCentroid=cluster.centroid
+    #but you have to make sure that this is oriented correctly
+    
+    #find the neck for this tract
+    neckNodes=findTractNeckNode(clusterStreams,refAnatT1=refNifti)
+    #get the neck coords for each
+    neckCoords=[iStream[neckNodes[iterator],:] for iterator,iStream in enumerate(clusterStreams)]
+    #mean neck coord
+    meanNeckCord=np.mean(np.asarray(neckCoords),axis=0)
+    #find the cetroid node closest to this
+    nodeDistances=cdist(curCentroid,np.atleast_2d(meanNeckCord))
+    
+    centroidNeckNode=np.argmin(nodeDistances)
+    #get safe neck nodes to index
+    safeNeckNodes=list(set(list(range(len(curCentroid)))).intersection(set(range(centroidNeckNode-3,centroidNeckNode+3))))
+    centroidNeck=curCentroid[safeNeckNodes,:]
+    deltas=wmaPyTools.analysisTools.cumulativeTraversalStream(centroidNeck)
+    
+    maxTraversalDim=np.where(np.max(deltas)==deltas)[0][0]
+    #get the current endpoints
+    endpoint1=centroidNeck[0,:]
+    endpoint2=centroidNeck[-1,:]
+
+    #if the coordinate of endpoint1 in the max traversal dimension
+    #is less than the coordinate of endpoint1 in the max traversal dimension
+    #flip it
+    if endpoint1[maxTraversalDim]<endpoint2[maxTraversalDim]:
+        curCentroid= curCentroid[::-1]
+
+    orientedStreams=streamline.orient_by_streamline(clusterStreams, curCentroid)
+    
+    #I don't think I need this any more
+    # refStreams=cluster.refdata
+    # for iStreams in range(len(streamIndexes)):
+    #     if not np.all(streamlines[streamIndexes[iStreams]][0,:]==orientedStreams[iStreams][0,:]):
+    #         streamlines[streamIndexes[iStreams]]= streamlines[streamIndexes[iStreams]][::-1]
+    
+    #would I rather do this in place?
+    return orientedStreams, cluster.indices
+    
 
 def bundleTest(streamlines):
     """
@@ -843,17 +953,19 @@ def wmc2tracts(inputTractogram,classification,outdir):
     
     if isinstance(classification,str):
         #load the .mat object
-        classification=loadmat(classification)
-        #it comes back as an eldridch horror, so parse it appropriately
-        #get the index vector
-        indices=classification['classification'][0][0]['index'][0]
-        #get the names vector
-        tractIdentities=[str(iIdenties) for iIdenties in classification['classification'][0][0][0][0]]
+        classification=matWMC2dict(classification)
+    else:
+        pass
+    
+    #it comes back as an eldridch horror, so parse it appropriately
+    #get the index vector
+    indices=classification['index']
+    #get the names vector
+    tractIdentities=classification['names']
     
     for tractID in range(len(tractIdentities)):
         #remove unncessary characters, adds unnecessary '[]'
-        t_name = tractIdentities[tractID][2:-2]
-        tract_name = t_name.replace(' ', '_')
+        tract_name = tractIdentities[tractID]
         idx_tract = np.array(np.where(indices==tractID+1))[0]
         
         #save it in the same format as the input
@@ -861,9 +973,14 @@ def wmc2tracts(inputTractogram,classification,outdir):
             out_filename=os.path.join(outdir,tract_name + '.tck')
         elif  isinstance(inputTractogram, nib.streamlines.trk.TrkFile):
             out_filename=os.path.join(outdir,tract_name + '.trk')
-        print('saving '+ str(len(idx_tract)) + ' streamlines for' + t_name+ ' to')
+        print('saving '+ str(len(idx_tract)) + ' streamlines for' + tract_name+ ' to')
         print(out_filename)
-        stubbornSaveTractogram(inputTractogram.streamlines[idx_tract],out_filename)
+        if isinstance( inputTractogram,nib.streamlines.array_sequence.ArraySequence):
+            #maybe they input just streamlines
+            stubbornSaveTractogram(inputTractogram[idx_tract],out_filename)
+        else:
+            #better hope its a stateful tractogram
+            stubbornSaveTractogram(inputTractogram.streamlines[idx_tract],out_filename)
   
 def matWMC2dict(classification):
     """
@@ -899,13 +1016,15 @@ def matWMC2dict(classification):
     print('digesting .mat object')
     indices=classification['classification'][0][0]['index'][0]
         #get the names vector
-    tractIdentities=[str(iIdenties) for iIdenties in classification['classification'][0][0][0][0]]
+        #this is... the worst thing ever
+    tractIdentities=[str(iIdenties[0]) for iIdenties in classification['classification'][0][0]['names'].flatten()]
     tractNames=[]
-    for tractID in range(len(tractIdentities)):
+    for iterator,inName in enumerate(tractIdentities):
         #remove unncessary characters, adds unnecessary '[]'
-        t_name = tractIdentities[tractID][2:-2]
+        #this has been solved
+        #t_name = tractIdentities[tractID][2:-2]
         #standard practice: get rid of all spaces
-        tractNames.append(t_name.replace(' ', '_'))
+        tractNames.append(inName.replace(' ', '_'))
         #also consider using this opportunity to fix/enforce naming conventions
     
     
@@ -913,7 +1032,8 @@ def matWMC2dict(classification):
     wmc_Dict={}
     wmc_Dict['names']=tractNames
     wmc_Dict['index']=indices.tolist()
-
+    #and the fix
+    wmc_Dict['names']=np.array(wmc_Dict['names'], dtype=np.object) 
     print('input classification structure represents ' + str(len(wmc_Dict['names'])) + ' structures composed of ' + str(np.sum(np.greater(wmc_Dict['index'],0))) + ' out of ' + str(len(indices)) + 'total available streamlines.')
     
     return wmc_Dict
@@ -965,7 +1085,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
     #determine whether the input vector is bool or indexes
     uniqueInputVals=np.unique(boolOrIndexesIn)
     #if the unique values are limited to some combination of ones and zeros
-    if np.any([uniqueInputVals==[0,1], uniqueInputVals==[1],uniqueInputVals==[0]]):
+    if np.any([np.array_equal(uniqueInputVals,[0,1]), np.array_equal(uniqueInputVals,[1]),np.array_equal(uniqueInputVals,[0])]):
         #its a bool
         #for the sake of expediency and standardization, lets get the length
         #and convert this to indexes
@@ -980,15 +1100,15 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
     if existingClassification==None:
         #need to make a new one
         wmc_Dict={}
-        wmc_Dict['names']=[]
+        
         #if there is a valid streamline lenth, create a blank index structure
         if isinstance(streamlinesLength,int):
-            wmc_Dict['index']=np.zeros(streamlinesLength)
+            wmc_Dict['index']=np.zeros(streamlinesLength,dtype=int)
         else:
             raise ValueError('Input indexes do not indicate TOTAL number of streamlines in input tract \ncCan not create new wmc structure without this information.')
         
         #now that we have sorted that out, we can add the name and set the indexes
-        wmc_Dict['names'].append(name)
+        wmc_Dict['names']=np.array([name])
         #because we are creating this new, it is safe to assume that the new
         #index for this name is 1
         wmc_Dict['index'][currentIndexes]=1
@@ -1001,7 +1121,7 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
             #throw a warning that you're about to overwrite that listing
             warn('Input name ' + name + ' detected in input classification structure \nOverwriting previous record(s)')
             #we have to add one because we can't use 0 indexing
-            currentIndex=wmc_Dict['names'].index(name)+1
+            currentIndex=np.where(wmc_Dict['names']==name)[0][0]+1
             #find the locations of where this is
             currentIndexMatches=wmc_Dict['index']==currentIndex
             #reset those entries to 0
@@ -1011,12 +1131,16 @@ def updateClassification(boolOrIndexesIn,name,existingClassification=None):
         #otherwise
         else:
             #add it to the list of names 
-            wmc_Dict['names'].append(name)
+            wmc_Dict['names']=np.append(wmc_Dict['names'],name)
             #get the new lenght of this vector
             #we don't need to add 1 because length reflects appropriate index
             currentIndex=len(wmc_Dict['names'])
             wmc_Dict['index'][currentIndexes]=currentIndex
             
+    #BEFORE WE LEAVE THOUGH, we have to convert the list to an np array for some reason:
+    #https://stackoverflow.com/questions/7464632/python-to-mat-file-export-list-of-string-to-ordinar-matrix-of-chars-not-a-cell
+    
+    wmc_Dict['names']=np.array(wmc_Dict['names'], dtype=np.object)        
     return wmc_Dict
     
   
@@ -1066,7 +1190,7 @@ def matWMC2jsonWMC(classification):
     outJson=json.dumps(wmc_Dict)
     return outJson
 
-def stubbornSaveTractogram(streamlines,savePath):
+def stubbornSaveTractogram(streamlines,savePath=None):
     """
     Why shouuld i supply a reference nifti?
     
@@ -1108,8 +1232,8 @@ def stubbornSaveTractogram(streamlines,savePath):
     #statefulTractogramOut=StatefulTractogram(voxStreams, dummyNifti, Space.VOX)
     #note we have to force a conversion here
     statefulTractogramOut=StatefulTractogram(Streamlines(streamlines), dummyNifti, Space.RASMM)
-    
-    save_tractogram(statefulTractogramOut,savePath, bbox_valid_check=False)
+    if not savePath==None:
+        save_tractogram(statefulTractogramOut,savePath, bbox_valid_check=False)
     return statefulTractogramOut
 
 def orientTractUsingNeck(streamlines,refAnatT1=None,surpressReport=False):
@@ -1523,6 +1647,8 @@ def orientTractUsingNeck_Robust(streamlines,refAnatT1=None,surpressReport=False)
     return streamlines
 
 
+
+
 def flipStreamstoAB_OrientOnce(streamlines, aheadNodes, behindNodes,surpressReport=False):
     """
     
@@ -1683,6 +1809,50 @@ def orientAllStreamlines(tractStreamlines):
 
     return  tractStreamlines
 
+def wmc_from_DIPY_connectome(grouping,lookupTable):
+    """
+    Generates a wmc-type classification structure
+    https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b/readme
+    from the output of dipy.tracking.utils.connectivity_matrix
+
+    Parameters
+    ----------
+    grouping : dict, output of dipy.tracking.utils.connectivity_matrix
+        The direct dictionary output of the grouping return object from
+        dipy.tracking.utils.connectivity_matrix
+    lookupTable : pandas.DataFrame
+        A lookup table derived either from wmaPyTools.analysisTools.reduceAtlasAndLookupTable
+        or wmaPyTools.genUtils.parcJSON_to_LUT, but probably the former, given
+        the requirements of dipy.tracking.utils.connectivity_matrix
+
+    Returns
+    -------
+    classification : a dictionary object with "names" and "index" field, in accordance
+    with the wmc datatype
+    https://brainlife.io/datatype/5cc1d64c44947d8aea6b2d8b/readme
+
+    """
+    import numpy as np
+    import itertools
+    #ugly way to get max index value from grouping
+    #np.max(grouping[list(grouping.keys())])
+    maxStreamIndex=np.max(list(itertools.chain(*[grouping[ikeys] for ikeys in list(grouping.keys())])))
+    #remember, zero indexing
+        
+    for iterator,iConnections in enumerate(list( grouping.keys())):
+        boolvec=np.zeros(maxStreamIndex+1,dtype=bool)
+        currentName1=lookupTable['labelNames'].iloc[iConnections[0]]
+        currentName2=lookupTable['labelNames'].iloc[iConnections[1]]
+        connectionName=currentName1 + '_TO_' + currentName2
+        currentIndexes=grouping[iConnections]
+        boolvec[currentIndexes]=True
+        if not 'classification' in locals():
+            classification=updateClassification(boolvec,connectionName,existingClassification=None)
+        else:
+            classification=updateClassification(boolvec,connectionName,existingClassification=classification)
+        
+    return classification
+
 def downsampleToEndpoints(streamlines):
     """
     
@@ -1720,6 +1890,9 @@ def downsampleToEndpoints(streamlines):
 
     return endpointsAsStreams 
 
+ 
+    
+
 def orientTractUsingNeck_multi(streamlines):
     """
     
@@ -1742,12 +1915,8 @@ def orientTractUsingNeck_multi(streamlines):
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
     import numpy as np
    
-    
-    feature = ResampleFeature(nb_points=100)
-    metric = AveragePointwiseEuclideanMetric(feature)
+    cluster=quickbundlesClusters(streamlines,nb_pts=50)
 
-    qb = QuickBundles(threshold=2,metric=metric, max_nb_clusters = len(streamlines)/100)
-    cluster = qb.cluster(streamlines)
     
     for iBundles in range(len(cluster)):
         streamIndexes=list(cluster[iBundles].indices)
@@ -1847,3 +2016,259 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
   
     return streamlines
 
+def quickbundlesClusters(streamlines, thresholds = [30,20,10,5], nb_pts=100,verbose=False):
+    """
+    (quickly?, via qbx_and_merge?) perform a quick-bundling of an input
+    collection of streamlines.  Perhaps an unnecessary wrapper.
+    Parameters
+    ----------
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence
+        The input streamlines 
+    **kwargs : keyword arguments for the qbx_and_merge
+        Currently only supports [thresholds] and [nb_pts]
+        See dipy.segment.bundles.qbx_and_merge for more details
+    Returns
+    -------
+    clusters : dipy.segment.clustering.ClusterMapCentroid
+        The clusters resulting from the quickBundle-ification of the input 
+        streamlines
+    """
+    from dipy.segment.bundles import qbx_and_merge
+    from dipy.tracking.streamline import Streamlines
+    
+    #this didn't work, and was causing all kinds of problems
+    # #fill in parameters if they are there.
+    # if not 'thresholds' in locals():
+    #     thresholds = [30,20,10,5]
+    # if not 'nb_points' in locals():
+    #     nb_pts=20
+    # if not 'verbose' in locals():
+    #     verbose=False
+    #perform the quick, iterave bundling
+    clusters=qbx_and_merge(streamlines,thresholds , nb_pts, select_randomly=None, rng=None, verbose=verbose)
+    
+    return clusters
+
+def cullViaClusters(clusters,streamlines,streamThresh):
+    """
+    Determine from an input collection of streamlines which ought to be culled
+    in accordance with how "unique" the trajectory of individual streamlines
+    are, as assessed by the number of streamlines they are bundled with using
+    DIPY's quickbundles.
+    
+    Returns indexes for both the surviving and (to be) culled streamlines.  As
+    such, does not actually perform the streamline cull itself, which would
+    be performed with cullStreamsByBundling
+
+    Parameters
+    ----------
+    clusters : ClusterMapCentroid object of dipy.segment.clustering module
+        Output clustring of dipy's quickbundles, e.g. from quickbundlesClusters
+    streamlines : nib.streamlines.array_sequence.ArraySequence
+        The source streamlines. Technically redundant with clusters._refdata.
+        Will be removed in future versions
+    streamThresh : int. Positive, greater than 0
+        The *minimum* number of streamlines needed in a quick bundles cluster
+        in order for *all* of the streamlines in that cluster to survive
+        the culling process.  All streamlines in all clusters having fewer than
+        this number will be interpreted as being excessively distinct from
+        other trajectories in the input collection of streamlines and will be
+        removed.
+
+    Returns
+    -------
+    survivingStreamsIndicies : list of int
+        The indexes of the surviving / filtered streamlines.
+        set(survivingStreamsIndicies).union(culledStreamIndicies)==range(len(clusters._refdata))==range(len(streamlines))
+    culledStreamIndicies : list of int
+        The indexes of the culled / (to be) removed streamlines.
+        set(survivingStreamsIndicies).union(culledStreamIndicies)==range(len(clusters._refdata))==range(len(streamlines))
+
+    """
+
+    import itertools
+    import numpy as np
+    import nibabel as nib
+    import dipy
+    
+    #implement robustness for case in which streamlines instead of cluster
+    #is passed.  Implicitly, this would indicate the user's desire to perform
+    #clustering inside this function, instead of performing it ahead of time.
+    #could be sensible in a case where you wouldn't be using the clustering 
+    #information for other purposes.
+    if isinstance(clusters, nib.streamlines.array_sequence.ArraySequence):
+        clusters=quickbundlesClusters(streamlines, thresholds=[30,20,10,5],nb_pts=100)
+    elif isinstance(clusters, dipy.segment.clustering.ClusterMapCentroid):
+        pass
+        #do nothing, it's in the format that is needed
+    
+    #get the cluster lengths
+    clusterLengths=[len(iCluster) for iCluster in clusters]
+    
+    #find which have meet the thresh criterion
+    clustersSurviveThresh=np.greater(clusterLengths,streamThresh)
+    
+    #get a list of the clusters
+    survivingClusters=list(itertools.compress(clusters,clustersSurviveThresh))
+    #get the indexes of the streamlines from each
+    survivingClusterLists=[iCluster.indices for iCluster in survivingClusters]
+    #cat them all together
+    survivingStreamsIndicies=list(itertools.chain(*survivingClusterLists))
+    
+    #find the obverse of the surviving stream set
+    culledStreamIndicies=list(set(list(range(0,len(clusters._refdata))))-set(survivingStreamsIndicies))
+
+    return survivingStreamsIndicies, culledStreamIndicies
+
+def manualSelectStreams_byEndpoint(streamlines,parc,lookupTable,targetLabels):
+    """
+    Determines which streamlines end in the requested collections of endpoints.
+    In other words, reduces the output of 
+    dipy.tracking.utils.connectivity_matrix to the indexes of *only* the
+    streamlines terminating in each of the specified collections of termination
+    areas.
+    
+    Returns a dictionary of classification structures such that each key-value
+    pair corresponds to the requested label value(s) and the streamline indexes 
+    associated with those termination areas.
+
+    Parameters
+    ----------
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence
+        The streamlines that are to be considered
+    parc : nibabel.nifti1.Nifti1Image or compatible
+        The parcellation to be used for dipy's utils.connectivity_matrix
+    lookupTable : csv or pandas.DataFrame
+        The lookup table for the associated parc
+    targetLabels : list of (int or list of int)
+        The requested termination areas whose streamline endpoint associations
+        are to be determined.  Each element of the list is treated as a
+        separate request, and has a corresponding output classification
+        structure.
+
+    Raises
+    ------
+    ValueError
+        Raises a value error of any of the requested labels are not found in
+        the input parcellation
+
+    Returns
+    -------
+    outClassificationDicts : dict
+        A dictionary of classification structures such that each key-value
+        pair corresponds to the requested label value(s) and the streamline
+        indexes associated with those termination areas.
+
+    """
+    
+    
+    import numpy as np
+    from dipy.tracking.utils import reduce_labels
+    from dipy.tracking import utils
+    import wmaPyTools.analysisTools
+    import itertools
+    
+    #throw an error at the outset if the requested labels aren't in the provided table
+    #get the unique label indexes requested
+    uniqueRequestLabels=np.unique(targetLabels)
+    #find out which labels are avaialbe in the input parc
+    availableLabels=np.unique(np.asanyarray(parc.dataobj))
+    #find which were requested but not avaialbe
+    requestedButNotFound=list(set(list(uniqueRequestLabels))-set(list(availableLabels)) )
+    if len(requestedButNotFound)>0:
+        raise ValueError('Requested indexes: \n '+ requestedButNotFound + '\n not found in input parcellation.' )
+    
+    #perform initial dipy based endpoint analysis
+    #begin by reducing the input atlas
+    [renumberedAtlasNifti,reducedLookupTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(parc,lookupTable,removeAbsentLabels=True)
+    #then do the endpoint connectivity matrix
+    M, grouping=utils.connectivity_matrix(streamlines, np.round(renumberedAtlasNifti.affine,2), label_volume=renumberedAtlasNifti.get_data().astype(int),
+                            symmetric=False,
+                            return_mapping=True,
+                            mapping_as_streamlines=False)
+    #from the DIPY connectivity dictionary structure, obtain all of the keys
+    #these keys are the indexes of *existing* connections, as indexed by
+    #their *reduced* index number. The value pairings for these are the
+    #streamline indexes    
+    groupingKeys=grouping.keys()
+    
+    outClassificationDicts={}
+
+    for iIterator,iSubdivisions in enumerate(targetLabels):
+        
+        #if iSubdivisions is a singleton, convert it to a list
+        if isinstance(iSubdivisions,int):
+            iSubdivisions=[iSubdivisions]
+        
+        #convert the requested label, presumably from the original parcellation,
+        #to the reduced version
+        currReducedIndexes=[reducedLookupTable.index[reducedLookupTable['#No.']==iIndexes].values[0] for iIndexes in iSubdivisions]
+        
+        #get the name or names for the current request, could be multiple
+        #so cat them together with and to obtain a name for this streamline collection
+        #find the entries in the lookup table
+        names=reducedLookupTable['LabelName:'].iloc[currReducedIndexes].values
+        #join them all together
+        namesJoined='_and_'.join(names)
+        
+        #iterate across the keys and determine if any match the current subdivision
+        keyBoolVec=np.zeros(len(groupingKeys),dtype=bool)
+        for iKeyIndex,iKeyPairs in enumerate(groupingKeys):
+            keyBoolVec[iKeyIndex]=iKeyPairs[0] in iSubdivisions or iKeyPairs[1] in iSubdivisions
+        
+        #extract the connectivity matrix keys that meet this criterion
+        validKeys=list(itertools.compress(groupingKeys,keyBoolVec))
+        
+        #extract the list of streamline indexes for each of these keys
+        indexLists=[grouping[iKey] for iKey in validKeys]
+        
+        #cat them all together, but be sure to get the unique values, as it
+        #is possible in cases where multiple labels have been entered for this
+        #iSubdivisions that *both* endpoint areas have been chosen, and thus
+        #the a streamline index might show up more than once
+        allStreamIndicies=np.unique(list(itertools.chain(*indexLists)))
+        
+        #now that we have the unique indexes for this, we need to create a WMC
+        #structure
+        #because we are creating a new wmc for each iSubdivisions requested, we
+        #need to create a boolean vector mask of the input streamlines for the
+        #current indexes
+        currentBoolVec=np.zeros(len(streamlines),dtype=bool)
+        #do I need to do it this way?
+        currentBoolVec[allStreamIndicies]=[True]*len(allStreamIndicies)
+        #currentBoolVec[allStreamIndicies]=True
+        currentClassificationStructure=updateClassification(currentBoolVec,namesJoined,existingClassification=None)
+        
+        outClassificationDicts[iSubdivisions]=currentClassificationStructure
+    
+    return outClassificationDicts
+
+# def cullStreamsByBundling(streamlines,streamThresh,qbThresholds=[30,20,10,5],qbResmaple=100):
+#     """
+#     Actually perform the streamline cull 
+
+#     Parameters
+#     ----------
+#     streamlines : TYPE
+#         DESCRIPTION.
+#     streamThresh : TYPE
+#         DESCRIPTION.
+#     qbThresholds : TYPE, optional
+#         DESCRIPTION. The default is [30,20,10,5].
+#     qbResmaple : TYPE, optional
+#         DESCRIPTION. The default is 100.
+
+#     Returns
+#     -------
+#     survivingStreamsIndicies : TYPE
+#         DESCRIPTION.
+#     culledStreamIndicies : TYPE
+#         DESCRIPTION.
+
+#     """
+    
+#     clusters=quickbundlesClusters(streamlines, thresholds=qbThresholds,nb_pts=qbResmaple,verbose=True)
+    
+#     survivingStreamsIndicies, culledStreamIndicies=cullViaClusters(clusters,streamlines,streamThresh)
+    
+#     return survivingStreamsIndicies, culledStreamIndicies

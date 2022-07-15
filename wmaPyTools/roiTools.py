@@ -202,6 +202,46 @@ def planeAtMaskBorder(inputMask,relativePosition):
     #return the planar roi you have created
     return outPlaneNifti
 
+def returnNiftiBounds(inputNifti):
+    """
+    Returns the subject space boundary coordinates of the input nifti.
+    
+
+    Parameters
+    ----------
+    inputNifti : nifti1.Nifti1Image
+        A nifti image from which you would like to obtain the subject-space
+        boundary coordinates
+
+    Returns
+    -------
+    boundingBox : np.array, 2x3
+        The first row (row 0) corresponds to the max dimension values,
+        while the second row (row 1) corresponds to the min dimension values.
+
+    """
+  
+    import itertools
+    import numpy as np
+    import nibabel as nib
+  
+    #obtain the nifti shape
+    niftiShape=inputNifti.shape
+    
+    #stack these alongside 0, the min bound in image space
+    imgBounds=np.vstack([np.asarray(niftiShape),[0,0,0]])
+    
+    #iterate to obtain all possible combinations
+    verticies=np.asarray(list(itertools.product(imgBounds[:,0], imgBounds[:,1], imgBounds[:,2])))
+   
+    #apply affine to obtain subject space coordinates
+    outCoordnates=nib.affines.apply_affine(inputNifti.affine,verticies)
+    
+    #find the min and max in each dimension, and stack acordingly
+    boundingBox=np.vstack([np.max(outCoordnates,axis=0),np.min(outCoordnates,axis=0)])
+    
+    return boundingBox
+
 def createSphere(r, p, reference, supress=True):
     """
     create a sphere of given radius at some point p in the brain mask
@@ -840,6 +880,231 @@ def subjectSpaceMaskBoundaryCoords(maskNifti):
     
 #     return outNifti1, outNifti2
 
+def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=[]):
+    """
+    Removes island label values from atlas iteratively across values present.
+    Important for when extracted atlas labels are being used as anatomical 
+    markers.  Instead of using erosion, we'll use scipy.ndimage.measurements.label
+    
+    Potentially faster ways of doing this in other packages.
+    
+    Parameters
+    ----------
+    atlasNifti : string path to file loadable via nib.load or nifti-like object
+        A multi label atlas/parc, with integer based labels.  Will load if string
+        is passed
+    ignoreLabelsRequest :  list of int, optional
+        The number of inflate iterations you would like to perform. If no value
+        is passed, no inflation is performedThe default is 0.
+
+    Returns
+    -------
+    atlasNiftiOut : nibabel.nifti1.Nifti1Image
+        The input atlas nifti, but with islands removed
+    removalReport : pandas.DataFrame
+        A pandas based table indicating the number of islands found, their total
+        volume, and the pre and post voxel count for each label
+
+    """
+
+    #scipy.ndimage.measurements.labeled_comprehension?        
+
+    import nibabel as nib
+    from scipy.ndimage.measurements import label
+    import numpy as np
+    import copy
+    import pandas as pd
+    #because it unnecessarily warns about things
+    pd.options.mode.chained_assignment = None
+    
+    if isinstance(atlasNifti,str):
+        atlas=nib.load(atlasNifti)
+    else:
+        atlas=atlasNifti
+    
+    #by default we ignore the background
+    ignoreLabelsRequest.append(0)
+    #just in case they included 0 or repeats
+    ignoreLabels=np.unique(ignoreLabelsRequest)
+
+    #do something to ensure that it is int based
+    atlasData=np.round( np.asanyarray(atlas.dataobj)).astype(int)
+    
+    #create a seprate object to begin de-islanding
+    noIslandData=copy.deepcopy(atlasData)
+    
+    #get counts of the unique lables
+    [labels,counts]=np.unique(atlasData, return_counts=True)
+    
+    #create a report of the island removal process
+    removalReport=pd.DataFrame(columns=['labelVal','startVoxCount','islandCount','totalIslandVox','endVoxCount'])
+    removalReport['labelVal']=labels
+    removalReport['startVoxCount']=counts
+    
+    
+    for labelIterator,iLabels in enumerate(labels):
+        #we don't want to do 0
+        
+
+        if not iLabels in ignoreLabels:
+            #label the distinct elements of the parcellation matching the current label
+            #startLabel = time.time()
+            #~.5 of .9 seconds per loop here
+            labeled_array, num_features = label(atlasData==iLabels)
+            #endLabel = time.time()
+            #print(endLabel - startLabel)
+            #get the counts for these elements
+            [curr_labels,curr_counts]=np.unique(labeled_array, return_counts=True)
+
+            #always ignore 0, add 1 because you're ignoring it
+            maxSizeIndex=np.where(curr_counts[1:]==np.max(curr_counts[1:]))[0][0]+1
+            #create a mask of the locations to be zeroed out
+            currIslandMask=np.logical_and(labeled_array>0,labeled_array!=maxSizeIndex)
+            
+            #compute and populate the data for the report
+            #-2 because we don't include 0 or the largest island
+            removalReport['islandCount'].loc[removalReport['labelVal']==iLabels]=len(curr_counts)-2
+            removalReport['totalIslandVox'].loc[removalReport['labelVal']==iLabels]=np.sum(currIslandMask)
+            
+            #use the mask to set the relevant voxels to 0
+            noIslandData[currIslandMask]=0
+            
+            #count the new total voxel count for this label
+            removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=np.sum(noIslandData==iLabels)
+            #print(removalReport.loc[removalReport['labelVal']==iLabels])
+
+    
+    #now populate data for the lables we didn't modify
+    for iLabels in ignoreLabels:
+            labeled_array, num_features = label(atlasData==iLabels)
+            #get the counts for these elements
+            [curr_labels,curr_counts]=np.unique(labeled_array, return_counts=True)
+
+            #always ignore 0, add 1 because you're ignoring it
+            maxSizeIndex=np.where(curr_counts[1:]==np.max(curr_counts[1:]))[0][0]+1
+            #create a mask of the locations to be zeroed out
+            currIslandMask=np.logical_and(labeled_array>0,labeled_array!=maxSizeIndex)
+            
+            #compute and populate the data for the report
+            #-2 because we don't include 0 or the largest island
+            removalReport['islandCount'].loc[removalReport['labelVal']==iLabels]=len(curr_counts)-2
+            removalReport['totalIslandVox'].loc[removalReport['labelVal']==iLabels]=np.sum(currIslandMask)
+            
+            #use the mask to set the relevant voxels to 0
+            #except we arent changing these
+            #noIslandData[currIslandMask]=0
+            
+            #count the new total voxel count for this label
+            removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=np.sum(noIslandData==iLabels)
+            
+    #now prepare the nifti output
+    atlasNiftiOut=nib.Nifti1Image(noIslandData, atlas.affine, atlas.header)
+    
+    return atlasNiftiOut,removalReport
+  
+def preProcParc(inParc,deIslandBool=True,inflateIter=0,retainOrigBorders=False,maintainIslandsLabels=None,erodeLabels=None):
+    """
+    
+
+    Parameters
+    ----------
+    inParc : String path to file loadable via nib.load or NIFTI-like object
+           A multi label atlas/parc, with integer based labels.  Will load if string
+           is passed
+    deIslandBool : Bool, optional
+        Whether to perform a de-islanding operation. The default is True.
+    inflateIter : int, optional
+        The number of intlation iterations to perform. The default is 0, thus 
+        no inflation.
+    retainOrigBorders : Bool, optional
+        Retains the borders of the origional input parcellation.
+        The default is False, and so inflation, if performed, will extend outside
+        the origional mask.
+    maintainIslandsLabels : list or array of int, optional
+        During the de-island operation (if performed) do not remove islands from
+        these labels.  NOTE:  Potentially useful for cross-hemispheric labels.
+        The default is None.
+    erodeLabels : list or array of int, optional
+        During the inflation operation (if perfrormed), allow these labels
+        to be eroded into. The default is None.
+
+    Returns
+    -------
+    atlasNiftiOut : nibabel.nifti1.Nifti1Image
+        The nifti image, after requested preprocessing has been performed.
+    deIslandReport : pandas.DataFrame
+        A pandas based table indicating the number of islands found, their total
+        volume, and the pre and post voxel count for each label
+    inflationReport : pandas.DataFrame
+        A pandas based table indicating which labels had voxels removed, and
+        how many
+
+    """
+
+    import copy
+    import numpy as np
+    import nibabel as nib
+    
+    
+    outAtlas=copy.deepcopy(inParc)
+    
+    #setup the ignore labels request vec
+    if maintainIslandsLabels==None:
+        ignoreLabelsRequest=[]
+    else:
+        ignoreLabelsRequest=maintainIslandsLabels
+    
+    #perform deislanding, if requested
+    if deIslandBool:
+        [outAtlas, deIslandReport]=removeIslandsFromAtlas_viaLabelCount(outAtlas,ignoreLabelsRequest)
+    else:
+        deIslandReport=None
+    #hold this to hold the effect of the deislanding, if it occured
+    deIslandHold=copy.deepcopy(outAtlas)
+        
+    #if inflation has been requested perform inflation
+    if inflateIter>0:
+        #but first, set up the erode atlas labels
+        if erodeLabels==None:
+            erodeLabels=[]
+            
+        for iToErode in erodeLabels:
+            #changeMultpleLabelValues(inputParc,targetLabelNums,newLabelNum) ?
+            #this sets these values to 0, allowing them to be inflated into
+            outAtlas=changeLabelValue(outAtlas,iToErode,0)
+        
+        [outAtlas, inflationReport]=inflateAtlas(outAtlas,inflateIter)
+        #but now we have to reset the values were eroded into
+        #get the data blocks now, outside of the loop
+        deIslandHoldData=np.round( np.asanyarray(deIslandHold.dataobj)).astype(int)
+        outAtlasData=np.round( np.asanyarray(outAtlas.dataobj)).astype(int)
+        
+        
+        for iToErode in erodeLabels:
+            #find the indexes == to the erode value in the deIslandHold and == to 0 in outAtlas
+            #set them back to the current erode value
+            outAtlasData[np.logical_and(deIslandHoldData==iToErode,outAtlasData==0)]=iToErode
+    else:
+        #get the out atlas data just in case
+        outAtlasData=np.round( np.asanyarray(outAtlas.dataobj)).astype(int)
+    
+    if retainOrigBorders:
+        brainMask=np.asanyarray(inParc.dataobj)>0
+        #negate it and set the corresponding data to 0
+        outAtlasData[np.logical_not(brainMask)]=0
+    
+    #now set the outAtlasData s a new nifti
+    
+    #should be done, although the final report won't reflect that toErode or maintain borders operation
+    #TODO
+    #edit output report to reflect the recent change
+    
+    #make a nifti of it
+    atlasNiftiOut=nib.Nifti1Image(outAtlasData, inParc.affine, inParc.header)
+
+    return atlasNiftiOut,deIslandReport,inflationReport
+    
+
 def removeIslandsFromAtlas(atlasNifti):
     """
     Removes island label values from atlas iteratively across values present.
@@ -850,15 +1115,15 @@ def removeIslandsFromAtlas(atlasNifti):
     
     Parameters
     ----------
-    atlasNifti : TYPE
+    atlasNifti : String path to file loadable via nib.load or NIFTI-like object
         A multi label atlas, with integer based labels.  Will load if string
         is passed
 
     Returns
     -------
-    atlasNiftiOut : TYPE
+    atlasNiftiOut : nibabel.nifti1.Nifti1Image
         The input atlas nifti, but with islands removed
-    removalReport : TYPE
+    removalReport : pandas.DataFrame
         A pandas based table indicating which labels had voxels removed, and
         how many
 
@@ -877,7 +1142,7 @@ def removeIslandsFromAtlas(atlasNifti):
 
 
     # atlasData=np.round(atlas.get_data()).astype(int)
-    # #COSIDER REPLACING ALL OR MSOT OF THIS WITH
+    # #COSIDER REPLACING ALL OR MOST OF THIS WITH
     #Doesn't seem to work?
     # relabelConnectedData=scipy.ndimage.measurements.label(atlasData.astype(bool))
 
@@ -936,7 +1201,181 @@ def removeIslandsFromAtlas(atlasNifti):
         #make a nifti of it
         atlasNiftiOut=nib.Nifti1Image(atlasData, atlas.affine, atlas.header)
         
-    return atlasNiftiOut, removalReport 
+    return atlasNiftiOut, removalReport
+
+def inflateAtlas(atlasNifti,iterations):
+    """
+    Inflates label values of input atlas background (i.e. 0) labels.  
+    Will perform island removal first.  More self contained rewrite of
+    inflateAtlasIntoWMandBG
+       
+    Potentially faster methods in other packages
+
+    Parameters
+    ----------
+    atlasNifti : String path to file loadable via nib.load or NIFTI-like object
+        A multi label atlas, with integer based labels.  Will load if string
+        is passed
+    iterations : int
+        The number of iterations to perform the inflation.  Proceeds voxelwise.
+
+    Returns
+    -------
+    atlasNiftiOut : nibabel.nifti1.Nifti1Image
+        The input atlas nifti, but with islands removed and then inflated into
+    removalReport : pandas DataFrame
+        a dataframe detailing the alterations performed upon the input atlas
+
+    """
+    
+    
+    import numpy as np
+    import scipy
+    import nibabel as nib
+    import pandas as pd
+    
+    #conditional import of tqdm
+    try: 
+        import tqdm
+        tqdmFlag=True
+    except:
+        tqdmFlag=False
+        
+    
+    if isinstance(atlasNifti,str):
+        atlas=nib.load(atlasNifti)
+    else:
+        atlas=atlasNifti
+ 
+    #do something to ensure that it is int based
+    atlasData=np.round( np.asanyarray(atlas.dataobj)).astype(int)
+    
+    #get counts of the unique lables
+    [labels,counts]=np.unique(atlasData, return_counts=True)
+    
+    #create a report of the island removal process
+    removalReport=pd.DataFrame(columns=['labelVal','startVoxCount','endVoxCount','changeCount'])
+    removalReport['labelVal']=labels
+    removalReport['startVoxCount']=counts
+    
+    #get the image space bounds
+    imgSpaceBounds=np.asarray([[0,0,0],list(atlasData.shape)])
+    
+    #within bounds check function
+    def coordsInBounds(coords,bounds):
+        
+        boolHold=np.zeros(coords.shape,dtype=bool)
+        for iDims in range(bounds.shape[1]):
+            
+            boolHold[:,iDims]=np.less_equal.outer(bounds[0,iDims] ,coords[:,iDims]) & np.greater.outer(bounds[1,iDims] ,coords[:,iDims])
+        
+        return coords[np.all(boolHold,axis=1)]
+        
+    
+    #precompute some search windows using meshgrid
+    #couldn't ever go above 8 right?
+    searchKernels=[[] for ival in range(1,9)]
+    for iterator,iVals in enumerate(range(1,9)):
+        #because ranges don't include the end?
+        curSpan=np.arange(-iVals,iVals+1)
+        centerCoord=np.where(curSpan==0)[0][0]
+        
+        x, y, z = np.meshgrid(curSpan, curSpan, curSpan,indexing='ij')          
+   
+        mask_r = x*x + y*y + z*z <= iVals*iVals
+        
+        windowCoords=np.asarray(np.where(mask_r))
+        
+        centeredWindowCoords=windowCoords-centerCoord
+        
+        searchKernels[iterator]=centeredWindowCoords
+        
+        
+    for iInflations in range(iterations):
+        print('inflation iteration ' + str(iInflations+1))
+        #create a blank holder for the new label identities
+        newIDentityHolder=np.zeros(atlasData.shape)
+        #create a mask of the non target data
+
+        inflatedLabelsMask=scipy.ndimage.binary_dilation(atlasData>0)
+        #find the intersection of the inflated data mask and the inflation targets
+        infationArrayTargets=np.logical_and(inflatedLabelsMask,atlasData==0)
+        #find the coordinates for these targets
+        inflationTargetCoords=np.asarray(np.where(infationArrayTargets)).T
+    
+        #this manuver is going to cost us .gif
+        #NOTE, sequencing of coordinates may influence votes
+        #create a dummy array for each inflation iteration to avoid this
+        if  tqdmFlag:
+            for iInflationTargetCoords in tqdm.tqdm(inflationTargetCoords):
+                #because I dont trust iteration in 
+                #print(str(iInflationTargetCoords))
+                #set some while loop iteration values
+                #this is 1 less than the voxel-wise radius of the expanse you're considering
+                window=0
+                
+                voteWinner=[0,0]
+                while len(voteWinner)>1:
+                    initialTargetCords=np.asarray([np.add(iInflationTargetCoords,iCoords) for iCoords in searchKernels[window].T])
+                    #now check to see that they are within bounds
+                    validCoords=coordsInBounds(initialTargetCords,imgSpaceBounds)
+                    
+                    #this seems dumb, but ok
+                    curLabelBlock=np.array([atlasData[iValidCoords[0],iValidCoords[1],iValidCoords[2]] for iValidCoords in validCoords])
+  
+                    (labels,counts)=np.unique(curLabelBlock, return_counts=True)
+                    voteWinner=labels[np.where(np.max(counts)==counts)[0]]
+                    #just in case
+                    window=window+1
+
+                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+                del voteWinner
+        else: 
+            for iInflationTargetCoords in inflationTargetCoords:
+                #because I dont trust iteration in 
+                #print(str(iInflationTargetCoords))
+                #set some while loop iteration values
+                #this is 1 less than the voxel-wise radius of the expanse you're considering
+                window=0
+                
+                voteWinner=[0,0]
+                while len(voteWinner)>1:
+                    initialTargetCords=np.asarray([np.add(iInflationTargetCoords,iCoords) for iCoords in searchKernels[window].T])
+                    #now check to see that they are within bounds
+                    validCoords=coordsInBounds(initialTargetCords,imgSpaceBounds)
+                    
+                    #this seems dumb, but ok
+                    curLabelBlock=np.array([atlasData[iValidCoords[0],iValidCoords[1],iValidCoords[2]] for iValidCoords in validCoords])
+  
+                    (labels,counts)=np.unique(curLabelBlock, return_counts=True)
+                    voteWinner=labels[np.where(np.max(counts)==counts)[0]]
+                    #just in case
+                    window=window+1
+
+                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+                del voteWinner
+            
+        #once the inflations are done for this round, set the values in the atlas data
+        #to their new identities
+        #2/25/2022 note:  previously we had been directly setting the identity
+        #within the iInflationTargetCoords loop.  This was probably leading
+        #to over-percolation of low number identities
+        atlasData[infationArrayTargets]=newIDentityHolder[infationArrayTargets]
+        
+    
+    #create end report
+    #get counts of the unique lables
+    [labels,counts]=np.unique(atlasData, return_counts=True)
+    
+    #create a report of the island removal process
+    for iterator,iLabels in enumerate(labels):
+        removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=counts[iterator]
+        removalReport['changeCount'].loc[removalReport['labelVal']==iLabels]=removalReport['startVoxCount'].loc[removalReport['labelVal']==iLabels]-counts[iterator]
+    
+    inflatedAtlas=nib.Nifti1Image(atlasData, atlas.affine, atlas.header)
+    
+    return inflatedAtlas,removalReport
+    
 
 def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
     """
@@ -984,6 +1423,9 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
     
     #first perform the island removal operation
     [noIslandAtlas,report]=removeIslandsFromAtlas(atlasNifti)
+    #just save it
+    report.to_csv('de-island_report.csv')
+    
     
     #now we need to detect the wm and bg labels
     #lots of ways we could do this, I guess
