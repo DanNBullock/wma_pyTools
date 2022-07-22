@@ -2190,7 +2190,7 @@ def manualSelectStreams_byEndpoint(streamlines,parc,lookupTable,targetLabels):
     #these keys are the indexes of *existing* connections, as indexed by
     #their *reduced* index number. The value pairings for these are the
     #streamline indexes    
-    groupingKeys=grouping.keys()
+    groupingKeys=list(grouping.keys())
     
     outClassificationDicts={}
 
@@ -2214,7 +2214,7 @@ def manualSelectStreams_byEndpoint(streamlines,parc,lookupTable,targetLabels):
         #iterate across the keys and determine if any match the current subdivision
         keyBoolVec=np.zeros(len(groupingKeys),dtype=bool)
         for iKeyIndex,iKeyPairs in enumerate(groupingKeys):
-            keyBoolVec[iKeyIndex]=iKeyPairs[0] in iSubdivisions or iKeyPairs[1] in iSubdivisions
+            keyBoolVec[iKeyIndex]=iKeyPairs[0] in currReducedIndexes or iKeyPairs[1] in currReducedIndexes
         
         #extract the connectivity matrix keys that meet this criterion
         validKeys=list(itertools.compress(groupingKeys,keyBoolVec))
@@ -2239,7 +2239,7 @@ def manualSelectStreams_byEndpoint(streamlines,parc,lookupTable,targetLabels):
         #currentBoolVec[allStreamIndicies]=True
         currentClassificationStructure=updateClassification(currentBoolVec,namesJoined,existingClassification=None)
         
-        outClassificationDicts[iSubdivisions]=currentClassificationStructure
+        outClassificationDicts[tuple(iSubdivisions)]=currentClassificationStructure
     
     return outClassificationDicts
 
