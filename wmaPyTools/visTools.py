@@ -1948,12 +1948,14 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
     #     # print('skipping')
     # else:
     #     refAnatT1=wmaPyTools.streamlineTools.dummyNiftiForStreamlines(streamlines)
-        
+    
+    
     if not parcNifti==None:
         streamColors, colorLut=colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWindowMM=2.5)
     else:
         streamColors=colorGradientForStreams(streamlines)
-        
+    
+    #streamColors=[ iStreams[:,0:3] for iStreams in streamColors]
     
     
     stream_actor = actor.line(streamlines, streamColors, linewidth=10,fake_tube=True,opacity=1)
@@ -3079,6 +3081,9 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     #we'll assume that all streamlines have the same internode distance
     #it's a TERRIBLE assumption, but really, people who violate it are the ones in error...
     avgNodeDistance=np.mean(np.sqrt(np.sum(np.square(np.diff(streamlines[0],axis=0)),axis=1)))
+    #ok, so that turned out to be a terrible assumption.  tractSeg and other
+    #mrtrix functions that use adaptive node distance wreak havok here
+    #best fix is to detect weird internode distances earlier and resample accordingly.
     lookDistanceMM=2.5
     #find the number of nodes this is equivalent to
     lookDistance=np.round(lookDistanceMM/avgNodeDistance).astype(int)
@@ -3493,7 +3498,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
         if not os.path.exists(os.path.join(outdir,'streamsPlot')):
             os.makedirs(os.path.join(outdir,'streamsPlot'))
         dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=streamsPlotPathName, parcNifti=None)
-        #dipyPlotTract(streamlines,refAnatT1=refAnatT1, tractName=os.path.join(outdir,tractName))
+        #dipyPlotTract(streamlines,refAnatT1=refAnatT1, tractName=streamsPlotPathName)
     
     if  makeFingerprints:   
     #we use the group variant because it normalizes by proportion and splits out the endpoints into common and uncommon 
