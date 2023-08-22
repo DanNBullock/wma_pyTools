@@ -80,7 +80,7 @@ def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
     volumesToCheck=np.zeros(len(criteriaROIs))
     for iROIs in range(len(criteriaROIs)):
         #compute the volume that needs to be checked
-        volumesToCheck[iROIs]=np.sum(criteriaROIs[iROIs].get_data())
+        volumesToCheck[iROIs]=np.sum(criteriaROIs[iROIs].get_fdata())
 
     print("volumes of input ROIs to check " + str(volumesToCheck))
     #find the criteria that only involve endpoints (you don't have to check all the nodes
@@ -118,7 +118,7 @@ def speedSortSegCriteria(criteriaROIs,inclusionCriteria,operations):
         sortedInclusionCriteria.append(inclusionCriteria[outOrder[iOutputs]])
         sortedOperations.append(operations[outOrder[iOutputs]])
         
-        volumesToCheckOut[iOutputs]=np.sum(sortedCriteriaROIs[iOutputs].get_data()).astype(int)
+        volumesToCheckOut[iOutputs]=np.sum(sortedCriteriaROIs[iOutputs].get_fdata()).astype(int)
         #if it is an exclusion, get the number of streamlines that are left out
     print("volumes of output ROIs to check " + str(volumesToCheckOut))
     
@@ -331,7 +331,7 @@ def segmentTractMultiROI_fast(streamlines, roisVec, includeVec, operationsVec):
     #iterate across segmentation operations
     for iOperations in range(len(roisVec)):
         #perform this segmentation operation
-        curBoolVec=near_roi_fast(streamlines[remainingStreamIndexes], roisVec[iOperations].affine, roisVec[iOperations].get_data(),mode=operationsVec[iOperations])
+        curBoolVec=near_roi_fast(streamlines[remainingStreamIndexes], roisVec[iOperations].affine, roisVec[iOperations].get_fdata(),mode=operationsVec[iOperations])
         #if the inclusion operation requires it, negate the output
         if not includeVec[iOperations]:
             curBoolVec=np.logical_not(curBoolVec)
@@ -391,7 +391,7 @@ def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operatio
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not a nifti.")
     
     #the conversion to int may cause problems if the input isn't convertable to int.  Then again, the point of this is to raise an error, so...
-    elif np.logical_not(np.all(np.unique(maskNifti.get_data()).astype(int)==[0, 1])): 
+    elif np.logical_not(np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1])): 
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not convertable to 0,1 int mask.  Likely not a mask.")
         
     if np.logical_not(isinstance(includeBool, bool )):
@@ -434,7 +434,7 @@ def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operatio
     #second track mask application doesn't seem to do anything    
     
     #use dipy's near roi function to generate bool
-    criteriaStreamsBool=near_roi(boundedStreamSubset, tractMaskROIIntersection.affine, tractMaskROIIntersection.get_data().astype(bool), mode=operationSpec)
+    criteriaStreamsBool=near_roi(boundedStreamSubset, tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata().astype(bool), mode=operationSpec)
        
     #find the indexes of the original streamlines that the survivors correspond to
     boundedStreamsIndexes=np.where(boundedStreamsBool)[0]
@@ -810,8 +810,8 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not a nifti.")
     
     #the conversion to int may cause problems if the input isn't convertable to int.  Then again, the point of this is to raise an error, so...
-    elif np.logical_not(np.all(np.unique(maskNifti.get_data()).astype(int)==[0, 1])): 
-        if np.all(np.unique(maskNifti.get_data()).astype(int)[0]==0):
+    elif np.logical_not(np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1])): 
+        if np.all(np.unique(maskNifti.get_fdata()).astype(int)[0]==0):
             import warnings
             warnings.warn("input mask nifti empty.")
         else:
@@ -861,7 +861,7 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
     #use dipy's near roi function to generate bool
     #start timing
     t1_start=time.process_time()
-    criteriaStreamsBool=near_roi(outStreams, tractMaskROIIntersection.affine, tractMaskROIIntersection.get_data().astype(bool), mode=operationSpec)
+    criteriaStreamsBool=near_roi(outStreams, tractMaskROIIntersection.affine, tractMaskROIIntersection.get_fdata().astype(bool), mode=operationSpec)
     #stop timing
     t1_stop=time.process_time()
     # get the elapsed time
@@ -1031,7 +1031,7 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     # import nibabel as nib
     # import wmaPyTools.roiTools 
     
-    fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_data().shape), planarROI.affine, planarROI.header)
+    fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_fdata().shape), planarROI.affine, planarROI.header)
     #obtain boundary coords in subject space in order set max min values for interactive visualization
     convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(fullMask)
 
@@ -1039,7 +1039,7 @@ def applyEndpointCriteria(streamlines,planarROI,requirement,whichEndpoints):
     #get coordinates of mask voxels in image space
     
     from dipy.tracking.utils import apply_affine
-    planeSubjCoords=apply_affine(planarROI.affine, np.array(np.where(planarROI.get_data())).T)
+    planeSubjCoords=apply_affine(planarROI.affine, np.array(np.where(planarROI.get_fdata())).T)
     #find the unique values of img space coordinates for each dimension
     uniqueCoordCounts=[len(np.unique(planeSubjCoords[:,iCoords])) for iCoords in list(range(planeSubjCoords.shape[1]))]
     #one of them should be singular in the case of a planar roi, throw an error if not
@@ -1122,7 +1122,7 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     # import nibabel as nib
     # import wmaPyTools.roiTools  
     
-    fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_data().shape), planarROI.affine, planarROI.header)
+    fullMask = nib.nifti1.Nifti1Image(np.ones(planarROI.get_fdata().shape), planarROI.affine, planarROI.header)
     #obtain boundary coords in subject space in order set max min values for interactive visualization
     convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(fullMask)
 
@@ -1130,7 +1130,7 @@ def applyMidpointCriteria(streamlines,planarROI,requirement):
     #get coordinates of mask voxels in image space
     
     from dipy.tracking.utils import apply_affine
-    planeSubjCoords=apply_affine(planarROI.affine, np.array(np.where(planarROI.get_data())).T)
+    planeSubjCoords=apply_affine(planarROI.affine, np.array(np.where(planarROI.get_fdata())).T)
     #find the unique values of img space coordinates for each dimension
     uniqueCoordCounts=[len(np.unique(planeSubjCoords[:,iCoords])) for iCoords in list(range(planeSubjCoords.shape[1]))]
     #one of them should be singular in the case of a planar roi, throw an error if not
@@ -1318,14 +1318,14 @@ def applyNiftiCriteriaToTract_DIPY_Cython(streamlines, maskNifti, includeBool, o
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not a nifti.")
     
     #the conversion to int may cause problems if the input isn't convertable to int.  Then again, the point of this is to raise an error, so...
-    elif np.logical_not(np.all(np.unique(maskNifti.get_data()).astype(int)==[0, 1])): 
+    elif np.logical_not(np.all(np.unique(maskNifti.get_fdata()).astype(int)==[0, 1])): 
         raise Exception("applyNiftiCriteriaToTract Error: input maskNifti not convertable to 0,1 int mask.  Likely not a mask.")
         
     if np.logical_not(isinstance(includeBool, bool )):
         raise Exception("applyNiftiCriteriaToTract Error: input includeBool not a bool.  See input description for usage")
         
     lin_T, offset =ut._mapping_to_voxel(maskNifti.affine)
-    criteriaStreamsBool=_streamlines_in_mask( list(streamlines), maskNifti.get_data().astype(np.uint8), lin_T, offset)
+    criteriaStreamsBool=_streamlines_in_mask( list(streamlines), maskNifti.get_fdata().astype(np.uint8), lin_T, offset)
     
     if includeBool==True:
         #initalize an out bool vec
@@ -1441,7 +1441,7 @@ def tractProbabilityMap2SegCriteria(singleTractProbMap):
     #thresholdProportion=.7
     #next we find where this is in the unique values of the datablock
     #and set it as our threshold value
-    #threshVal=np.unique(singleTractProbMap.get_data())[np.floor(len(np.unique(singleTractProbMap.get_data()))*thresholdProportion).astype(int)]
+    #threshVal=np.unique(singleTractProbMap.get_fdata())[np.floor(len(np.unique(singleTractProbMap.get_fdata()))*thresholdProportion).astype(int)]
     
     #lets get to making the planar coordinates
     planarInclusionROIs=[]
@@ -1466,8 +1466,8 @@ def densityMaskToSegCriteria(densityMask):
     #MAJOR INSIGHT:  it is never the case that endpoints can be in the "core" of a
     #tract.  Ergo, you can erode the mask a bit and use it as an endpoint exclusion criterion, 
     # but also as a traversal criterion
-    coreMask=scipy.ndimage.binary_erosion(densityMask.get_data(), iterations=2)
-    inflatedMask=scipy.ndimage.binary_dilation(densityMask.get_data(), iterations=1)
+    coreMask=scipy.ndimage.binary_erosion(densityMask.get_fdata(), iterations=2)
+    inflatedMask=scipy.ndimage.binary_dilation(densityMask.get_fdata(), iterations=1)
     endpointsMask=copy.deepcopy(inflatedMask)
     endpointsMask[coreMask]=False
     
