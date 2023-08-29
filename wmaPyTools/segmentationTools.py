@@ -404,7 +404,7 @@ def applyNiftiCriteriaToTract_DIPY(streamlines, maskNifti, includeBool, operatio
     #tractmask, but nonetheless within the tolerance.
     tractMask=scipy.ndimage.binary_dilation(tractMask.astype(bool), iterations=1)
     #convert int-based voxel-wise count data to int because apparently that's the only way you can save with nibabel
-    tractMask=nib.Nifti1Image(np.greater(tractMask,0).astype(int), affine=maskNifti.affine)
+    tractMask=nib.Nifti1Image(np.greater(tractMask,0).astype('int32'), affine=maskNifti.affine)
 
     #take the intersection of the two, the tract mask and the ROI mask nifti.
     #ideally we are reducing the number of points that each streamline node needs to be compared to
@@ -827,7 +827,7 @@ def applyNiftiCriteriaToTract_DIPY_Test(streamlines, maskNifti, includeBool, ope
     #tractmask, but nonetheless within the tolerance.
     tractMask=scipy.ndimage.binary_dilation(tractMask.astype(bool), iterations=1)
     #convert int-based voxel-wise count data to int because apparently that's the only way you can save with nibabel
-    tractMask=nib.Nifti1Image(np.greater(tractMask,0).astype(int), affine=maskNifti.affine)
+    tractMask=nib.Nifti1Image(np.greater(tractMask,0).astype('int32'), affine=maskNifti.affine)
 
     #take the intersection of the two, the tract mask and the ROI mask nifti.
     #ideally we are reducing the number of points that each streamline node needs to be compared to
