@@ -1968,8 +1968,8 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
 
     gtab = gradient_table(bvals, bvecs)
 
-    response, ratio = auto_response_ssst(gtab, dwi.get_data(), roi_radii=10, fa_thr=0.7)
-    #response, ratio = auto_response(gtab, dwi.get_data(), roi_radii=10, fa_thr=0.7)
+    response, ratio = auto_response_ssst(gtab, dwi.get_fdata(), roi_radii=10, fa_thr=0.7)
+    #response, ratio = auto_response(gtab, dwi.get_fdata(), roi_radii=10, fa_thr=0.7)
     
     csd_model = ConstrainedSphericalDeconvModel(gtab, response, sh_order=6)
     
@@ -1978,7 +1978,7 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     #no white matter mask for now?
     wmOnDwi=image.resample_to_img(wmMask,dwi,interpolation='nearest')
     
-    csd_fit = csd_model.fit(dwi.get_data(), mask=wmOnDwi.get_data())
+    csd_fit = csd_model.fit(dwi.get_fdata(), mask=wmOnDwi.get_fdata())
 
     # prob_dg = ProbabilisticDirectionGetter.from_shcoeff(csd_fit.shm_coeff,
     #                                                 max_angle=30.,
@@ -1986,7 +1986,7 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
     
     
     csa_model = CsaOdfModel(gtab, sh_order=6)
-    gfa = csa_model.fit(dwi.get_data(), mask=wmOnDwi.get_data()).gfa
+    gfa = csa_model.fit(dwi.get_fdata(), mask=wmOnDwi.get_fdata()).gfa
     stopping_thr= 0.2
     stopping_criterion = ThresholdStoppingCriterion(gfa, stopping_thr)
     
@@ -1996,7 +1996,7 @@ def trackStreamsInMask(targetMask,seed_density,wmMask,dwi,bvecs,bvals):
                                                     sphere=default_sphere)   
 
    
-    seeds = utils.seeds_from_mask(targetMask.get_data(), targetMask.affine, density=seed_density)
+    seeds = utils.seeds_from_mask(targetMask.get_fdata(), targetMask.affine, density=seed_density)
     step_size= dist_to_corner(targetMask.affine)
     
     
@@ -2182,7 +2182,7 @@ def manualSelectStreams_byEndpoint(streamlines,parc,lookupTable,targetLabels):
     #begin by reducing the input atlas
     [renumberedAtlasNifti,reducedLookupTable]=wmaPyTools.analysisTools.reduceAtlasAndLookupTable(parc,lookupTable,removeAbsentLabels=True)
     #then do the endpoint connectivity matrix
-    M, grouping=utils.connectivity_matrix(streamlines, np.round(renumberedAtlasNifti.affine,2), label_volume=renumberedAtlasNifti.get_data().astype(int),
+    M, grouping=utils.connectivity_matrix(streamlines, np.round(renumberedAtlasNifti.affine,2), label_volume=renumberedAtlasNifti.get_fdata().astype(int),
                             symmetric=False,
                             return_mapping=True,
                             mapping_as_streamlines=False)

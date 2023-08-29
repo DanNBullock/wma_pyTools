@@ -144,7 +144,7 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -604,7 +604,7 @@ def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParam
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -802,7 +802,7 @@ def endpointDispersionAsymmetryMapping_Bootstrap(streamlines,referenceNifti,dist
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
+        currentSphereImgCoords = np.array(np.where(currentSphere.get_fdata())).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -999,7 +999,7 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     
     #segment tractome into connectivity matrix from parcellation
     #   ENDPOINT GROUP MATTERS
-    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_data().astype(int),
+    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_fdata().astype(int),
                             symmetric=False,
                             return_mapping=True,
                             mapping_as_streamlines=False)
@@ -1038,7 +1038,7 @@ def inferReduceLUT_to_LabelNameCols(atlas,lookUpTable):
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #first get the data out of the input atlas and *ensure* that it is Int
     #some atlases are being passed as float
-    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+    inputAtlasDataINT=np.round(atlas.get_fdata()).astype(int)
       
     if isinstance(lookUpTable,str):
         if lookUpTable[-4:]=='.csv':
@@ -1114,7 +1114,7 @@ def coordinateLUTsAndAtlases(LUT1,LUT2,atlas1,atlas2):
     
     #what do we assume about negative numbers?
     #get the atlas data for atlas 2
-    atlas2Data=atlas2.get_data()
+    atlas2Data=atlas2.get_fdata()
     atlas2Data[atlas2Data>0]=atlas2Data[atlas2Data>0]+newLUT2start
     
     atlas2=nib.Nifti1Image(atlas2Data, atlas2.affine, atlas2.header)
@@ -1135,7 +1135,7 @@ def reduceLUTtoAvail(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColum
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #first get the data out of the input atlas and *ensure* that it is Int
     #some atlases are being passed as float
-    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+    inputAtlasDataINT=np.round(atlas.get_fdata()).astype(int)
       
     if isinstance(lookUpTable,str):
         if lookUpTable[-4:]=='.csv':
@@ -1553,7 +1553,7 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #first get the data out of the input atlas and *ensure* that it is Int
     #some atlases are being passed as float
-    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+    inputAtlasDataINT=np.round(atlas.get_fdata()).astype(int)
     
     [relabeledAtlasData, labelMappings]=reduce_labels(inputAtlasDataINT)
     #create new nifti object
@@ -1769,15 +1769,15 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
     #identify their types
     #kind of involves an assumption, in that we are inferring that a 2 unique 
     #value ROI is binary, and thus 0 and 1 or some equivalent
-    if len(np.unique(ROI1.get_data()))<=2:
+    if len(np.unique(ROI1.get_fdata()))<=2:
            ROI1type=bool
     else:
-        ROI1type=ROI1.get_data().dtype
+        ROI1type=ROI1.get_fdata().dtype
         
-    if len(np.unique(ROI2.get_data()))<=2:
+    if len(np.unique(ROI2.get_fdata()))<=2:
            ROI2type=bool
     else:
-        ROI2type=ROI2.get_data().dtype
+        ROI2type=ROI2.get_fdata().dtype
     
     #if either of these are bool, you've got to force them both to boolean
     #so that you can perform dice coefficient
@@ -1787,8 +1787,8 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
         #I'm assuming ravel ravels in a standard fashion and that this is safe.
         #also, we can use ravel given that these ROIs are presumably the same size
         #thanks to wmaPyTools.roiTools.alignNiftis
-        ROI1DataVec=np.ravel(ROI1.get_data().astype(bool))
-        ROI2DataVec=np.ravel(ROI2.get_data().astype(bool))
+        ROI1DataVec=np.ravel(ROI1.get_fdata().astype(bool))
+        ROI2DataVec=np.ravel(ROI2.get_fdata().astype(bool))
         #now compute the dice coefficient as the distance measure
         print('Computing dice coefficient')
         distanceMeasure=scipy.spatial.distance.dice(ROI1DataVec,ROI2DataVec)
@@ -1798,8 +1798,8 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
         #thanks to wmaPyTools.roiTools.alignNiftis
         #no need to modify datatype as before, though maybe an issue if different 
         #types, i.e. int vs float.
-        ROI1DataVec=np.ravel(ROI1.get_data())
-        ROI2DataVec=np.ravel(ROI2.get_data())
+        ROI1DataVec=np.ravel(ROI1.get_fdata())
+        ROI2DataVec=np.ravel(ROI2.get_fdata())
         #now compute the dice coefficient as the distance measure
         print('Computing cosine distance')
         distanceMeasure=scipy.spatial.distance.cosine(ROI1DataVec,ROI2DataVec)
@@ -1945,7 +1945,7 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #using round as a workaround
-    [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(atlasNifti.get_data()).astype(int))
+    [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(atlasNifti.get_fdata()).astype(int))
     
    
     #if an input mask is actually provided
@@ -2157,7 +2157,7 @@ def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,out
     
    
     #get the endpoint identities
-    M, grouping=utils.connectivity_matrix(streamlines, renumberedAtlasNifti.affine, label_volume=np.round(renumberedAtlasNifti.get_data()).astype(int),
+    M, grouping=utils.connectivity_matrix(streamlines, renumberedAtlasNifti.affine, label_volume=np.round(renumberedAtlasNifti.get_fdata()).astype(int),
                             return_mapping=True,
                             mapping_as_streamlines=False)
     #get the keys so that you can iterate through them later
