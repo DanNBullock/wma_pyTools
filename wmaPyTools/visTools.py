@@ -52,10 +52,10 @@ Created on Sun Dec  5 16:03:14 2021
 #             fig,ax = plt.subplots()
 #             ax.axis('off')
 #             #kind of overwhelming to do this in one line
-#             refData=np.rot90(np.reshape(croppedReference.get_data()[currentSlice.get_data().astype(bool)],broadcastShape),3)
+#             refData=np.rot90(np.reshape(np.asanyarray(croppedReference.dataobj)[np.asanyarray(currentSlice.dataobj).astype(bool)],broadcastShape),3)
 #             plt.imshow(refData, cmap='gray', interpolation='nearest')
 #             #kind of overwhelming to do this in one line
-#             densityData=np.rot90(np.reshape(densityNifti.get_data()[currentSlice.get_data().astype(bool)],broadcastShape),3)
+#             densityData=np.rot90(np.reshape(np.asanyarray(densityNifti.dataobj)[np.asanyarray(currentSlice.dataobj).astype(bool)],broadcastShape),3)
 #             plt.imshow(np.ma.masked_where(densityData<1,densityData), cmap='viridis', alpha=.5, interpolation='nearest')
 #             figName='dim_' + str(iDims) +'_'+  str(iSlices).zfill(3)
 #             plt.savefig(figName,bbox_inches='tight')
@@ -78,6 +78,7 @@ def plotMultiGifsFrom4DNifti(fourDNifti,referenceAnatomy,saveDir):
     
     import os
     import nibabel as nib
+    import numpy as np
     
     for iSlices in range(fourDNifti.shape[3]):
         
@@ -85,7 +86,7 @@ def plotMultiGifsFrom4DNifti(fourDNifti,referenceAnatomy,saveDir):
         if not os.path.exists(outPath):
             os.makedirs(outPath)
         #just try it, maybe it will work
-        densityNifti=nib.nifti1.Nifti1Image(fourDNifti.get_data()[:,:,:,iSlices],referenceAnatomy.affine,referenceAnatomy.header)
+        densityNifti=nib.nifti1.Nifti1Image(np.asanyarray(fourDNifti.dataobj)[:,:,:,iSlices],referenceAnatomy.affine,referenceAnatomy.header)
         crossSectionGIFsFromNifti(densityNifti,referenceAnatomy,outPath) 
         
 def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
@@ -153,7 +154,8 @@ def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
         for iCoords in coordsToCheck:
             try:
                 streamIndexes=streamIndexes+streamlineMapping[tuple(iCoords)]
-            except:
+            #Claude note: KeyError only: a voxel with no streamlines simply isn't in the mapping
+            except KeyError:
                 pass
         streamIndexes=np.unique(streamIndexes)
         return streamIndexes
@@ -165,7 +167,7 @@ def dispersionReport(outDict,streamlines,saveDir,refAnatT1,distanceParameter=3):
         if not os.path.exists(outPath):
             os.makedirs(outPath)
         
-        currentData=outDict[iOutFiles].get_data()
+        currentData=np.asanyarray(outDict[iOutFiles].dataobj)
         smallestNotZero=np.unique(currentData)[1]
         crossSectionGIFsFromNifti(outDict[iOutFiles],refAnatT1,outPath, blendOption=False)
         #lets mask out the background
@@ -249,6 +251,9 @@ def generateAnatOverlayXSections(overlayNifti,refAnatT1,saveDir):
     
     #obtain boundary coords in subject space in order to
     #use plane generation function
+    #Claude note: subjectSpaceMaskBoundaryCoords returns the
+    #outermost voxel centres on both sides, so the slice ranges below run to
+    #bound+half a step to keep including the last slice.
     convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(refAnatT1)
     
     dimsList=['x','y','z']
@@ -257,9 +262,9 @@ def generateAnatOverlayXSections(overlayNifti,refAnatT1,saveDir):
     for iDims in list(range(len(refT1Shape))):
    
         if refT1Shape[iDims]<=overlayShape[iDims]:
-            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refT1Res[iDims])
+            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims]+refT1Res[iDims]*.5,refT1Res[iDims])
         else:
-            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],overlayRes[iDims])
+            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims]+overlayRes[iDims]*.5,overlayRes[iDims])
         #get the desired broadcast shape and delete current dim value
         broadcastShape=list(refAnatT1.shape)
         del broadcastShape[iDims]
@@ -278,18 +283,18 @@ def generateAnatOverlayXSections(overlayNifti,refAnatT1,saveDir):
             fig,ax = plt.subplots()
             ax.axis('off')
             #kind of overwhelming to do this in one line
-            refData=np.rot90(np.reshape(refAnatT1.get_data()[currentRefSlice.get_data().astype(bool)],broadcastShape),1)
+            refData=np.rot90(np.reshape(np.asanyarray(refAnatT1.dataobj)[np.asanyarray(currentRefSlice.dataobj).astype(bool)],broadcastShape),1)
             plt.imshow(refData, cmap='gray', interpolation='antialiased')
             #kind of overwhelming to do this in one line
-            overlayData=np.rot90(np.reshape(overlayNifti.get_data()[currentOverlaySlice.get_data().astype(bool)],broadcastShape),1)
+            overlayData=np.rot90(np.reshape(np.asanyarray(overlayNifti.dataobj)[np.asanyarray(currentOverlaySlice.dataobj).astype(bool)],broadcastShape),1)
             #lets mask out the background
             [unique, counts] = np.unique(overlayData, return_counts=True)
             backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
             
-            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='antialiased',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='antialiased',vmin=0,vmax=np.nanmax(np.asanyarray(overlayNifti.dataobj)))
             curFig=plt.gcf()
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
-            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
+            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(np.asanyarray(overlayNifti.dataobj))], orientation='vertical')
             
             #put some text about the current dimension and slice
             yLims=curFig.gca().get_ylim()
@@ -329,7 +334,7 @@ def multiTileOverlay_wrap(overlayNifti,refAnatT1,saveDir,figName,noEmpties=True,
     
     generateAnatOverlayXSections(overlayNifti,refAnatT1,saveDir)
     
-    imgSpaceMins, imgSpaceMaxs=bounding_box(overlayNifti.get_data())
+    imgSpaceMins, imgSpaceMaxs=bounding_box(np.asanyarray(overlayNifti.dataobj))
     
     overlayShape=overlayNifti.shape
     refT1Shape=refAnatT1.shape
@@ -457,6 +462,9 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
 
     #obtain boundary coords in subject space in order to
     #use plane generation function
+    #Claude note: subjectSpaceMaskBoundaryCoords returns the
+    #outermost voxel centres on both sides, so the slice ranges below run to
+    #bound+half a step to keep including the last slice.
     convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(refAnatT1)
     #overlayBoundCoords=subjectSpaceMaskBoundaryCoords(overlayNifti)
     
@@ -468,8 +476,8 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
     # #change datatype so that nilearn doesn't mess up
     # #it doesn't like bool so we have to do something about that
     # #somehow the data can be set to nifti, but can't be extracted as nifti, so...
-    # overlayNifti=nib.nifti1.Nifti1Image(overlayNifti.get_data(),overlayNifti.affine,overlayNifti.header)
-    # overlayNifti.set_data_dtype(overlayNifti.get_data().dtype)
+    # overlayNifti=nib.nifti1.Nifti1Image(np.asanyarray(overlayNifti.dataobj),overlayNifti.affine,overlayNifti.header)
+    # overlayNifti.set_data_dtype(np.asanyarray(overlayNifti.dataobj).dtype)
     
     #resample to the best resolution
     #but also assuming that the refernce anatomy is ultimately the shape that we want
@@ -491,6 +499,9 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
     # overlayNifti=resample_img(overlayNifti,target_affine=refAnatT1.affine, target_shape=refAnatT1.shape)
     
     #compute the bounds of the actual density data   
+    #Claude note: subjectSpaceMaskBoundaryCoords returns the
+    #outermost voxel centres on both sides, so the slice ranges below run to
+    #bound+half a step to keep including the last slice.
     streamDensityBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(overlayNifti)
     
     dimsList=['x','y','z']
@@ -503,17 +514,17 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
             # + and - 1 in odrer to provide a pad
             #NO PADDING, PADDING IS BAD
             if refAnatT1Resolution[iDims]<=overlayResolution[iDims]:
-                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims],streamDensityBoundCoords[1,iDims],refAnatT1Resolution[iDims])
+                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims],streamDensityBoundCoords[1,iDims]+refAnatT1Resolution[iDims]*.5,refAnatT1Resolution[iDims])
             else:
-                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims],streamDensityBoundCoords[1,iDims],overlayResolution[iDims])
+                subjectSpaceSlices=np.arange(streamDensityBoundCoords[0,iDims],streamDensityBoundCoords[1,iDims]+overlayResolution[iDims]*.5,overlayResolution[iDims])
      
             
         #pick whichever input has the best resolution in this dimension
         else:
                 if refAnatT1Resolution[iDims]<=overlayResolution[iDims]:
-                    subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1Resolution[iDims])
+                    subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims]+refAnatT1Resolution[iDims]*.5,refAnatT1Resolution[iDims])
                 else:
-                    subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],overlayResolution[iDims])
+                    subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims]+overlayResolution[iDims]*.5,overlayResolution[iDims])
                 #get the desired broadcast shape and delete current dim value
         broadcastShape=list(refAnatT1.shape)
         del broadcastShape[iDims]
@@ -532,15 +543,15 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
             fig,ax = plt.subplots()
             ax.axis('off')
             #kind of overwhelming to do this in one line
-            refData=np.rot90(np.reshape(refAnatT1.get_data()[currentRefSlice.get_data().astype(bool)],broadcastShape),1)
+            refData=np.rot90(np.reshape(np.asanyarray(refAnatT1.dataobj)[np.asanyarray(currentRefSlice.dataobj).astype(bool)],broadcastShape),1)
             plt.imshow(refData, cmap='gray', interpolation='gaussian')
             #kind of overwhelming to do this in one line
-            overlayData=np.rot90(np.reshape(overlayNifti.get_data()[currentOverlaySlice.get_data().astype(bool)],broadcastShape),1)
+            overlayData=np.rot90(np.reshape(np.asanyarray(overlayNifti.dataobj)[np.asanyarray(currentOverlaySlice.dataobj).astype(bool)],broadcastShape),1)
             #lets mask out the background
             [unique, counts] = np.unique(overlayData, return_counts=True)
             backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
             
-            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='kaiser',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='kaiser',vmin=0,vmax=np.nanmax(np.asanyarray(overlayNifti.dataobj)))
             curFig=plt.gcf()
             yLims=sorted(curFig.gca().get_ylim())
             xLims=sorted(curFig.gca().get_xlim())
@@ -553,7 +564,7 @@ def multiTileDensity(streamlines,refAnatT1,saveDir,tractName,densityThreshold=0,
             
             #be careful here, modifying the cbaxes  modifies the current figure
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
-            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
+            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(np.asanyarray(overlayNifti.dataobj))], orientation='vertical')
             
             
             #put some text about the current dimension and slice
@@ -675,7 +686,7 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     #reference, we can crop the overlay safely and work adaptively.  Why would
     #you even have overlay **outside** of the refernce
     #nilearn doesn't handle NAN gracefully, so we have to be inelegant
-    #overlayNifti=nib.nifti1.Nifti1Image(np.nan_to_num(overlayNifti.get_data()), overlayNifti.affine, overlayNifti.header)
+    #overlayNifti=nib.nifti1.Nifti1Image(np.nan_to_num(np.asanyarray(overlayNifti.dataobj)), overlayNifti.affine, overlayNifti.header)
     #croppedOverlayNifti=crop_img(overlayNifti)
     
     #RAS reoreintation
@@ -690,6 +701,9 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     
     #obtain boundary coords in subject space in order to
     #use plane generation function
+    #Claude note: subjectSpaceMaskBoundaryCoords returns the
+    #outermost voxel centres on both sides, so the slice ranges below run to
+    #bound+half a step to keep including the last slice.
     convertedBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(refAnatT1)
     #overlayBoundCoords=subjectSpaceMaskBoundaryCoords(overlayNifti)
     
@@ -700,8 +714,8 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
     #change datatype so that nilearn doesn't mess up
     #it doesn't like bool so we have to do something about that
     #somehow the data can be set to nifti, but can't be extracted as nifti, so...
-    overlayNifti=nib.nifti1.Nifti1Image(overlayNifti.get_data(),overlayNifti.affine,overlayNifti.header)
-    overlayNifti.set_data_dtype(overlayNifti.get_data().dtype)
+    overlayNifti=nib.nifti1.Nifti1Image(np.asanyarray(overlayNifti.dataobj),overlayNifti.affine,overlayNifti.header)
+    overlayNifti.set_data_dtype(np.asanyarray(overlayNifti.dataobj).dtype)
     
     #resample to the best resolution
     #but also assuming that the refernce anatomy is ultimately the shape that we want
@@ -731,9 +745,9 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
         
         #pick whichever input has the best resolution in this dimension
         if refAnatT1Resolution[iDims]<=overlayResolution[iDims]:
-            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],refAnatT1Resolution[iDims])
+            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims]+refAnatT1Resolution[iDims]*.5,refAnatT1Resolution[iDims])
         else:
-            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],overlayResolution[iDims])
+            subjectSpaceSlices=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims]+overlayResolution[iDims]*.5,overlayResolution[iDims])
         #get the desired broadcast shape and delete current dim value
         broadcastShape=list(refAnatT1.shape)
         del broadcastShape[iDims]
@@ -752,18 +766,18 @@ def crossSectionGIFsFromNifti(overlayNifti,refAnatT1,saveDir, blendOption=False)
             fig,ax = plt.subplots()
             ax.axis('off')
             #kind of overwhelming to do this in one line
-            refData=np.rot90(np.reshape(refAnatT1.get_data()[currentRefSlice.get_data().astype(bool)],broadcastShape),1)
+            refData=np.rot90(np.reshape(np.asanyarray(refAnatT1.dataobj)[np.asanyarray(currentRefSlice.dataobj).astype(bool)],broadcastShape),1)
             plt.imshow(refData, cmap='gray', interpolation='gaussian')
             #kind of overwhelming to do this in one line
-            overlayData=np.rot90(np.reshape(overlayNifti.get_data()[currentOverlaySlice.get_data().astype(bool)],broadcastShape),1)
+            overlayData=np.rot90(np.reshape(np.asanyarray(overlayNifti.dataobj)[np.asanyarray(currentOverlaySlice.dataobj).astype(bool)],broadcastShape),1)
             #lets mask out the background
             [unique, counts] = np.unique(overlayData, return_counts=True)
             backgroundVal=unique[np.where(np.max(counts)==counts)[0]]
             
-            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(overlayNifti.get_data()))
+            plt.imshow(np.ma.masked_where(overlayData==backgroundVal,overlayData), cmap='jet', alpha=.75, interpolation='gaussian',vmin=0,vmax=np.nanmax(np.asanyarray(overlayNifti.dataobj)))
             curFig=plt.gcf()
             cbaxes = inset_axes(curFig.gca(), width="5%", height="80%", loc=5) 
-            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(overlayNifti.get_data())], orientation='vertical')
+            plt.colorbar(cax=cbaxes, ticks=[0.,np.nanmax(np.asanyarray(overlayNifti.dataobj))], orientation='vertical')
             curFig.gca().yaxis.set_ticks_position('left')
             curFig.gca().tick_params( colors='white')
             # we use *2 in order to afford room for the subsequent blended images
@@ -898,8 +912,8 @@ def radialTractEndpointFingerprintPlot(tractStreamlines,atlas,atlasLookupTable,t
         missingLabels2=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(endpointsDF2['labelNames'])]
         
         #now append them to the tables
-        endpointsDF1=endpointsDF1.append(pd.DataFrame(missingLabels1,columns=['labelNames']),ignore_index=True)
-        endpointsDF2=endpointsDF2.append(pd.DataFrame(missingLabels2,columns=['labelNames']),ignore_index=True)
+        endpointsDF1=pd.concat([endpointsDF1,pd.DataFrame(missingLabels1,columns=['labelNames'])],ignore_index=True)
+        endpointsDF2=pd.concat([endpointsDF2,pd.DataFrame(missingLabels2,columns=['labelNames'])],ignore_index=True)
         
         #now set the nans to zero
         endpointsDF1['endpointCounts']= endpointsDF1['endpointCounts'].fillna(0)
@@ -1018,16 +1032,16 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
         missingLabels2=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(firstRASDF['labelNames'])]
         
         #now append them to the uncommon tables
-        firstLPIDFUnCommon=firstLPIDFUnCommon.append(pd.DataFrame(data=missingLabels1.tolist(),columns=['labelNames']),ignore_index=True)
-        firstRASDFUnCommon=firstRASDFUnCommon.append(pd.DataFrame(data=missingLabels2.tolist(),columns=['labelNames']),ignore_index=True)
+        firstLPIDFUnCommon=pd.concat([firstLPIDFUnCommon,pd.DataFrame(data=missingLabels1.tolist(),columns=['labelNames'])],ignore_index=True)
+        firstRASDFUnCommon=pd.concat([firstRASDFUnCommon,pd.DataFrame(data=missingLabels2.tolist(),columns=['labelNames'])],ignore_index=True)
         
         #now set the nans to zero
         firstLPIDFUnCommon= firstLPIDFUnCommon.fillna(0)
         firstRASDFUnCommon= firstRASDFUnCommon.fillna(0)
         
         #then move over the relevant rows to the common table, a clever move
-        firstLPIDFCommon=firstLPIDFCommon.append(firstLPIDFUnCommon[firstLPIDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
-        firstRASDFCommon=firstRASDFCommon.append(firstRASDFUnCommon[firstRASDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
+        firstLPIDFCommon=pd.concat([firstLPIDFCommon,firstLPIDFUnCommon[firstLPIDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])]],ignore_index=True)
+        firstRASDFCommon=pd.concat([firstRASDFCommon,firstRASDFUnCommon[firstRASDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])]],ignore_index=True)
         
     #Plot the common endpoints
     figure1=basicRadarPlot(list(firstRASDFCommon['labelNames']),list(firstRASDFCommon['meanProportion']),metaValues=list(firstRASDFCommon['proportionSTD']))
@@ -1086,7 +1100,7 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
         
         figure1.savefig(os.path.join(saveDir,tractName+'_group_RAS_UNcommonEndpointMap.svg'))
         plt.close()
-    except:
+    except Exception:
         print('no uncommon for RAS')
     
     try:
@@ -1098,7 +1112,7 @@ def radialTractEndpointFingerprintPlot_MultiSubj(tractTractogramList,atlasList,a
             ha="center", va="center", size=12, zorder=12)
         figure2.savefig(os.path.join(saveDir,tractName+'_group_LPI_UNcommonEndpointMap.svg'))
         plt.close() 
-    except:
+    except Exception:
         print('no uncommon for LPI')
         
             
@@ -1221,16 +1235,16 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         missingLabels2=forceTable[columnNames[1]][~forceTable[columnNames[1]].isin(RASendpointData['labelNames'])]
         
         #now append them to the uncommon tables
-        firstLPIDFUnCommon=firstLPIDFUnCommon.append(pd.DataFrame(data=missingLabels1.tolist(),columns=['labelNames']),ignore_index=True)
-        firstRASDFUnCommon=firstRASDFUnCommon.append(pd.DataFrame(data=missingLabels2.tolist(),columns=['labelNames']),ignore_index=True)
+        firstLPIDFUnCommon=pd.concat([firstLPIDFUnCommon,pd.DataFrame(data=missingLabels1.tolist(),columns=['labelNames'])],ignore_index=True)
+        firstRASDFUnCommon=pd.concat([firstRASDFUnCommon,pd.DataFrame(data=missingLabels2.tolist(),columns=['labelNames'])],ignore_index=True)
         
         #now set the nans to zero
         firstLPIDFUnCommon= firstLPIDFUnCommon.fillna(0)
         firstRASDFUnCommon= firstRASDFUnCommon.fillna(0)
         
         #then move over the relevant rows to the common table, a clever move
-        firstLPIDFCommon=firstLPIDFCommon.append(firstLPIDFUnCommon[firstLPIDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
-        firstRASDFCommon=firstRASDFCommon.append(firstRASDFUnCommon[firstRASDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])],ignore_index=True)
+        firstLPIDFCommon=pd.concat([firstLPIDFCommon,firstLPIDFUnCommon[firstLPIDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])]],ignore_index=True)
+        firstRASDFCommon=pd.concat([firstRASDFCommon,firstRASDFUnCommon[firstRASDFUnCommon['labelNames'].isin(forceTable[columnNames[1]])]],ignore_index=True)
         
         
     fig, axs = plt.subplots(2, 2,subplot_kw=dict(projection='polar'))
@@ -1273,7 +1287,7 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         axs[1,0].set_title('RAS *UN*common endpoints',size=fontsize)
         axs[1,0].set_facecolor([0,0,1,.15])
         
-    except:
+    except Exception:
         print('no uncommon for RAS')
     
     try:
@@ -1287,7 +1301,7 @@ def radialTractEndpointFingerprintPlot_Norm(tract,atlas,atlasLookupTable,tractNa
         axs[1,1].set_facecolor([1,0,0,.15])
 
    
-    except:
+    except Exception:
         print('no uncommon for LPI')    
         
     fig.suptitle(tractName+' endpoints fingerprint', fontsize=12)
@@ -1565,7 +1579,7 @@ def dipyPlotPrototypicality(streamlines,filename):
     import wmaPyTools.analysisTools  
     prototypeMeasure=wmaPyTools.analysisTools.streamlinePrototypicalityMeasure(streamlines,'mean')
     
-    cmap = matplotlib.cm.get_cmap('jet')
+    cmap = matplotlib.colormaps.get_cmap('jet')
     
     colors = [cmap(prototypeMeasure[iStreamline]) for iStreamline in range(len(streamlines))]
    
@@ -1589,7 +1603,13 @@ def dipyBasicPlotTract(streamlines,colors,tractName):
     scene.clear()
     
     
-    stream_actor = actor.line(streamlines, colors, linewidth=10,fake_tube=True,opacity=1)
+    #Claude note: fury needs per-node colors as one stacked (totalNodes x RGB[A])
+    
+    
+    #array; the ragged per-streamline list fails under numpy>=2
+    
+    
+    stream_actor = actor.line(streamlines, np.vstack(colors), linewidth=10,fake_tube=True,opacity=1)
     #stream_actor = actor.line(streamlines[1:10000], colors[1:10000], linewidth=10,fake_tube=True,opacity=1)
     #stream_actor = actor.line(streamlines[1:3000], colors[1:3000])
     #scene.clear()
@@ -1657,7 +1677,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
         #borrowed from app-
         # compute mean and standard deviation of t1 for brigthness adjustment
         print("setting brightness")
-        t1Data=refAnatT1.get_data()
+        t1Data=np.asanyarray(refAnatT1.dataobj)
         mean, std = t1Data[t1Data > 0].mean(), t1Data[t1Data > 0].std()
 
         img_min = 0.5
@@ -1669,7 +1689,7 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
         
         
         
-        # vol_actor = actor.slicer(refAnatT1.get_data())
+        # vol_actor = actor.slicer(np.asanyarray(refAnatT1.dataobj))
         # vol_actor.display(x=0)
         # scene.add(vol_actor)
         print('skipping')
@@ -1681,23 +1701,27 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     
     
     #colormap for main tract
-    cmap = matplotlib.cm.get_cmap('seismic')
+    cmap = matplotlib.colormaps.get_cmap('seismic')
     #colormap for neck
     #apparently this doesn't work for old versions of matplotlib
     try:
-        neckCmap = matplotlib.cm.get_cmap('twilight')
-    except:
-        neckCmap = matplotlib.cm.get_cmap('jet')
+        neckCmap = matplotlib.colormaps.get_cmap('twilight')
+    except Exception:
+        neckCmap = matplotlib.colormaps.get_cmap('jet')
     #jet could work too
     
-    endpoints1Cmap=matplotlib.cm.get_cmap('winter')
-    endpoints2Cmap=matplotlib.cm.get_cmap('autumn')
+    endpoints1Cmap=matplotlib.colormaps.get_cmap('winter')
+    endpoints2Cmap=matplotlib.colormaps.get_cmap('autumn')
        
     colors = [cmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
     
     #find the neck nodes
-    neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines) 
-    
+    #Claude note: measured cross-section neck (see neckNodesForPlotting)
+    neckNodes=neckNodesForPlotting(streamlines)
+    #Claude note: findTractNeckNode returns a flat int vector (one index per
+    #streamline); it is raveled here.
+    neckNodes=np.asarray(neckNodes).ravel()
+
     lin_T, offset =ut._mapping_to_voxel(refAnatT1.affine)
     
     #lets set some parameters for the exponential decay computation we'll be doing
@@ -1739,26 +1763,26 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
     #no longer hard coding 0,0,0, now using the average endpoint.  Theoretically
     #has to be somewhere in the middle, right?
     kernelNifti=wmaPyTools.roiTools.createSphere(endpointColorDensityKernel, np.mean(allEndpoints,axis=0), refAnatT1)
-    kernelNifti=nib.nifti1.Nifti1Image(kernelNifti.get_data().astype(int), kernelNifti.affine, kernelNifti.header)
+    kernelNifti=nib.nifti1.Nifti1Image(np.asanyarray(kernelNifti.dataobj).astype(np.int32), kernelNifti.affine, kernelNifti.header)
     croppedKernel=crop_img(kernelNifti)
    
-    summedDensityMap=ndimage.generic_filter(densityMap,function=np.sum,footprint=croppedKernel.get_data().astype(bool))
+    summedDensityMap=ndimage.generic_filter(densityMap,function=np.sum,footprint=np.asanyarray(croppedKernel.dataobj).astype(bool))
 
     for iStreamlines in range(len(streamlines)):
         #A check to make sure you've got room to do this indexing on both sides
-        if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)[0]>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)[0]>lookDistance):
+        if np.logical_and((len(streamlines[iStreamlines])-neckNodes[iStreamlines]-1)>lookDistance,((len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))-1)>lookDistance):
             aheadNodes[iStreamlines]=(neckNodes[iStreamlines]+lookDistance)
             behindNodes[iStreamlines]=(neckNodes[iStreamlines]-lookDistance)
             #otherwise do the best you can
         else:
             #if there's a limit to how many nodes are available ahead, do the best you can
-            spaceAhead=np.abs(neckNodes[iStreamlines][0]-len(streamlines[iStreamlines]))
+            spaceAhead=np.abs(neckNodes[iStreamlines]-len(streamlines[iStreamlines]))
             if spaceAhead<=lookDistance:
                 aheadWindow=spaceAhead-1
             else:
                 aheadWindow=lookDistance
             #if there's a limit to how many nodes are available behind, do the best you can
-            spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines][0]))
+            spaceBehind=np.abs(len(streamlines[iStreamlines])-(len(streamlines[iStreamlines])-neckNodes[iStreamlines]))
             if spaceBehind<=lookDistance:
                 behindWindow=spaceBehind-1
             else:
@@ -1839,7 +1863,13 @@ def dipyPlotTract(streamlines,refAnatT1=None, tractName=None,endpointColorDensit
         colors[iStreamlines][-(lookDistance+1):-1]=blendedReplacement
       
         
-    stream_actor = actor.line(streamlines, colors, linewidth=10,fake_tube=True,opacity=1)
+    #Claude note: fury needs per-node colors as one stacked (totalNodes x RGB[A])
+      
+        
+    #array; the ragged per-streamline list fails under numpy>=2
+      
+        
+    stream_actor = actor.line(streamlines, np.vstack(colors), linewidth=10,fake_tube=True,opacity=1)
     #stream_actor = actor.line(streamlines[1:10000], colors[1:10000], linewidth=10,fake_tube=True,opacity=1)
     #stream_actor = actor.line(streamlines[1:3000], colors[1:3000])
     #scene.clear()
@@ -1930,7 +1960,7 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
     #     # #borrowed from app-
     #     # # compute mean and standard deviation of t1 for brigthness adjustment
     #     # print("setting brightness")
-    #     # t1Data=refAnatT1.get_data()
+    #     # t1Data=np.asanyarray(refAnatT1.dataobj)
     #     # mean, std = t1Data[t1Data > 0].mean(), t1Data[t1Data > 0].std()
 
     #     # img_min = 0.5
@@ -1942,7 +1972,7 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
         
         
         
-    #     # vol_actor = actor.slicer(refAnatT1.get_data(), refAnatT1.affine, value_range)
+    #     # vol_actor = actor.slicer(np.asanyarray(refAnatT1.dataobj), refAnatT1.affine, value_range)
     #     # vol_actor.display(x=0)
     #     # scene.add(vol_actor)
     #     # print('skipping')
@@ -1956,7 +1986,15 @@ def dipyPlotTract_clean(streamlines,refAnatT1=None, tractName=None, parcNifti=No
         
     
     
-    stream_actor = actor.line(streamlines, streamColors, linewidth=10,fake_tube=True,opacity=1)
+    #Claude note: fury needs per-node colors as one stacked (totalNodes x RGB[A])
+        
+    
+    
+    #array; the ragged per-streamline list fails under numpy>=2
+        
+    
+    
+    stream_actor = actor.line(streamlines, np.vstack(streamColors), linewidth=10,fake_tube=True,opacity=1)
     #stream_actor = actor.line(streamlines[1:10000], colors[1:10000], linewidth=10,fake_tube=True,opacity=1)
     #stream_actor = actor.line(streamlines[1:3000], colors[1:3000])
     #scene.clear()
@@ -2069,7 +2107,11 @@ def dipyPlotTract_setColors(streamlines, streamColors, refAnatT1=None, tractName
     scene = window.Scene()
     scene.clear()
     
-    stream_actor = actor.line(streamlines, streamColors, linewidth=10,fake_tube=True,opacity=1)
+    #Claude note: fury needs per-node colors as one stacked (totalNodes x RGB[A])
+    
+    #array; the ragged per-streamline list fails under numpy>=2
+    
+    stream_actor = actor.line(streamlines, np.vstack(streamColors), linewidth=10,fake_tube=True,opacity=1)
     scene.add(stream_actor)
 
 
@@ -2118,7 +2160,7 @@ def dipyPlotTract_setColors(streamlines, streamColors, refAnatT1=None, tractName
     
 
     
-def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=2.5,endpointCmaps=['winter_','autumn_r']):
+def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=2.5,endpointCmaps=['winter_','autumn_r'],bodyAnchor='neck'):
     """
     
 
@@ -2171,6 +2213,9 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     #it's a TERRIBLE assumption, but really, people who violate it are the ones in error...
     avgNodeDistance=np.mean(np.sqrt(np.sum(np.square(np.diff(streamline,axis=0)),axis=1)))
     
+    #Claude note: accept a 1-element array (findTractNeckNode can return
+    #column vectors); range() below needs a plain int
+    neckNodeIndex=int(np.asarray(neckNodeIndex).ravel()[0])
     #get the length of the streamline
     streamLength=len(streamline)
     
@@ -2181,6 +2226,15 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     bodyCmapDict={}
     bodyCmapDict['cmap']=streamCmap
     bodyCmapDict['nodes']=bodyCmapNodes
+    #Claude note: where along streamCmap each body node is sampled.  'neck'
+    #centers the colormap on this streamline's neck by arc length (see
+    #neckAnchoredArcPosition); 'index' leaves the key out, so
+    #stackedElementColorAssignments spreads the colormap evenly over the body
+    #nodes (pre-2026 behavior: center at the halfway body node).
+    if bodyAnchor=='neck':
+        bodyCmapDict['positionsByNode']=neckAnchoredArcPosition(streamline,neckNodeIndex)
+    elif bodyAnchor!='index':
+        raise ValueError("bodyAnchor must be 'neck' or 'index', got "+repr(bodyAnchor))
     
     #neck stuff
     #find the number of nodes this is equivalent to
@@ -2198,11 +2252,15 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     #specify the nodes
     neckCmapNodes=list(range(neckCmapStart,neckCmapStart+oddNeckNodeNum))
     #use an intersect with the main body to ensure that all the nodes are within the right range
-    neckCmapNodes=list(set(neckCmapNodes).intersection(bodyCmapNodes))
+    #Claude note: sorted() - sets do not keep numeric order, and the neck
+    #colormap is applied in list order (scrambled neck bands otherwise)
+    neckCmapNodes=sorted(set(neckCmapNodes).intersection(bodyCmapNodes))
     neckCmapDict={}
     #do a quick check here to make sure the cmap is actually avaialbe
     neckCmapDict['cmap']=neckCmap
-    if not neckCmapDict['cmap'] in matplotlib.pyplot.colormaps():
+    #Claude note: was matplotlib.pyplot.colormaps(), which fails unless pyplot
+    #happens to be imported elsewhere first; the registry has the same names
+    if not neckCmapDict['cmap'] in list(matplotlib.colormaps):
         neckCmapDict['cmap']=invertDivergentCmap(bodyCmapDict['cmap'],overlapProportion=.5)
     
     neckCmapDict['nodes']=neckCmapNodes
@@ -2221,8 +2279,8 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     end1CmapDict={}
     end1CmapDict['cmap']=endpointCmaps[0]
     #do a check to ensure it is avaialble
-    if not end1CmapDict['cmap'] in matplotlib.pyplot.colormaps():
-        end1CmapDict['cmap']=RGB_to_maxBright_colormap( matplotlib.cm.get_cmap(bodyCmapDict['cmap'])(.0)).reversed()
+    if not end1CmapDict['cmap'] in list(matplotlib.colormaps):
+        end1CmapDict['cmap']=RGB_to_maxBright_colormap( matplotlib.colormaps.get_cmap(bodyCmapDict['cmap'])(.0)).reversed()
     #set the nodes
     end1CmapDict['nodes']=end1CmapNodes
     
@@ -2237,8 +2295,8 @@ def makeBandedColorDicts_for_stream(streamline,neckNodeIndex,streamCmap='seismic
     end2CmapNodes=list(sorted(list(set(end2CmapNodes).intersection(bodyCmapNodes))))
     end2CmapDict={}
     end2CmapDict['cmap']=endpointCmaps[1]
-    if not end2CmapDict['cmap'] in matplotlib.pyplot.colormaps():
-        end2CmapDict['cmap']=RGB_to_maxBright_colormap( matplotlib.cm.get_cmap(bodyCmapDict['cmap'])(1.0))
+    if not end2CmapDict['cmap'] in list(matplotlib.colormaps):
+        end2CmapDict['cmap']=RGB_to_maxBright_colormap( matplotlib.colormaps.get_cmap(bodyCmapDict['cmap'])(1.0))
     end2CmapDict['nodes']=end2CmapNodes
     #reverse the endpoint 2 cmap nodes so that they are colored correctly
     #don't do this, just set the colormap to _r in the input
@@ -2277,6 +2335,10 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
         -'cmap' : the matplotlib colormap being requested for the associated elements
         -'nodes' : the indexes of the elements which are assigned the associated
             'cmap' matplotlib colormap
+        -'positionsByNode' (optional) : Claude note: an array over ALL
+            elements giving where in [0,1] each element samples 'cmap'.  If
+            absent, the colormap is spread evenly over 'nodes' (the original
+            behavior).
 
     Returns
     -------
@@ -2306,7 +2368,7 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
     #similar check for colormaps requested
     cmapsAssigned=[iDicts['cmap'] for iDicts in colorAssignmentDicts]
     #get all the avaialbe colormaps
-    availableColormaps=matplotlib.pyplot.colormaps()
+    availableColormaps=list(matplotlib.colormaps)
     #TODO
     #how do I do this better?
     assert np.all([np.any([isinstance(iRequestedMap,matplotlib.colors.Colormap), isinstance(iRequestedMap,matplotlib.colors.LinearSegmentedColormap), iRequestedMap in availableColormaps]) for iRequestedMap in cmapsAssigned ]), 'Not all requested colormaps available in available version of matplotlib'
@@ -2324,7 +2386,7 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
         currentCmap=copy.deepcopy(blankColorArray)
         #get the colormap itself
         if isinstance(iCmaps['cmap'], str):
-            currCmap = matplotlib.cm.get_cmap(iCmaps['cmap'])
+            currCmap = matplotlib.colormaps.get_cmap(iCmaps['cmap'])
         elif isinstance(iCmaps['cmap'],matplotlib.colors.Colormap):
             currCmap =iCmaps['cmap']
         else:
@@ -2346,6 +2408,10 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
             #np.array(range(nodeNumber))/nodeNumber
             #cmapSampleLocations=np.array(np.arange((len(currNodes)))/len(currNodes)
             cmapSampleLocations=np.linspace(0,1,num=len(currNodes))
+            #Claude note: explicit per-element positions (e.g. neck-anchored)
+            #override the even spread
+            if 'positionsByNode' in iCmaps:
+                cmapSampleLocations=np.asarray(iCmaps['positionsByNode'])[np.asarray(currNodes)]
             selectedNodesCmap=currCmap(cmapSampleLocations)
             #get thhe lead and lag blend colors
             leadBlendColor=selectedNodesCmap[0,:]
@@ -2358,13 +2424,13 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
             try:
                 leadBlendColorArray=np.vstack([leadBlendColor]*len(leadBlendNodes))
                 leadBlendColorArray[:,3]=leadBlendWeights
-            except:
+            except Exception:
                 leadBlendColorArray=[]
             #lag:
             try:
                 lagBlendColorArray=np.vstack([lagBlendColor]*len(lagBlendNodes))
                 lagBlendColorArray[:,3]=lagBlendWeights
-            except:
+            except Exception:
                 lagBlendColorArray=[]
             
             #assign these to the blank colormap
@@ -2372,11 +2438,11 @@ def stackedElementColorAssignments(elementNum,colorAssignmentDicts):
             #lead lag
             try:
                 currentCmap[leadBlendNodes,:]=leadBlendColorArray
-            except:
+            except Exception:
                 pass
             try:
                 currentCmap[lagBlendNodes,:]=lagBlendColorArray
-            except:
+            except Exception:
                 pass
         else:
             #currentCmap is already empty, so this doesn't matter
@@ -2572,7 +2638,10 @@ def blendCompetingColormaps(stackedColormaps):
             cmap_x_indexes=np.where(stackedColormaps[:,3,iCmaps_x])[0]
             cmap_y_indexes=np.where(stackedColormaps[:,3,iCmaps_y])[0]
             #find the intersection
-            overlapIndexes=np.asarray(list(set(cmap_x_indexes).intersection(set(cmap_y_indexes))))
+            #Claude note: sorted() - set order is NOT guaranteed to be numeric
+            #(it rotates across hash-table boundaries), so first/last below
+            #were not reliably the start/end of the overlap
+            overlapIndexes=np.asarray(sorted(set(cmap_x_indexes).intersection(set(cmap_y_indexes))))
             #i'm pretty sure they will always be in order, so its safe to just index into first and last
             #conditional for cases of non overlap
             if len(overlapIndexes)>0:
@@ -2871,7 +2940,370 @@ def RGB_to_maxBright_colormap(RGBval):
 
     return brightCmap
 
-def bandedStreamCmap(streamline, neckNode,streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=2.5,endpointCmaps=['winter','autumn']):
+#Claude note: the following OKLab / gamut helpers support
+#hotTipColormap.  OKLab is a perceptual color space (equal steps ~ equal
+#perceived differences), by Bjorn Ottosson:
+#https://bottosson.github.io/posts/oklab/
+#matrices below are taken from that post.
+def srgbToOklab(rgb):
+    """
+    (Claude note.)  Converts sRGB colors to OKLab.
+
+    Parameters
+    ----------
+    rgb : array-like, (..., 3), floats in [0,1]
+        sRGB color(s).  An alpha channel, if present, is ignored.
+
+    Returns
+    -------
+    lab : np.ndarray, (..., 3)
+        OKLab L (lightness, ~0 black to 1 white), a, b coordinates.
+    """
+    import numpy as np
+    rgb=np.asarray(rgb,dtype=float)[...,0:3]
+    #Claude note: undo the sRGB gamma to get linear light
+    linearRGB=np.where(rgb<=0.04045,rgb/12.92,((rgb+0.055)/1.055)**2.4)
+    rgbToLMS=np.array([[0.4122214708,0.5363325363,0.0514459929],
+                       [0.2119034982,0.6806995451,0.1073969566],
+                       [0.0883024619,0.2817188376,0.6299787005]])
+    lmsToLab=np.array([[0.2104542553,0.7936177850,-0.0040720468],
+                       [1.9779984951,-2.4285922050,0.4505937099],
+                       [0.0259040371,0.7827717662,-0.8086757660]])
+    return np.cbrt(linearRGB@rgbToLMS.T)@lmsToLab.T
+
+def oklabToLinearRGB(lab):
+    """
+    (Claude note.)  Converts OKLab to *linear* (not gamma
+    encoded) RGB, without clipping, so that out-of-gamut colors can be
+    detected (any channel outside [0,1]).
+    """
+    import numpy as np
+    lab=np.asarray(lab,dtype=float)
+    labToLMS=np.array([[1.0,0.3963377774,0.2158037573],
+                       [1.0,-0.1055613458,-0.0638541728],
+                       [1.0,-0.0894841775,-1.2914855480]])
+    lmsToRGB=np.array([[4.0767416621,-3.3077115913,0.2309699292],
+                       [-1.2684380046,2.6097574011,-0.3413193965],
+                       [-0.0041960863,-0.7034186147,1.7076147010]])
+    return ((lab@labToLMS.T)**3)@lmsToRGB.T
+
+def oklabToSrgb(lab):
+    """
+    (Claude note.)  Converts OKLab to sRGB, clipped to [0,1].
+    """
+    import numpy as np
+    linearRGB=np.clip(oklabToLinearRGB(lab),0,1)
+    return np.where(linearRGB<=0.0031308,12.92*linearRGB,1.055*linearRGB**(1/2.4)-0.055)
+
+def gamutCuspOklch(hueDeg):
+    """
+    (Claude note.)  For each requested OKLCH hue, finds the
+    "cusp" of the sRGB gamut: the most saturated (max chroma) displayable
+    color at that hue, and its lightness.  The cusps are the pure,
+    fully-saturated colors (e.g. sRGB pure red, pure blue).
+
+    Parameters
+    ----------
+    hueDeg : float or array-like
+        OKLCH hue angle(s), in degrees.
+
+    Returns
+    -------
+    cuspL : np.ndarray
+        Lightness of the cusp at each hue.
+    cuspC : np.ndarray
+        Chroma of the cusp at each hue.
+    """
+    import numpy as np
+    hueRad=np.radians(np.atleast_1d(np.asarray(hueDeg,dtype=float)))
+    #Claude note: brute force but vectorized: for a grid of lightness values,
+    #bisect the largest in-gamut chroma, then keep the lightness with the
+    #largest such chroma.  ~1e-3 precision, which is far below visibility.
+    lightnessGrid=np.linspace(0.2,0.999,160)
+    L=lightnessGrid[None,:].repeat(len(hueRad),axis=0)
+    lowC=np.zeros_like(L)
+    highC=np.full_like(L,0.4)
+    cosH=np.cos(hueRad)[:,None]
+    sinH=np.sin(hueRad)[:,None]
+    for iBisect in range(25):
+        midC=(lowC+highC)/2
+        lab=np.stack([L,midC*cosH,midC*sinH],axis=-1)
+        linearRGB=oklabToLinearRGB(lab)
+        #Claude note: 1e-4 tolerance, because the published matrices are only
+        #precise to ~1e-5, and colors exactly on the gamut corner (e.g. pure
+        #blue) otherwise test as fractionally out of gamut
+        inGamut=np.all((linearRGB>=-1e-4)&(linearRGB<=1+1e-4),axis=-1)
+        lowC=np.where(inGamut,midC,lowC)
+        highC=np.where(inGamut,highC,midC)
+    bestIndex=np.argmax(lowC,axis=1)
+    cuspL=lightnessGrid[bestIndex]
+    cuspC=lowC[np.arange(len(hueRad)),bestIndex]
+    return cuspL,cuspC
+
+def hotTipColormap(endColor,targetHue=None,warmTargetHue=110,coolTargetHue=155,path='srgb',nSamples=256):
+    """
+    (Claude note.)  Generates a "hot" accent colormap for a
+    given streamline end color, for use in coloring streamline endpoints
+    (the "telomere" caps in dipyPlotTract).  This generalizes the original
+    design, which used matplotlib's 'autumn' (red -> yellow) for the red end
+    of a 'seismic' colored tract, and 'winter' (blue -> green) for the blue
+    end.
+
+    The rule, as measured from those colormaps in a perceptual color space
+    (OKLCH): starting from the end color, the hue rotates toward the nearest
+    *bright* hue -- yellow for warm colors, a cyan-green for cool ones --
+    while lightness rises, ending on the most saturated color (gamut cusp)
+    at that bright hue.  Visually this reads as incandescence (red -> orange
+    -> yellow, like heated metal) or as an icy/electric glow (blue -> cyan /
+    green).  Both 'autumn' and 'winter' are straight lines in sRGB between
+    two corners of the RGB cube; red->yellow happens to run along the
+    saturated edge of the gamut, while blue->green cuts inside it (through a
+    softer azure).  path='srgb' reproduces that (the default);
+    path='ridge' instead rides the saturated edge all the way, for a more
+    vivid tip.
+
+    See also RGB_to_maxBright_colormap, which brightens a color without
+    rotating its hue.
+
+    Parameters
+    ----------
+    endColor : RGB(A) triplet / quadruplet of floats in [0,1], or a matplotlib
+        color specification (e.g. 'red', '#0000ff')
+        The color of the streamline body at the end that the tip caps.  The
+        returned colormap starts at exactly this color.
+    targetHue : float, optional
+        OKLCH hue (degrees) to rotate toward.  If None, whichever of
+        warmTargetHue / coolTargetHue is reached by the shorter rotation is
+        used.  The default is None.
+    warmTargetHue : float, optional
+        OKLCH hue used for warm end colors.  110 is the yellow cusp (the
+        lightest saturated color).  The default is 110.
+    coolTargetHue : float, optional
+        OKLCH hue used for cool end colors.  155 is where 'winter' ends
+        (spring green).  Larger values (~195) give cyan.  The default is 155.
+    path : str, optional
+        'srgb': straight line in sRGB from endColor to the target cusp color
+        (reproduces 'autumn' / 'winter' from pure red / pure blue).
+        'ridge': follow the gamut cusp (maximum saturation) at every
+        intermediate hue.  The default is 'srgb'.
+    nSamples : int, optional
+        Number of color samples in the colormap.  The default is 256.
+
+    Raises
+    ------
+    ValueError
+        If path is not 'srgb' or 'ridge'.
+
+    Returns
+    -------
+    hotCmap : matplotlib.colors.LinearSegmentedColormap
+        A colormap running from endColor (0.0) to the bright, saturated
+        target (1.0).
+    """
+    import numpy as np
+    import matplotlib
+
+    #Claude note: accept any matplotlib color spec
+    startRGB=np.asarray(matplotlib.colors.to_rgb(endColor),dtype=float)
+    startLab=srgbToOklab(startRGB)
+    startL=startLab[0]
+    startC=np.hypot(startLab[1],startLab[2])
+    startHue=np.degrees(np.arctan2(startLab[2],startLab[1]))%360
+
+    #Claude note: pick the target hue: whichever bright target is the shorter
+    #rotation away.  (Signed shortest angular difference, in (-180,180].)
+    def signedHueDelta(fromHue,toHue):
+        return (toHue-fromHue+180)%360-180
+    if targetHue is None:
+        warmDelta=signedHueDelta(startHue,warmTargetHue)
+        coolDelta=signedHueDelta(startHue,coolTargetHue)
+        hueDelta=warmDelta if abs(warmDelta)<=abs(coolDelta) else coolDelta
+    else:
+        hueDelta=signedHueDelta(startHue,targetHue)
+
+    if path not in ['srgb','ridge']:
+        raise ValueError("hotTipColormap Error: path must be 'srgb' or 'ridge', not "+str(path))
+    fractions=np.linspace(0,1,nSamples)
+    if path=='srgb':
+        #Claude note: straight line in sRGB to the cusp color at the target hue
+        finalHue=(startHue+hueDelta)%360
+        finalL,finalC=gamutCuspOklch(finalHue)
+        finalLab=np.array([finalL[0],finalC[0]*np.cos(np.radians(finalHue)),finalC[0]*np.sin(np.radians(finalHue))])
+        finalRGB=oklabToSrgb(finalLab)
+        rgbSamples=startRGB[None,:]*(1-fractions[:,None])+finalRGB[None,:]*fractions[:,None]
+        cmapName='hotTip_'+'_'.join([str(int(round(iVal*255))) for iVal in startRGB])
+        return matplotlib.colors.LinearSegmentedColormap.from_list(cmapName,rgbSamples,len(rgbSamples))
+    
+    #Claude note: path=='ridge': walk the hue from start to target.  At every step, lightness
+    #and chroma follow the gamut cusp at that hue; the start color's own
+    #offset from its cusp (e.g. if a darker or paler end color is given) is
+    #faded out over the walk, so the map begins exactly at endColor and ends
+    #exactly on the cusp.
+    hues=(startHue+hueDelta*fractions)%360
+    cuspL,cuspC=gamutCuspOklch(hues)
+    startCuspL,startCuspC=gamutCuspOklch(startHue)
+    lightness=cuspL+(1-fractions)*(startL-startCuspL[0])
+    chromaFraction=(1-fractions)*(startC/max(startCuspC[0],1e-9))+fractions
+    chroma=cuspC*chromaFraction
+    lab=np.stack([lightness,chroma*np.cos(np.radians(hues)),chroma*np.sin(np.radians(hues))],axis=-1)
+    rgbSamples=oklabToSrgb(lab)
+    #Claude note: guarantee the exact start color (removes any round-trip error)
+    rgbSamples[0]=startRGB
+
+    cmapName='hotTip_'+'_'.join([str(int(round(iVal*255))) for iVal in startRGB])
+    hotCmap=matplotlib.colors.LinearSegmentedColormap.from_list(cmapName,rgbSamples,len(rgbSamples))
+    return hotCmap
+
+#Claude note: named, documented tract color schemes.  Each
+#entry is either the original hand-built combination ('classic') or a pair of
+#OKLCH hues (end A, end B) from which tractColorScheme generates a scheme using
+#the same principles.  The pairs come from mapping those principles over every
+#hue pair; 'rendered' notes
+#whether the scheme has been visually checked on a real tract.
+TRACT_COLOR_SCHEME_PRESETS={
+    'classic':{'hues':None,'rendered':True,
+               'description':"The original: seismic body, twilight neck seam, winter / autumn tips."},
+    'blueRed':{'hues':(264,29),'rendered':True,
+               'description':"The original's principles regenerated from its two hues; near-identical to 'classic'.  The strongest pairing."},
+    'blueCrimson':{'hues':(264,10),'rendered':True,
+                   'description':"Blue against a cooler, pinker red."},
+    'violetRed':{'hues':(294,29),'rendered':True,
+                 'description':"Violet against red; softer cool side than blue."},
+    'indigoVermilion':{'hues':(280,40),'rendered':True,
+                       'description':"Indigo against orange-red."},
+    'redMagenta':{'hues':(29,335),'rendered':True,
+                  'description':"Red against magenta; a low temperature-contrast, all-warm look."},
+    'greenBlue':{'hues':(145,264),'rendered':True,
+                 'description':"Green against blue (green end is light, so less neck glow)."},
+    'redGreen':{'hues':(29,145),'rendered':True,
+                'description':"Red against green; strong hue contrast, light green end."},
+    'tealOrange':{'hues':(200,53),'rendered':True,
+                  'description':"Cinematic teal / orange; both ends are light, so the neck glow is subtle and the teal tip cannot brighten further."},
+    }
+
+def tractColorScheme(preset='classic',hueA=None,hueB=None,shadeDepth=0.4,nSamples=256):
+    """
+    (Claude note.)  Returns the set of colormaps used to color
+    a tract's streamlines: the body, the neck seam, and the two "hot" endpoint
+    tips.  Either a named preset or two custom hues can be requested.
+
+    The generated schemes follow the principles measured from the original
+    ('classic') scheme:
+        - each end is the most saturated displayable color at its hue (the
+          sRGB gamut "cusp"); the darkest cusps (blue, red) work best,
+          because they leave the longest dark -> pure -> white run
+        - body: one constant hue per half; shade (toward black) at the
+          terminal, the pure color a quarter of the way in, white at the neck
+          (the structure of 'seismic')
+        - seam: a short, inverted (dark-centred), low-saturation ramp that
+          starts and ends at white and passes through both end hues (the
+          structure of 'twilight'); meant to be squeezed into the neck
+        - tips: hotTipColormap of each end color (rotate toward yellow for
+          warm ends, green / cyan for cool ends, while brightening)
+
+    Orientation convention: colormap position 0 is end A (the first node of
+    each oriented streamline), position 1 is end B, the neck is at 0.5.
+
+    Parameters
+    ----------
+    preset : str, optional
+        A key of TRACT_COLOR_SCHEME_PRESETS (see that dict for descriptions).
+        Ignored if hueA and hueB are given.  The default is 'classic'.
+    hueA : float, optional
+        OKLCH hue (degrees) for end A, for a custom scheme.  Requires hueB.
+        The default is None.
+    hueB : float, optional
+        OKLCH hue (degrees) for end B, for a custom scheme.  Requires hueA.
+        The default is None.
+    shadeDepth : float between 0 and 1, optional
+        How far toward black the terminal ends of the body are darkened (the
+        terminal color is the pure color multiplied by this).  The default is
+        0.4.
+    nSamples : int, optional
+        Number of samples in each generated colormap.  The default is 256.
+
+    Raises
+    ------
+    ValueError
+        If the preset is unknown, or only one of hueA / hueB is given.
+
+    Returns
+    -------
+    scheme : dict
+        'body'  : matplotlib Colormap for the streamline body (0 = end A,
+                  0.5 = neck, 1 = end B)
+        'seam'  : matplotlib Colormap for the neck seam
+        'tipA'  : matplotlib Colormap for end A's tip (0 = body color at
+                  that end, 1 = hottest)
+        'tipB'  : matplotlib Colormap for end B's tip
+        'name'  : the preset name, or 'custom_<hueA>_<hueB>'
+        'hues'  : (hueA, hueB), or None for 'classic'
+    """
+    import numpy as np
+    import matplotlib
+
+    #Claude note: input handling
+    if (hueA is None)!=(hueB is None):
+        raise ValueError('tractColorScheme Error: hueA and hueB must be given together')
+    if hueA is None:
+        if not preset in TRACT_COLOR_SCHEME_PRESETS:
+            raise ValueError('tractColorScheme Error: unknown preset '+str(preset)+'; available: '+', '.join(TRACT_COLOR_SCHEME_PRESETS.keys()))
+        hues=TRACT_COLOR_SCHEME_PRESETS[preset]['hues']
+        name=preset
+    else:
+        hues=(float(hueA),float(hueB))
+        name='custom_'+str(int(round(hueA)))+'_'+str(int(round(hueB)))
+
+    #Claude note: the original, hand-built scheme
+    if hues is None:
+        return {'body':matplotlib.colormaps['seismic'],
+                'seam':matplotlib.colormaps['twilight'],
+                'tipA':matplotlib.colormaps['winter'],
+                'tipB':matplotlib.colormaps['autumn'],
+                'name':name,'hues':None}
+
+    #Claude note: the pure (cusp) color at each end hue
+    def cuspRGB(hueDeg):
+        cuspL,cuspC=gamutCuspOklch(hueDeg)
+        lab=np.array([cuspL[0],cuspC[0]*np.cos(np.radians(hueDeg)),cuspC[0]*np.sin(np.radians(hueDeg))])
+        return oklabToSrgb(lab)
+    endA=cuspRGB(hues[0])
+    endB=cuspRGB(hues[1])
+    white=np.ones(3)
+
+    #Claude note: piecewise-linear sRGB ramp through (position, color) stops,
+    #which is how 'seismic' itself is built
+    def ramp(stops):
+        positions=np.linspace(0,1,nSamples)
+        stopPositions=np.array([iStop[0] for iStop in stops])
+        stopColors=np.array([iStop[1] for iStop in stops])
+        return np.stack([np.interp(positions,stopPositions,stopColors[:,iChannel]) for iChannel in range(3)],axis=1)
+
+    #Claude note: body: shade -> pure -> white -> pure -> shade
+    bodyColors=ramp([(0.0,endA*shadeDepth),(0.25,endA),(0.5,white),(0.75,endB),(1.0,endB*shadeDepth)])
+
+    #Claude note: seam: white -> muted A -> dark midpoint -> muted B -> white
+    #Claude note: muted = the end hue at mid lightness and 40% of its chroma;
+    #the dark midpoint takes the hue halfway between the two ends (in OKLab)
+    def muted(rgb):
+        lab=srgbToOklab(rgb)
+        chroma=np.hypot(lab[1],lab[2])*0.4
+        hueRad=np.arctan2(lab[2],lab[1])
+        return oklabToSrgb(np.array([0.55,chroma*np.cos(hueRad),chroma*np.sin(hueRad)]))
+    labA=srgbToOklab(endA)
+    labB=srgbToOklab(endB)
+    midHueRad=np.arctan2(labA[2]+labB[2],labA[1]+labB[1])
+    seamDark=oklabToSrgb(np.array([0.25,0.07*np.cos(midHueRad),0.07*np.sin(midHueRad)]))
+    seamColors=ramp([(0.0,white*0.9),(0.3,muted(endA)),(0.5,seamDark),(0.7,muted(endB)),(1.0,white*0.9)])
+
+    makeCmap=lambda colors,suffix: matplotlib.colors.LinearSegmentedColormap.from_list(name+'_'+suffix,colors,len(colors))
+    return {'body':makeCmap(bodyColors,'body'),
+            'seam':makeCmap(seamColors,'seam'),
+            'tipA':hotTipColormap(endA,nSamples=nSamples),
+            'tipB':hotTipColormap(endB,nSamples=nSamples),
+            'name':name,'hues':hues}
+
+def bandedStreamCmap(streamline, neckNode,streamCmap='seismic', neckLengthMM=10 ,neckCmap='twilight' ,endCapLengthMM=2.5,endpointCmaps=['winter','autumn'],bodyAnchor='neck'):
     """
     Computes and generates a banded colormap for a given streamline.  See
     wma_pyTools examples of streamline plots for demonstrations of this.
@@ -2898,6 +3330,10 @@ def bandedStreamCmap(streamline, neckNode,streamCmap='seismic', neckLengthMM=10 
     endpointCmaps : List of string, 2 items long, optional
         The string names of the matplotlib colormap desired for the respective
         terminal ends of the streamline.. The default is ['winter','autumn'].
+    bodyAnchor : str, optional
+        Claude note: 'neck' (default) centers streamCmap on the neck by arc
+        length; 'index' spreads it evenly over the body nodes (pre-2026).  See
+        colorGradientForStreams.
 
     Returns
     -------
@@ -2906,7 +3342,7 @@ def bandedStreamCmap(streamline, neckNode,streamCmap='seismic', neckLengthMM=10 
 
     """
     
-    colorDicts=makeBandedColorDicts_for_stream(streamline,neckNode,streamCmap=streamCmap, neckLengthMM=neckLengthMM ,neckCmap=neckCmap ,endCapLengthMM=endCapLengthMM,endpointCmaps=endpointCmaps)
+    colorDicts=makeBandedColorDicts_for_stream(streamline,neckNode,streamCmap=streamCmap, neckLengthMM=neckLengthMM ,neckCmap=neckCmap ,endCapLengthMM=endCapLengthMM,endpointCmaps=endpointCmaps,bodyAnchor=bodyAnchor)
     
     stackedColorMaps=stackedElementColorAssignments(len(streamline),colorDicts)
     
@@ -2918,7 +3354,8 @@ def bandedStreamCmap(streamline, neckNode,streamCmap='seismic', neckLengthMM=10 
     
 def orientAndColormapStreams(streamlines, **kwargs):
     """
-    
+    Claude note: orients streamlines and computes a banded colormap
+    (bandedStreamCmap) for each.
 
     Parameters
     ----------
@@ -2926,6 +3363,18 @@ def orientAndColormapStreams(streamlines, **kwargs):
         DESCRIPTION.
     *kwargs : TYPE
         DESCRIPTION.
+        Claude note: besides the bandedStreamCmap options (streamCmap,
+        neckLengthMM, neckCmap, endCapLengthMM, endpointCmaps, bodyAnchor) and
+        the QuickBundles options (thresholds, nb_pts):
+        singleTract : bool, default False
+            False (original behavior, meant for whole-brain tractograms):
+            split into QuickBundles clusters, and orient and find a neck per
+            cluster.  On a single tract this doubles as a QC / "reveal" mode:
+            clusters are oriented independently, so sub-units that disagree
+            with the rest of the tract (e.g. branches, truncated pieces)
+            stand out in the opposite color.  True (for one tract): orient the whole tract at once
+            (orientStreamlinesForPlotting, i.e. orientTractUsingNeck_Robust)
+            and use a single tract-wide neck, so clusters cannot disagree.
 
     Returns
     -------
@@ -2979,10 +3428,20 @@ def orientAndColormapStreams(streamlines, **kwargs):
         endpointCmaps=['winter_r','autumn']
     else:
         endpointCmaps=kwargs['endpointCmaps']
+    #Claude note: see colorGradientForStreams; 'index' restores the old look
+    bodyAnchor=kwargs.get('bodyAnchor','neck')
         
     #can make this shorter by having a default kwargs dict
     #default_kwargs={'nb_pts':100'thresholds'=[40,20,10],'endpointCmaps':['winter_r','autumn']
         
+    #Claude note: one tract: orient and find the neck once, for all streamlines
+    if kwargs.get('singleTract',False):
+        streamlines=orientStreamlinesForPlotting(streamlines,orientMethod='neck')
+        #Claude note: measured cross-section neck (see neckNodesForPlotting)
+        neckNodes=neckNodesForPlotting(streamlines)
+        outColormaps=[bandedStreamCmap(iStream,neckNodes[iterator],streamCmap=streamCmap, neckLengthMM=neckLengthMM ,neckCmap=neckCmap ,endCapLengthMM=endCapLengthMM,endpointCmaps=endpointCmaps,bodyAnchor=bodyAnchor) for iterator,iStream in enumerate(streamlines)]
+        return streamlines, outColormaps
+
     clusters=wmaPyTools.streamlineTools.quickbundlesClusters(streamlines, thresholds=thresholds,nb_pts=nb_pts)
     
     clusterLens=[len(icluster.indices) for icluster in clusters]
@@ -3005,7 +3464,7 @@ def orientAndColormapStreams(streamlines, **kwargs):
         
         currentCmaps=[[] for istreams in orientedStreams]
         for iterator,iStream in enumerate(orientedStreams):
-            currentCmaps[iterator]=  bandedStreamCmap(iStream,neckNodes[iterator],streamCmap=streamCmap, neckLengthMM=neckLengthMM ,neckCmap=neckCmap ,endCapLengthMM=endCapLengthMM,endpointCmaps=endpointCmaps)
+            currentCmaps[iterator]=  bandedStreamCmap(iStream,neckNodes[iterator],streamCmap=streamCmap, neckLengthMM=neckLengthMM ,neckCmap=neckCmap ,endCapLengthMM=endCapLengthMM,endpointCmaps=endpointCmaps,bodyAnchor=bodyAnchor)
         #test run = 320.004 seconds .0.009 per
         
         for iterator,iStreamIndexes in enumerate(clusterIndexes):
@@ -3015,7 +3474,45 @@ def orientAndColormapStreams(streamlines, **kwargs):
     return streamlines, outColormaps
 
 
-def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twilight' ,endpointCmaps=['winter','autumn']):
+def neckAnchoredArcPosition(streamline,neckNode):
+    """
+    Claude note: position of each node along a streamline, measured by arc
+    length from its neck: 0 at the first node, 0.5 at the neck node, 1 at the
+    last node.  Each side of the neck is scaled separately, so a streamline
+    whose neck is off-center still spans the full [0,1] range.  Used to place
+    the center of a diverging colormap at the tract's neck.
+
+    Parameters
+    ----------
+    streamline : numpy.ndarray, shape (N,3)
+        The node coordinates of one streamline.
+    neckNode : int
+        Index of the streamline's neck node (e.g. from
+        streamlineTools.findTractNeckNode).
+
+    Returns
+    -------
+    position : numpy.ndarray, shape (N,)
+        Values in [0,1], monotonically non-decreasing along the streamline.
+
+    """
+    import numpy as np
+    streamline=np.asarray(streamline)
+    #Claude note: findTractNeckNode may hand back 1-element arrays
+    neckNode=int(np.clip(np.asarray(neckNode).ravel()[0],0,len(streamline)-1))
+    cumulativeLength=np.concatenate([[0],np.cumsum(np.linalg.norm(np.diff(streamline,axis=0),axis=1))])
+    lengthBefore=cumulativeLength[neckNode]
+    lengthAfter=cumulativeLength[-1]-lengthBefore
+    position=np.empty(len(streamline))
+    #Claude note: a neck at the very first / last node leaves that side empty;
+    #the max() guards the division and the side is pinned at 0.5
+    position[:neckNode+1]=0.5*cumulativeLength[:neckNode+1]/max(lengthBefore,1e-6)
+    position[neckNode:]=0.5+0.5*(cumulativeLength[neckNode:]-lengthBefore)/max(lengthAfter,1e-6)
+    if lengthBefore<=1e-6:
+        position[:neckNode+1]=0.5
+    return position
+
+def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twilight' ,endpointCmaps=['winter','autumn'], bodyAnchor='neck'):
     """
     Computes and implements a colormapping for an input collection of streamlines
     applies a separate colormap at the "neck" of the tract, and also
@@ -3035,6 +3532,18 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
         The colormap that is specific to the neck. The default is 'twilight'.
     endpointCmaps : string, specifying matplotlib colormap (or colormap itself), optional, optional
         The colormap that is specific to the endpoints. The default is ['winter','autumn'].
+    bodyAnchor : str, optional
+        Claude note: where the center of streamCmap (white, for 'seismic') is
+        placed on each streamline.
+        'neck' : at that streamline's own neck node.  Position is measured by
+            arc length separately on each side: the first node maps to 0, the
+            neck to 0.5, the last node to 1.  Every streamline is then pale at
+            the tract's neck and fully saturated at both ends.
+        'index' : the pre-2026 behavior, streamCmap(nodeIndex/nNodes).  This
+            puts the center at each streamline's halfway node, which on real
+            arcuate / callosal tracts sits a median of 21-25 mm (up to ~60 mm)
+            from the neck, smearing the pale band along the tract.
+        The default is 'neck'.
 
     Returns
     -------
@@ -3050,15 +3559,15 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     if isinstance(neckCmap, str):
         #sometimes twlight isn't avaialble.  lets think of a way around this.
         try:
-            neckCmap = matplotlib.cm.get_cmap(neckCmap)
-        except:
-            neckCmap = invertDivergentCmap(matplotlib.cm.get_cmap(streamCmap),overlapProportion=.5)
+            neckCmap = matplotlib.colormaps.get_cmap(neckCmap)
+        except Exception:
+            neckCmap = invertDivergentCmap(matplotlib.colormaps.get_cmap(streamCmap),overlapProportion=.5)
     if isinstance(streamCmap, str):
-        streamCmap = matplotlib.cm.get_cmap(streamCmap)
+        streamCmap = matplotlib.colormaps.get_cmap(streamCmap)
 
     if isinstance(endpointCmaps[0], str):
-        endpointCmap1 = matplotlib.cm.get_cmap(endpointCmaps[0])
-        endpointCmap2 = matplotlib.cm.get_cmap(endpointCmaps[1])
+        endpointCmap1 = matplotlib.colormaps.get_cmap(endpointCmaps[0])
+        endpointCmap2 = matplotlib.colormaps.get_cmap(endpointCmaps[1])
     else:
         endpointCmap1 = endpointCmaps[0]
         endpointCmap2 = endpointCmaps[1]
@@ -3070,8 +3579,8 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     print('endpointCmap1 = ' + endpointCmap1.name )
     print('endpointCmap2 = ' + endpointCmap2.name )
         
-    #go ahead and apply the full streamline colorscheme
-    streamColors = [streamCmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
+    if bodyAnchor not in ('neck','index'):
+        raise ValueError("bodyAnchor must be 'neck' or 'index', got "+repr(bodyAnchor))
     
     #steal come code from orientTractUsingNeck to color the neck
     #lets aim for a realspace distance when orienting our streamlines
@@ -3086,7 +3595,14 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
     behindNodes=np.zeros(len(streamlines)).astype(int)
     neckWindow=[[] for iStreams in streamlines]
 
-    neckNodes=wmaPyTools.streamlineTools.findTractNeckNode(streamlines)
+    #Claude note: measured cross-section neck (see neckNodesForPlotting)
+    neckNodes=neckNodesForPlotting(streamlines)
+
+    #go ahead and apply the full streamline colorscheme
+    if bodyAnchor=='index':
+        streamColors = [streamCmap(np.array(range(streamline.shape[0]))/streamline.shape[0]) for streamline in streamlines]
+    else:
+        streamColors = [streamCmap(neckAnchoredArcPosition(streamline,neckNodes[iStreamIndexes])) for iStreamIndexes,streamline in enumerate(streamlines)]
     
     for iStreamIndexes,iStreamlines in enumerate(streamlines):
         #A check to make sure you've got room to do this indexing on both sides
@@ -3095,9 +3611,13 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
         currAheadNodes=list(range(neckNodes[iStreamIndexes],neckNodes[iStreamIndexes]+lookDistance))
         currBehindNodes=list(range(neckNodes[iStreamIndexes]-lookDistance,neckNodes[iStreamIndexes]))
         #find the safe intersection of these with the available nodes
-        currAheadNodes=list(set(currAheadNodes).intersection(set( currentStreamNodeIndexes)))
-        currBehindNodes=list(set(currBehindNodes).intersection(set(currentStreamNodeIndexes)))
-        neckWindow[iStreamIndexes]=list(set(currAheadNodes).union(set(currBehindNodes)))
+        #Claude note: sorted() - Python sets do not keep numeric order (a set of
+        #node indexes spanning a hash-table boundary iterates rotated, e.g.
+        #512..519 then 480..511), and the neck colormap is painted in list
+        #order, so ~20-40% of streamlines got a scrambled / reversed neck band.
+        currAheadNodes=sorted(set(currAheadNodes).intersection(set( currentStreamNodeIndexes)))
+        currBehindNodes=sorted(set(currBehindNodes).intersection(set(currentStreamNodeIndexes)))
+        neckWindow[iStreamIndexes]=sorted(set(currAheadNodes).union(set(currBehindNodes)))
         #for old code
         aheadNodes[iStreamIndexes]=np.max(neckWindow[iStreamIndexes])
         behindNodes[iStreamIndexes]=np.min(neckWindow[iStreamIndexes])
@@ -3139,8 +3659,15 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
             streamColors[iStreamIndexes][targetIndexes]=blendedReplacement
         #now do the other side
         #if there's room, don't bother with it otherwise
-        if len(streamColors[iStreamIndexes])>=aheadNodes[iStreamIndexes]+lookDistance:
-            targetIndexes=list(range(behindNodes[iStreamIndexes]-lookDistance,behindNodes[iStreamIndexes]))
+        #Claude note: the room check must match the shifted window below (which
+        #starts at aheadNodes+1); with '>=aheadNodes+lookDistance' a neck window
+        #ending one node short of the streamline's end indexed past it
+        #(IndexError on streamlines that end at the neck, e.g. AF branches).
+        if len(streamColors[iStreamIndexes])>=aheadNodes[iStreamIndexes]+1+lookDistance:
+            #Claude note: the ahead side of the neck uses the *ahead* indexes,
+            #so it is blended toward white once.  Mirrors the commented out
+            #implementation below.
+            targetIndexes=list(range(aheadNodes[iStreamIndexes]+1,aheadNodes[iStreamIndexes]+1+lookDistance))
             aheadColors=streamColors[iStreamIndexes][targetIndexes]
             blendColorsStack=np.asarray([aheadColors,whiteArray])
             blendedReplacement=np.average(blendColorsStack,axis=0,weights=blendWeightsArray)
@@ -3204,9 +3731,9 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
 #     if isinstance(neckCmap, str):
 #         #sometimes twlight isn't avaialble.  lets think of a way around this.
 #         try:
-#             neckCmap = matplotlib.cm.get_cmap(neckCmap)
+#             neckCmap = matplotlib.colormaps.get_cmap(neckCmap)
 #         except:
-#             neckCmap = matplotlib.cm.get_cmap(streamCmap)
+#             neckCmap = matplotlib.colormaps.get_cmap(streamCmap)
 #             #create a linspace to index into colormap
 #             linspaceFill=np.linspace(0.0, 1.0, 255)
 #             #use it to extract a temp colormap
@@ -3218,11 +3745,11 @@ def colorGradientForStreams(streamlines, streamCmap='seismic', neckCmap='twiligh
 #             #use that to create a new colormap           
 #             neckCmap=matplotlib.colors.LinearSegmentedColormap.from_list('cycle_'+streamCmap,doubleAvgCmap,len(doubleAvgCmap))
 #     if isinstance(streamCmap, str):
-#         streamCmap = matplotlib.cm.get_cmap(streamCmap)
+#         streamCmap = matplotlib.colormaps.get_cmap(streamCmap)
 
 #     if isinstance(endpointCmaps[0], str):
-#         endpointCmap1 = matplotlib.cm.get_cmap(endpointCmaps[0])
-#         endpointCmap2 = matplotlib.cm.get_cmap(endpointCmaps[1])
+#         endpointCmap1 = matplotlib.colormaps.get_cmap(endpointCmaps[0])
+#         endpointCmap2 = matplotlib.colormaps.get_cmap(endpointCmaps[1])
 #     else:
 #         endpointCmap1 = endpointCmaps[0]
 #         endpointCmap2 = endpointCmaps[1]
@@ -3375,10 +3902,10 @@ def colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWi
     colorNodeDistance=np.round(colorWindowMM/avgNodeDistance).astype(int)
     
     #get the number of colors required
-    uniqueLabels=np.unique(np.round(parcNifti.get_data()).astype(int))
+    uniqueLabels=np.unique(np.round(np.asanyarray(parcNifti.dataobj)).astype(int))
     neededColors=len(uniqueLabels)
     #generate a color selection for these
-    endpointsColormap=matplotlib.cm.get_cmap('gist_rainbow')
+    endpointsColormap=matplotlib.colormaps.get_cmap('gist_rainbow')
     
     #establish a parameter to force the color selection to jump about the colormap
     jitterParam=12
@@ -3398,7 +3925,7 @@ def colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWi
         streamColors=colorGradientForStreams(streamlines)
     
     #get the endpoint identities
-    M, grouping=utils.connectivity_matrix(streamlines, parcNifti.affine, label_volume=np.round(parcNifti.get_data()).astype(int),
+    M, grouping=utils.connectivity_matrix(streamlines, parcNifti.affine, label_volume=np.round(np.asanyarray(parcNifti.dataobj)).astype(int),
                             symmetric=False,
                             return_mapping=True,
                             mapping_as_streamlines=False)
@@ -3427,7 +3954,90 @@ def colorStreamEndpointsFromParc(streamlines,parcNifti,streamColors=None,colorWi
     
     return streamColors, colorLut
 
-def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=None,outdir=None,tractName=None,makeGifs=True,makeTiles=True,makeFingerprints=True,makeSpagetti=True):
+def neckNodesForPlotting(streamlines):
+    """
+    Claude note: per-streamline neck node indexes for tract plots.  Uses the
+    measured cross-section neck (streamlineTools.findTractNeckNode with
+    method='section': middle of the narrowest well-covered stretch), which
+    places the neck at the tract's visible waist.  Falls back, with a warning,
+    to the original density-peak neck when the section method cannot run
+    (fewer than ~20 streamlines per section).
+
+    Parameters
+    ----------
+    streamlines : nibabel ArraySequence / dipy Streamlines
+        The streamlines of one tract.
+
+    Returns
+    -------
+    neckNodes : numpy.ndarray of int
+        One node index per streamline.
+    """
+    import warnings
+    import numpy as np
+    import wmaPyTools.streamlineTools
+    try:
+        return np.asarray(wmaPyTools.streamlineTools.findTractNeckNode(streamlines,method='section')).ravel()
+    except Exception as sectionError:
+        warnings.warn('neckNodesForPlotting: section-based neck failed ('+str(sectionError)+'); using the density-peak neck')
+        return np.asarray(wmaPyTools.streamlineTools.findTractNeckNode(streamlines)).ravel()
+
+
+def orientStreamlinesForPlotting(streamlines,orientMethod='neck'):
+    """
+    Claude note: orient a tract's streamlines consistently before plotting, so
+    that endpoint-based coloring (and the endpoint fingerprint) assigns each
+    terminal region a single color.
+
+    Parameters
+    ----------
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence
+        The streamlines of a single tract.
+    orientMethod : str, optional
+        'neck' : orientTractUsingNeck_Robust, falling back (with a warning) to
+            'axis' if it cannot run on this input, e.g. streamlines whose node
+            spacing varies by more than 10%.
+        'axis' : orientAllStreamlines, the pre-2026 plotting behavior.
+        'centroid' : orientTractUsingCentroids (added 2026-11-12): orients via
+            the tract's QuickBundles sub-bundles by local direction agreement.
+            More consistent and faster than 'neck' on the 72 TractSeg tracts
+            of HCP 100206, works with any node spacing and with fan-shaped
+            tracts; see streamlineTools.orientTractUsingCentroids and
+            docs/orientationMethods.md for the tradeoffs.  Falls back to
+            'axis', with a warning, if it cannot run.
+        The default is 'neck' (unchanged; switching it changes figures).
+
+    Returns
+    -------
+    streamlines : nibabel.streamlines.array_sequence.ArraySequence
+        The oriented streamlines.
+
+    """
+    import io
+    import contextlib
+    import warnings
+    import wmaPyTools.streamlineTools
+
+    if orientMethod not in ('neck','axis','centroid'):
+        raise ValueError("orientMethod must be 'neck', 'axis' or 'centroid', got "+repr(orientMethod))
+    if orientMethod=='centroid':
+        try:
+            #Claude note: quiet, as for 'neck'
+            with contextlib.redirect_stdout(io.StringIO()):
+                return wmaPyTools.streamlineTools.orientTractUsingCentroids(streamlines,surpressReport=True)
+        except Exception as centroidError:
+            warnings.warn('orientStreamlinesForPlotting: centroid-based orientation failed ('+str(centroidError).replace('\n',' ')+'); falling back to orientAllStreamlines')
+    if orientMethod=='neck':
+        try:
+            #Claude note: the neck method prints a per-pass report; keep plotting
+            #output quiet
+            with contextlib.redirect_stdout(io.StringIO()):
+                return wmaPyTools.streamlineTools.orientTractUsingNeck_Robust(streamlines,surpressReport=True)
+        except Exception as neckError:
+            warnings.warn('orientStreamlinesForPlotting: neck-based orientation failed ('+str(neckError).replace('\n',' ')+'); falling back to orientAllStreamlines')
+    return wmaPyTools.streamlineTools.orientAllStreamlines(streamlines)
+
+def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=None,outdir=None,tractName=None,makeGifs=True,makeTiles=True,makeFingerprints=True,makeSpagetti=True,orientMethod='neck'):
     """
     Create any number of image plots for the input collection of streamlines
 
@@ -3457,6 +4067,20 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
         DESCRIPTION. The default is True.
     makeSpagetti : TYPE, optional
         DESCRIPTION. The default is True.
+    orientMethod : str, optional
+        Claude note: how streamlines are oriented before plotting.  'neck'
+        (default) uses orientTractUsingNeck_Robust, which orients every
+        streamline the same way through the tract's neck and was 0.0%
+        inconsistent on 5 of 6 real HCP tracts (CC_7: only truncated midline
+        stubs, whose direction is undefined).  If the neck method cannot run
+        (e.g. variable node spacing) it warns and falls back to 'axis'.
+        'axis' is the previous behavior (orientAllStreamlines: each streamline
+        by its own axis of greatest travel), which mis-orients up to ~31% of
+        curved or callosal tracts and produced the "red in with the blue"
+        speckling.  'centroid' (added 2026-11-12) uses
+        orientTractUsingCentroids: more consistent and faster than 'neck' in
+        a 72-tract comparison and independent of node spacing; see
+        docs/orientationMethods.md before choosing.  The default is 'neck'.
 
     Returns
     -------
@@ -3473,7 +4097,7 @@ def multiPlotsForTract(streamlines,atlas=None,atlasLookupTable=None,refAnatT1=No
         streamlinesLoad=nib.streamlines.load(streamlines)
         streamlines=streamlinesLoad.streamlines
     #orient them for plotting
-    streamlines=wmaPyTools.streamlineTools.orientAllStreamlines(streamlines)
+    streamlines=orientStreamlinesForPlotting(streamlines,orientMethod=orientMethod)
         
     if isinstance(refAnatT1,str):
         refAnatT1=nib.load(refAnatT1)
@@ -3634,14 +4258,14 @@ def plotFullyConnectedRelations(squareformDistTable):
         raise ValueError('input distance table does not appear to be squareform')
         
     if squareformDistTable.shape[0]>8:
-        warnings.warning('Input data table features more than 8 items.  Output plot may be cluttered or uninterpretable')
+        warnings.warn('Input data table features more than 8 items.  Output plot may be cluttered or uninterpretable')
         
     #get the column names, presumably this is the name of the pertinent entity
     #as is the case in multiTractOverlapAnalysis
     nodeNames=list(squareformDistTable.columns)
-    nodeColorMap = matplotlib.cm.get_cmap('winter')
+    nodeColorMap = matplotlib.colormaps.get_cmap('winter')
     
-    #connectionColorMap= matplotlib.cm.get_cmap('autumn')
+    #connectionColorMap= matplotlib.colormaps.get_cmap('autumn')
     
     fig, axes = plot_connectivity_circle(squareformDistTable.to_numpy(), nodeNames, colormap='autumn',
     node_colors=nodeColorMap(range(len(nodeNames))), facecolor='white', textcolor='black', colorbar_size=20, colorbar=True,
@@ -3665,7 +4289,7 @@ def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,ou
     
    
     #get the endpoint identities
-    M, grouping=utils.connectivity_matrix(streamlines, renumberedAtlasNifti.affine, label_volume=np.round(renumberedAtlasNifti.get_data()).astype(int),
+    M, grouping=utils.connectivity_matrix(streamlines, renumberedAtlasNifti.affine, label_volume=np.round(np.asanyarray(renumberedAtlasNifti.dataobj)).astype(int),
                             return_mapping=True,
                             mapping_as_streamlines=False)
     #get the keys so that you can iterate through them later
@@ -3692,7 +4316,16 @@ def iteratedTractSubComponentCrossSec(streamlines,atlas,lookupTable,refAnatT1,ou
         if currentProportion >=  proportionThreshold: 
            multiTileDensity(streamlines[currentStreams],refAnatT1,saveDir,tckName,densityThreshold,noEmpties=True)
 
-def makePrettyStreamsPlot(streamlines, fileName, smoothBool=True,cullBool=True):
+def makePrettyStreamsPlot(streamlines, fileName, smoothBool=True,cullBool=True,**colorKwargs):
+    """
+    Claude note: smooths, optionally culls, orients and band-colors a set of
+    streamlines (orientAndColormapStreams) and renders them to fileName
+    (dipyPlotTract_setColors).  colorKwargs are passed to
+    orientAndColormapStreams (e.g. bodyAnchor='index' for the pre-2026 look,
+    neckLengthMM, endpointCmaps); endpointCmaps defaults to ['foo','foo'],
+    i.e. tips derived from the body colormap's ends.
+    """
+    import numpy as np
     import nibabel as nib
     import wmaPyTools.streamlineTools
     
@@ -3703,12 +4336,16 @@ def makePrettyStreamsPlot(streamlines, fileName, smoothBool=True,cullBool=True):
     
     if cullBool:
         [survivingStreamsIndicies, culledStreamIndicies]= wmaPyTools.streamlineTools.cullStreamsByBundling(tempTractogram.streamlines,5,qbThresholds=[32,16,8,3],qbResmaple=50)
+    else:
+        #Claude note: with cullBool=False, every streamline survives
+        survivingStreamsIndicies=np.arange(len(tempTractogram.streamlines))
  
     #ok, now we need to orient the bundle and get the per-cluster color coding    
         
         
-    [streamlinesToPlot, outColormaps]=orientAndColormapStreams(tempTractogram.streamlines[survivingStreamsIndicies],endpointCmaps=['foo','foo'])
+    colorKwargs.setdefault('endpointCmaps',['foo','foo'])
+    [streamlinesToPlot, outColormaps]=orientAndColormapStreams(tempTractogram.streamlines[survivingStreamsIndicies],**colorKwargs)
     
-    fileName='/media/dan/storage/gitDir/testData/testPlot2'
+    #Claude note: the output goes to the caller's fileName
     dipyPlotTract_setColors(streamlinesToPlot, outColormaps, refAnatT1=None, tractName=fileName)
 

@@ -1,0 +1,63 @@
+# -*- coding: utf-8 -*-
+# Packaging metadata for wma_pyTools.
+#
+# NOTE: the package directory (wmaPyTools/) is deliberately left at the repo
+# root, rather than moved to a src/ layout.  Every downstream brainlife app
+# vendors this repo as a git submodule and puts the submodule directory on
+# sys.path, then calls `import wmaPyTools.roiTools` etc.  Moving the package
+# would break all of them.  `pip install -e .` now works too.
+
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wmaPyTools"
+version = "0.2.0.dev0"
+description = "White matter anatomy tools: a python refactor of the MATLAB wma_tools toolset"
+readme = "README.md"
+requires-python = ">=3.9"
+authors = [{ name = "Dan Bullock", email = "bullo092@umn.edu" }]
+# Lower bounds reflect the oldest versions the code has been verified against
+# on this branch.  The upper bounds on numpy / nibabel / dipy guard against the
+# next round of API removals (e.g. get_data in nibabel 5, DataFrame.append in
+# pandas 2) that previously broke this package silently.
+dependencies = [
+    "numpy>=1.23,<3",
+    "scipy>=1.9",
+    "nibabel>=4,<6",
+    "dipy>=1.7,<2",
+    "nilearn>=0.10",
+    "pandas>=1.5",
+    "matplotlib>=3.5",
+    "pillow",
+    "scikit-learn",
+    "scikit-image",
+    "seaborn",
+]
+
+[project.optional-dependencies]
+# progress bars; the code falls back gracefully if this is absent
+progress = ["tqdm"]
+# 3D rendering for visTools.dipyPlotTract and friends (requires a display, or
+# xvfb when containerized)
+# Claude note: fury 2.0 is a breaking rewrite; visTools uses the 0.x API
+# (window.record / window.snapshot / actor.line).  Verified with fury 0.12.0,
+# vtk 9.7.2.  Headless machines need a virtual display; the xvfbwrapper
+# usage in visTools is commented out, so wrap the call instead, e.g.
+# `xvfb-run -a pytest` (requires the system xvfb package).
+render = ["fury>=0.10,<1", "vtk"]
+test = ["pytest>=7"]
+
+[project.urls]
+Homepage = "https://github.com/DanNBullock/wma_pyTools"
+"MATLAB origin" = "https://github.com/DanNBullock/wma_tools"
+
+[tool.setuptools]
+packages = ["wmaPyTools"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+markers = [
+    "realdata: requires the HCP sub-100206 test data set (set WMAPYTOOLS_TESTDATA)",
+]

@@ -6,6 +6,137 @@ Created on Mon May 16 11:42:56 2022
 @author: dan
 """
 
+# Claude note: --------------------------------------------------------------
+# Stage timing (added 2026-11).  Several functions used to time themselves
+# with inline time.process_time() pairs and print the result.  process_time
+# is CPU time summed over every thread of the process, so with multithreaded
+# numpy / BLAS it overstates the time a user actually waits, and those prints
+# could neither be turned off nor collected.  StageTimer measures wall-clock
+# time with time.perf_counter (keeping the CPU time alongside it), prints
+# only while timing messages are switched on (the default, so output is as
+# before), and reports every stage to any collectStageTimings() block, e.g.
+# for a per-stage profiling DataFrame.
+# ---------------------------------------------------------------------------
+
+import contextlib as _contextlib
+import time as _time
+
+#Claude note: module-wide switch for the timing messages; see setTimingVerbose
+_TIMING_VERBOSE = True
+#Claude note: record lists of the currently open collectStageTimings blocks
+_ACTIVE_RECORDS = []
+
+
+def setTimingVerbose(verbose):
+    """
+    Claude note: switch the per-stage timing messages on or off.
+
+    Parameters
+    ----------
+    verbose : bool
+        True (the default state) prints a message as each timed stage
+        finishes, as wmaPyTools always has; False silences them, e.g. inside
+        loops over many ROIs.
+
+    Returns
+    -------
+    previous : bool
+        The setting before this call, so it can be restored.
+    """
+    global _TIMING_VERBOSE
+    previous = _TIMING_VERBOSE
+    _TIMING_VERBOSE = bool(verbose)
+    return previous
+
+
+@_contextlib.contextmanager
+def collectStageTimings():
+    """
+    Claude note: collect every StageTimer that finishes inside the block.
+
+    Usage::
+
+        with collectStageTimings() as records:
+            segmentationTools.segmentTractMultiROI(...)
+        pd.DataFrame(records)   # columns: stage, wallSeconds, cpuSeconds
+
+    Yields
+    ------
+    records : list of dict
+        One {'stage', 'wallSeconds', 'cpuSeconds'} dict per finished stage,
+        in finishing order.  Blocks may be nested; each sees the stages that
+        finish while it is open.
+    """
+    records = []
+    _ACTIVE_RECORDS.append(records)
+    try:
+        yield records
+    finally:
+        #Claude note: remove this block's own list by identity (list.remove
+        #compares by equality, and nested blocks can hold equal lists)
+        for iList in range(len(_ACTIVE_RECORDS) - 1, -1, -1):
+            if _ACTIVE_RECORDS[iList] is records:
+                del _ACTIVE_RECORDS[iList]
+                break
+
+
+class StageTimer(object):
+    """
+    Claude note: wall-clock (and CPU) timer for one stage of a computation.
+
+    Starts when created; finish() stops it, reports it to any open
+    collectStageTimings() blocks and, if timing messages are on, prints a
+    message.
+
+    Usage::
+
+        stageTimer = StageTimer('subsetStreamsByROIboundingBox')
+        ...work...
+        stageTimer.finish(lambda seconds: 'subsetting complete in ' + str(seconds))
+
+    Parameters
+    ----------
+    label : str
+        Name of the stage, used in the records and the default message.
+
+    Attributes
+    ----------
+    wallSeconds, cpuSeconds : float or None
+        Elapsed times, set by finish().
+    """
+    def __init__(self, label):
+        self.label = label
+        self.wallSeconds = None
+        self.cpuSeconds = None
+        self._wallStart = _time.perf_counter()
+        self._cpuStart = _time.process_time()
+
+    def finish(self, message=None):
+        """
+        Claude note: stop the timer, record it, and print its message.
+
+        Parameters
+        ----------
+        message : callable, optional
+            Function of the elapsed wall-clock seconds returning the text to
+            print.  Default: "<label> complete in <seconds> seconds".
+
+        Returns
+        -------
+        wallSeconds : float
+        """
+        self.wallSeconds = _time.perf_counter() - self._wallStart
+        self.cpuSeconds = _time.process_time() - self._cpuStart
+        for records in _ACTIVE_RECORDS:
+            records.append({'stage': self.label, 'wallSeconds': self.wallSeconds, 'cpuSeconds': self.cpuSeconds})
+        if _TIMING_VERBOSE:
+            if message is None:
+                print(self.label + ' complete in ' + str(self.wallSeconds) + ' seconds')
+            else:
+                print(message(self.wallSeconds))
+        return self.wallSeconds
+
+
 def searchAndLoad_configJSON(path=None):
     """
     searchAndLoad_configJSON(path=None)
@@ -13,7 +144,7 @@ def searchAndLoad_configJSON(path=None):
 
     Parameters
     ----------
-    path : TYPE, optional
+    path : string path, optional
         Path to the config.json file or the directory containing the config.json
         If there is no path passed, the current working directory will be used.
         The default is None.
@@ -30,45 +161,35 @@ def searchAndLoad_configJSON(path=None):
     import json
     
     #if the input path is None
-    if path==None:
+    if path is None:
         #set the current path to the cwd
         path=os.getcwd()
     
-    #in either case proceed
-        
-    #if this is a directory
+    #Claude note: figure out where the candidate config.json would be
+    #Claude note: a previous version of this function (1) opened the literal relative
+    #path 'config.json' rather than the path it had just computed, so it only
+    #ever worked from inside the config's directory, and (2) ended with an
+    #unconditional config=[] that overwrote whatever had been loaded.  So it
+    #always returned [].
+    #if this is a directory, look for a config.json in it
     if os.path.isdir(path):
-        #check to see if if there's a config.json in it.
-
-        #check to see if there is a config.json here
-        #create path to hypothetical .json file
         jsonPath=os.path.join(path,'config.json')
-        #check to see if this exists
-        if os.path.isfile(jsonPath):
-            #if so, load it
-            with open('config.json') as config_json:
-                config = json.load(config_json)
-            #if it's a directory without a config.json, pass out nothing
-        else: 
-            config=[]
-    #if this is instead a file
-    elif os.path.isfile(path):
-        #check to see if it's basename is config.json
-        if os.path.basename(path)=='config.json':
-            #if so load it as the config .json
-            with open('config.json') as config_json:
-                config = json.load(config_json)
-        #if the file is not config.json, set config to empty
-        else:
-            config=[]
+    #Claude note: if this is instead a file, it's only a candidate if it's named config.json
+    elif os.path.isfile(path) and os.path.basename(path)=='config.json':
+        jsonPath=path
+    #Claude note: otherwise there's nothing to find
+    else:
+        jsonPath=None
+    
+    #Claude note: if there is a config.json at the computed location, load it
+    if jsonPath is not None and os.path.isfile(jsonPath):
+        with open(jsonPath) as config_json:
+            config = json.load(config_json)
     #if there is not a config.json in the input path, or, as relevant, the current directory
     #output an empty config
-    config=[]
+    else:
+        config=[]
     return config
-    
-    #check to see if there is a config.json here
-    #create path to hypothetical .json file
-    jsonPath=os.path.join(path,'config.json')
     
 def parseInputSysArgs():
     
@@ -134,7 +255,7 @@ def parseInputSysArgs():
         #first char case
         #why the zero index? to hit he first character
         if argsIn[iArgLocations][0]=='=':
-            warnings.warning('Poorly formatted input detected for ' + argsIn[iArgLocations][0] + '\nRecommend more rigid structure in input')
+            warnings.warn('Poorly formatted input detected for ' + argsIn[iArgLocations] + '\nRecommend more rigid structure in input')
         
             #stealing from the previous example even though it isn't exactly the same
             #because the = is on the left, we can assume the thing prior was the prior input
@@ -148,7 +269,7 @@ def parseInputSysArgs():
             
         #last char case
         elif argsIn[iArgLocations][-1]=='=':
-            warnings.warning('Poorly formatted input detected for ' + argsIn[iArgLocations][0] + '\nRecommend more rigid structure in input')
+            warnings.warn('Poorly formatted input detected for ' + argsIn[iArgLocations] + '\nRecommend more rigid structure in input')
         
             #stealing from the previous example even though it isn't exactly the same
             #because the = is on the left, we can assume the thing prior was the prior input
@@ -224,50 +345,46 @@ def cmdORconfig_input():
 
     Returns
     -------
-    positionalArgs : list or tuple?
+    positionalArgs : list
         The ORDERED list of positional varaibles that have been extracted
     nonPositionalArgs : dict
         The keyword arguments and their values, as a dictionary.
 
     """   
     
-    import os
-    import json
     import sys
-
     
-    #use nonlocal to pass out variables
+    #Claude note: sys.argv always contains at least the script name (argv[0]), so
+    #"no arguments" means len(sys.argv)==1.  A previous version checked for
+    #len==0 (unreachable) and, in the config-found branch, assigned
+    #nonPositionalArgs to itself before it existed, so it could never
+    #actually return a loaded config.
     
-    #if there are any sys args passed in
-    if len(sys.argv) == 0:
-        #get the first arg, which is probably the python script
-        pythonScript=sys.argv[0]
-        
-    if len(sys.argv) >= 2:
-        #if the inputs are longer than 2, try and load the second item as a config.json
-        
+    #Claude note: if no arguments were passed, look for a config.json in the cwd
+    if len(sys.argv) == 1:
+        tempConfig=searchAndLoad_configJSON()
+        positionalArgs=[]
+        #Claude note: an empty config results in empty kwargs
+        nonPositionalArgs=dict(tempConfig) if tempConfig else {}
+    
+    #Claude note: if there are 3 or more arguments, treat them as command line inputs
+    elif len(sys.argv) >= 3:
+        [positionalArgs , nonPositionalArgs]=parseInputSysArgs()
+    
+    #Claude note: in the case that it is merely 2 long, it could be either a path to a
+    #config.json, or a single command line argument
+    else:
         tempConfig=searchAndLoad_configJSON(sys.argv[1])
-        
-        #if there are 3 or more arguments 
-        if len(sys.argv) >= 3:
-            #use these inputs as the config
+        #if tempconfig is empty
+        if not tempConfig:
+            #use the paraseInputSysArgs to get that input
+            #nonpositional should be empty
             [positionalArgs , nonPositionalArgs]=parseInputSysArgs()
         
-        #in the case that it is merely 2 long, we have to determine if temp config is empty
+        #else, convert the temp config into nonPositionalArgs and just set positionalArgs to empty
         else:
-            #if tempconfig is empty
-            if not tempConfig:
-                #use the paraseInputSysArgs to get that input
-                #nonpositional should be empty
-                [positionalArgs , nonPositionalArgs]=parseInputSysArgs()
-            
-            #else, convert the temp config into nonPositionalArgs and just set positionalArgs to empty
-            else:
-                positionalArgs=[]
-                nonPositionalArgs=nonPositionalArgs
-    
-    #whatever the case, we should now have arguments parsed to some degree
-    #now pass out the positional args to the outer function
+            positionalArgs=[]
+            nonPositionalArgs=dict(tempConfig)
     
     #just pass these out as args and kwargs
     #use them like so:
@@ -298,22 +415,36 @@ def is_docker():
     )
 
 def parcJSON_to_LUT(pathOrDict):
+    """
+    Converts a brainlife parcellation/volume label.json into a lookup table.
+
+    Parameters
+    ----------
+    pathOrDict : string path or list of dicts
+        Either a path to a label.json file, or the already-loaded contents of
+        one: a list of dicts, each with (at minimum) 'voxel_value' and 'name'
+        keys.
+
+    Returns
+    -------
+    lookupTable : pandas.DataFrame
+        A two column table, with columns 'labelNumber' and 'labelNames'
+    """
     import json
     import pandas as pd
     if isinstance(pathOrDict,str):
         with open(pathOrDict) as label_json:
             label_dict_list = json.load(label_json)
     else:
-        #just assume it's been loaded already and is a list?  I guess
-        pass
+        #Claude note: assume it's been loaded already and is a list of dicts
+        #(previously this branch didn't assign label_dict_list, so it raised a
+        #NameError below)
+        label_dict_list = pathOrDict
     
-    #create a dataframe
-    lookupTable=pd.DataFrame(columns=['labelNumber' , 'labelNames'])
-    
-    for iterator,iLabels in enumerate(label_dict_list):
-        currVals=[iLabels['voxel_value'],iLabels['name']]
-        toAppendSeries=pd.Series(currVals, index=lookupTable.columns)
-        lookupTable=lookupTable.append(toAppendSeries,ignore_index=True)
+    #Claude note: build the rows first, then the dataframe in one go
+    #(DataFrame.append was removed in pandas 2, and was O(n^2) besides)
+    rowList=[[iLabels['voxel_value'],iLabels['name']] for iLabels in label_dict_list]
+    lookupTable=pd.DataFrame(rowList, columns=['labelNumber' , 'labelNames'])
     
     return lookupTable
         

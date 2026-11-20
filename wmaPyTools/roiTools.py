@@ -4,6 +4,292 @@ Created on Sun Dec  5 16:03:01 2021
 
 @author: Daniel
 """
+#Claude note: module level imports for the private speedup helpers below
+#(the public functions in this module keep their own local imports)
+import numpy as np
+from scipy.ndimage import find_objects as _find_objects
+
+
+# Claude note: --------------------------------------------------------------
+# Plane / voxel mapping helpers (added 2026-11).  makePlanarROI,
+# sliceROIwithPlane and alignROItoReference used to map subject-space points
+# to voxels with dipy's _to_voxel_coordinates and then subtract 1 from every
+# index "because of zero indexing".  dipy's indices are already 0-based (the
+# -1 is a leftover from the MATLAB originals, which index from 1), so every
+# plane landed one voxel too low along each axis, and a point on the lowest
+# voxel wrapped round to the opposite edge of the image (index -1).  Separately,
+# dipy's bounding_box (used by subjectSpaceMaskBoundaryCoords) reports its
+# upper bound one voxel past the mask, so planeAtMaskBorder put its low-side
+# planes one voxel outside the mask and only got its high-side planes onto
+# the mask because the two errors cancelled.  These helpers do the mapping
+# directly, and subjectSpaceMaskBoundaryCoords now returns the centres of the
+# mask's outermost voxels on both sides (see _imageFaceBounds for the outer
+# faces of a whole image).
+# ---------------------------------------------------------------------------
+
+def _pointsToVoxelMask(coords, affine, shape):
+    """
+    Claude note: mark the voxels containing subject-space points.
+
+    A point is assigned to the voxel whose centre is nearest along each axis
+    (the same rounding dipy's _to_voxel_coordinates uses), with no index
+    offset.  Points falling outside the image are dropped instead of wrapping
+    round to the far edge.
+
+    Parameters
+    ----------
+    coords : numpy.ndarray
+        N x 3 subject-space (mm) coordinates.
+    affine : numpy.ndarray
+        4 x 4 voxel-to-subject affine of the target image.
+    shape : tuple of int
+        Shape of the target image (first three dimensions are used).
+
+    Returns
+    -------
+    outMask : numpy.ndarray of bool
+        Mask of the target shape, True in voxels containing a point.
+    """
+    import nibabel as nib
+    #Claude note: move the points into (continuous) voxel space
+    voxCoords = nib.affines.apply_affine(np.linalg.inv(affine), np.asarray(coords, dtype=float))
+    #Claude note: round to the nearest voxel centre, as dipy does (floor(x+0.5))
+    inds = np.floor(voxCoords + 0.5).astype(np.int64)
+    #Claude note: drop any point that falls outside the image
+    shape3 = np.asarray(shape[:3])
+    inImage = np.all((inds >= 0) & (inds < shape3), axis=1)
+    inds = inds[inImage]
+    #Claude note: set those voxels
+    outMask = np.zeros(tuple(shape3), dtype=bool)
+    outMask[inds[:, 0], inds[:, 1], inds[:, 2]] = True
+    return outMask
+
+
+def _voxelCentreBounds(affine, indexMins, indexMaxs):
+    """
+    Claude note: subject-space min/max of the voxel centres in an (inclusive)
+    index box.
+
+    Parameters
+    ----------
+    affine : numpy.ndarray
+        4 x 4 voxel-to-subject affine.
+    indexMins, indexMaxs : sequence of int
+        Inclusive lowest and highest voxel index along each of the 3 axes.
+
+    Returns
+    -------
+    bounds : numpy.ndarray
+        2 x 3 array: row 0 the minimum, row 1 the maximum subject-space
+        coordinate in each dimension, taken over the box's corner voxels.
+    """
+    import itertools
+    import nibabel as nib
+    #Claude note: all 8 corner voxels of the box
+    corners = np.asarray(list(itertools.product(*[[indexMins[i], indexMaxs[i]] for i in range(3)])), dtype=float)
+    #Claude note: their subject-space positions
+    cornerCoords = nib.affines.apply_affine(affine, corners)
+    return np.vstack([cornerCoords.min(axis=0), cornerCoords.max(axis=0)])
+
+
+def _imageFaceBounds(affine, shape):
+    """
+    Claude note: subject-space bounds of an image's outer voxel faces.
+
+    The image occupies voxel coordinates -0.5 .. n-0.5 along each axis (voxel
+    centres sit on whole numbers), so its extent is the box spanned by those
+    corners, half a voxel beyond the first and last voxel centres.
+
+    Parameters
+    ----------
+    affine : numpy.ndarray
+        4 x 4 voxel-to-subject affine.
+    shape : tuple of int
+        Image shape (first three dimensions are used).
+
+    Returns
+    -------
+    bounds : numpy.ndarray
+        2 x 3 array: row 0 the minimum, row 1 the maximum subject-space
+        coordinate in each dimension.
+    """
+    return _voxelCentreBounds(affine, [-.5, -.5, -.5], [n - .5 for n in shape[:3]])
+
+
+# Claude note: --------------------------------------------------------------
+# Private speedup helpers (added 2026-11).  The atlas processing functions
+# previously ran morphological operations (label, erosion, propagation) over
+# the whole (e.g. 256^3) volume once per atlas label, although each label
+# occupies a small corner of it.  Cropping each such operation to the label's
+# bounding box gives identical results (voxels outside the box are not part
+# of the label, which is exactly how scipy.ndimage treats voxels outside the
+# array), at a small fraction of the cost.  See
+# tests/test_speedupEquivalence.py.
+# ---------------------------------------------------------------------------
+
+def _labelBoundingBoxes(data, labelValues):
+    """
+    Claude note: for each requested label value, a tuple of slices (one per
+    dimension) that contains every voxel where data==label.  The box is
+    tight when this is cheap to compute, but callers must only rely on it
+    containing all of the label's voxels.
+
+    Parameters
+    ----------
+    data : np.ndarray
+        label volume
+    labelValues : iterable of numbers
+
+    Returns
+    -------
+    boxes : dict
+        label value -> tuple of slices.  A label that is absent gets an empty
+        box (zero size slices).
+    """
+    fullBox = tuple(slice(0, iDim) for iDim in data.shape)
+    emptyBox = tuple(slice(0, 0) for iDim in data.shape)
+    boxes = {}
+    labelValues = list(labelValues)
+    if np.issubdtype(data.dtype, np.integer) and data.size > 0 and data.min() >= 0 and data.max() < 10**7:
+        #Claude note: one pass over the volume for all labels
+        objectSlices = _find_objects(data)
+        for iLabel in labelValues:
+            if iLabel == 0 or iLabel != int(iLabel):
+                #Claude note: find_objects ignores 0 (and non-integer values
+                #can't be equal to integer data anyway)
+                boxes[iLabel] = fullBox
+            elif 0 < int(iLabel) <= len(objectSlices) and objectSlices[int(iLabel) - 1] is not None:
+                boxes[iLabel] = objectSlices[int(iLabel) - 1]
+            else:
+                boxes[iLabel] = emptyBox
+    else:
+        for iLabel in labelValues:
+            boxes[iLabel] = fullBox
+    return boxes
+
+
+def _resolveBackgroundLabel(labels, counts, backgroundLabel, functionName):
+    """
+    Claude note: decides which label is the atlas background.
+
+    If backgroundLabel is given, it is used.  Otherwise the original
+    heuristic is kept (the most common label), but because that heuristic
+    cannot be reliable in principle (on a cropped atlas the most common label
+    may well be white matter, and nothing in the image itself says otherwise)
+    a warning is issued whenever its answer departs from the near universal
+    convention that background is 0.
+
+    Parameters
+    ----------
+    labels, counts : np.ndarray
+        as returned by np.unique(atlasData, return_counts=True)
+    backgroundLabel : number or None
+        the caller's explicit background label, if any
+    functionName : str
+        for the warning message
+
+    Returns
+    -------
+    detectBackground : int
+    """
+    import warnings
+    if backgroundLabel is not None:
+        if not np.any(labels==backgroundLabel):
+            warnings.warn(functionName + ": requested backgroundLabel " + str(backgroundLabel) + " is not present in the atlas.")
+        return int(backgroundLabel)
+    detectBackground=int(labels[np.where(np.max(counts)==counts)[0][0]])
+    if detectBackground!=0:
+        zeroNote=(" Label 0 is present (" + str(int(counts[labels==0][0])) + " voxels) but is not the most common.") if np.any(labels==0) else ""
+        warnings.warn(functionName + ": inferred background label " + str(detectBackground) + " (the most common label), not 0." + zeroNote + " If the atlas is cropped, or its background is not its most common label, this is likely wrong; pass backgroundLabel explicitly.")
+    return detectBackground
+
+
+def _inflationVoteForVoxel(noIslandAtlasData, iInflationTargetCoords, inflationLabelTargets):
+    """
+    Claude note: the per-voxel vote of inflateAtlasIntoWMandBG, moved here
+    verbatim (minus the commented-out lines) so it can be reused for the
+    (rare) voxels whose immediate neighborhood gives a tied vote.  Grows the
+    window until a single label wins.
+    """
+    #this is the voxel-wise radius of the expans you're considering
+    window=1
+    #if you set the vector to 2 or longer by default, it will run until fixed
+    voteWinner=[0,0]
+    while len(voteWinner)>1:
+        #we need to consider those cases in which the voxels are adjacent to the edge of the volume
+        xRange=np.asarray(range((iInflationTargetCoords[0]-window),(iInflationTargetCoords[0]+1+window)))
+        yRange=np.asarray(range((iInflationTargetCoords[1]-window),(iInflationTargetCoords[1]+1+window)))
+        zRange=np.asarray(range((iInflationTargetCoords[2]-window),(iInflationTargetCoords[2]+1+window)))
+        #remove invalid indexes
+        #Claude note: >=1 (was >=0), so that the padding is excluded on both sides
+        xRange=xRange[np.all([xRange<noIslandAtlasData.shape[0]-1,  xRange>=1],axis=0)]
+        yRange=yRange[np.all([yRange<noIslandAtlasData.shape[1]-1,  yRange>=1],axis=0)]
+        zRange=zRange[np.all([zRange<noIslandAtlasData.shape[2]-1,  zRange>=1],axis=0)]
+        x, y, z = np.meshgrid(xRange, yRange, zRange,indexing='ij')
+        #squeeze the output (maybe not necessary)          
+        windowBlock= np.squeeze([x, y, z])
+        #convert to array of coordinates
+        windowIndexes=np.vstack(windowBlock).reshape(3,-1).T
+        voxelVotes=np.asarray([noIslandAtlasData[iVoxel[0],iVoxel[1],iVoxel[2]] for iVoxel in list(windowIndexes)])
+        #get the vote counts
+        (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
+        #Claude note: no votes at all: widen
+        #the window, and if it already spans the volume, leave the voxel as is
+        if len(counts)==0:
+            if window>max(noIslandAtlasData.shape):
+                return int(noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]])
+            window=window+1
+            voteWinner=[0,0]
+            continue
+        voteWinner=labels[np.where(np.max(counts)==counts)[0]]
+        window=window+1
+    return int(voteWinner[0])
+
+
+def _inflationVotes(noIslandAtlasData, inflationTargetCoords, inflationLabelTargets, chunkSize=50000):
+    """
+    Claude note: vectorised equivalent of running _inflationVoteForVoxel for
+    every target voxel.  The 3x3x3 (window=1) vote is computed for all target
+    voxels at once; only voxels where that vote is tied (or empty) fall back
+    to the original per-voxel loop, which then widens the window exactly as
+    before.  The data are not modified while voting (the original also
+    collected all votes before applying them), so the order in which voxels
+    are processed does not matter.
+
+    Returns
+    -------
+    winners : np.ndarray of int, one per row of inflationTargetCoords
+    """
+    winners=np.zeros(len(inflationTargetCoords),dtype=np.int64)
+    if len(inflationTargetCoords)==0:
+        return winners
+    dataShape=np.asarray(noIslandAtlasData.shape)
+    #Claude note: the 27 offsets of the window=1 neighborhood, in the same (x,y,z) order
+    offsets=np.stack(np.meshgrid([-1,0,1],[-1,0,1],[-1,0,1],indexing='ij'),axis=-1).reshape(-1,3)
+    for iChunk in range(0,len(inflationTargetCoords),chunkSize):
+        chunkCoords=np.asarray(inflationTargetCoords[iChunk:iChunk+chunkSize])
+        neighborCoords=chunkCoords[:,None,:]+offsets[None,:,:]
+        #Claude note: same validity rule as _inflationVoteForVoxel: >=1 and < shape-1
+        valid=np.all(np.logical_and(neighborCoords>=1,neighborCoords<dataShape-1),axis=2)
+        clipped=np.clip(neighborCoords,0,dataShape-1)
+        votes=noIslandAtlasData[clipped[:,:,0],clipped[:,:,1],clipped[:,:,2]]
+        valid=np.logical_and(valid,np.isin(votes,inflationLabelTargets,invert=True))
+        #Claude note: for each vote, how many valid votes share its label
+        sameLabel=np.logical_and(votes[:,:,None]==votes[:,None,:],valid[:,None,:])
+        voteCounts=np.where(valid,np.sum(sameLabel,axis=2),0)
+        maxCounts=np.max(voteCounts,axis=1)
+        firstMax=np.argmax(voteCounts,axis=1)
+        winnerLabels=votes[np.arange(len(votes)),firstMax]
+        #Claude note: tied if a different label reaches the same maximum count
+        tied=np.any(np.logical_and(voteCounts==maxCounts[:,None],votes!=winnerLabels[:,None]),axis=1)
+        needsLoop=np.logical_or(tied,maxCounts==0)
+        chunkWinners=winnerLabels.astype(np.int64)
+        for iLoop in np.where(needsLoop)[0]:
+            chunkWinners[iLoop]=_inflationVoteForVoxel(noIslandAtlasData,chunkCoords[iLoop],inflationLabelTargets)
+        winners[iChunk:iChunk+chunkSize]=chunkWinners
+    return winners
+
+
 def makePlanarROI(reference, mmPlane, dimension):
     """
     this plane will be oblique to the subject's *actual anatomy* if they aren't
@@ -49,19 +335,22 @@ def makePlanarROI(reference, mmPlane, dimension):
     
     import nibabel as nib
     import numpy as np
-    import dipy.tracking.utils as ut
     
-    fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_data().shape), reference.affine, reference.header)
-    #pass full mask to subject space boundary function
-    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
-    
+    #Claude note: the image's extent, as the subject-space bounds of its first
+    #and last voxel centres (previously the upper bound was one voxel past the
+    #image, see subjectSpaceMaskBoundaryCoords)
+    refShape=reference.shape[:3]
+    convertedBoundCoords=_voxelCentreBounds(reference.affine, [0,0,0], [n-1 for n in refShape])
+    #Claude note: half a voxel either side of those centres is still inside the image
+    halfVoxel=np.asarray(reference.header.get_zooms()[:3])*.5
+
     #create a dict to interpret input
     dimDict={'x':0,'y':1,'z':2}
     selectedDim=dimDict[dimension]
-    
+
     #if the requested planar coordinate is outside of the image, throw a full on error
-    if convertedBoundCoords[0,selectedDim]>mmPlane or convertedBoundCoords[1,selectedDim]<mmPlane: 
-        raise ValueError('Requested planar coordinate outside of reference image \n coordinate ' + str(mmPlane) + ' requested for bounds ' + str(convertedBoundCoords[:,selectedDim]))   
+    if convertedBoundCoords[0,selectedDim]-halfVoxel[selectedDim]>mmPlane or convertedBoundCoords[1,selectedDim]+halfVoxel[selectedDim]<mmPlane:
+        raise ValueError('Requested planar coordinate outside of reference image \n coordinate ' + str(mmPlane) + ' requested for bounds ' + str(convertedBoundCoords[:,selectedDim]))
     
     #not always 0,0,0
     subjectCenterCoord=np.mean(convertedBoundCoords,axis=0)
@@ -77,26 +366,24 @@ def makePlanarROI(reference, mmPlane, dimension):
             planeCoords.append(mmPlane)
         else:
             #set step size at half the voxel length in this dimension
-            stepSize=fullMask.header.get_zooms()[iDims]*.5
+            stepSize=halfVoxel[iDims]
             #create a vector with the coords for this dimension
-            dimCoords=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims],stepSize)
+            #Claude note: running up to and including the last voxel centre
+            dimCoords=np.arange(convertedBoundCoords[0,iDims],convertedBoundCoords[1,iDims]+stepSize*.5,stepSize)
             #append it to the planeCoords list object
             planeCoords.append(list(dimCoords))
     x, y, z = np.meshgrid(planeCoords[0], planeCoords[1], planeCoords[2],indexing='ij')
-    #squeeze the output (maybe not necessary)          
+    #squeeze the output (maybe not necessary)
     planeCloud= np.squeeze([x, y, z])
     #convert to coordinate vector
     testSplit=np.vstack(planeCloud).reshape(3,-1).T
-    #use dipy functions to treat point cloud like one big streamline, and move it back to image space
-    #alternatively just use inds=nib.affines.apply_affine(np.linalg.inv(fullMask.affine),testSplit)
-    lin_T, offset =ut._mapping_to_voxel(fullMask.affine)
-    inds = ut._to_voxel_coordinates(testSplit, lin_T, offset)
-    
-    #create a blank array for the output
-    outData=np.zeros(reference.shape).astype(bool)
-    #set the relevant indexes to true
-    #-1 because of zero indexing
-    outData[inds[:,0]-1,inds[:,1]-1,inds[:,2]-1]=True
+    #Claude note: mark the voxels holding those points (see _pointsToVoxelMask)
+    outData=_pointsToVoxelMask(testSplit, reference.affine, refShape)
+    #Claude note: a coordinate exactly half a voxel past the last voxel centre
+    #passes the check above but rounds to the voxel beyond the image; treat
+    #it as outside rather than silently returning an empty plane
+    if not np.any(outData):
+        raise ValueError('Requested planar coordinate outside of reference image \n coordinate ' + str(mmPlane) + ' requested for bounds ' + str(convertedBoundCoords[:,selectedDim]))
     #format output
     returnedNifti=nib.nifti1.Nifti1Image(outData, reference.affine, header=reference.header)
     return returnedNifti
@@ -120,7 +407,7 @@ def makePlanarROI(reference, mmPlane, dimension):
 #     import nibabel as nib
 #     outHeader = atlas.header.copy()
 #     #numpy and other stuff has been acting weird with ints lately
-#     atlasData = np.round(atlas.get_data()).astype(int)
+#     atlasData = np.round(np.asanyarray(atlas.dataobj)).astype(int)
 #     outData = np.zeros((atlasData.shape)).astype(int)
 #     #check to make sure it is in the atlas
 #     #not entirely sure how boolean array behavior works here
@@ -165,10 +452,14 @@ def planeAtMaskBorder(inputMask,relativePosition):
     validPositionTerms=['superior','inferior','medial','lateral','anterior','posterior','rostral','caudal','left','right']
     #cased relativePosition check
     #again, don't know how arrays work with booleans
-    if ~np.isin(relativePosition.lower(),validPositionTerms):
+    if not np.isin(relativePosition.lower(),validPositionTerms):
          raise Exception("planeAtROIborder Error: input relative position " + relativePosition + " not valid.")
     
     #convert the boundary coords of the mask to subject space in order to interpret positional terms
+    #Claude note: the outermost mask voxel centres, so every border plane lies
+    #on the mask's edge voxels (before 2026-11 the upper bound was one voxel
+    #past the mask, which with makePlanarROI's old -1 offset put the
+    #inferior / posterior / left planes one voxel outside the mask)
     convertedBoundCoords=subjectSpaceMaskBoundaryCoords(inputMask)
     
     #kind of assumes at least moderately ACPC aligned data, at least insofar
@@ -218,6 +509,7 @@ def returnNiftiBounds(inputNifti):
     boundingBox : np.array, 2x3
         The first row (row 0) corresponds to the max dimension values,
         while the second row (row 1) corresponds to the min dimension values.
+        (Claude note: these are the image's outer voxel faces.)
 
     """
   
@@ -225,20 +517,10 @@ def returnNiftiBounds(inputNifti):
     import numpy as np
     import nibabel as nib
   
-    #obtain the nifti shape
-    niftiShape=inputNifti.shape
-    
-    #stack these alongside 0, the min bound in image space
-    imgBounds=np.vstack([np.asarray(niftiShape),[0,0,0]])
-    
-    #iterate to obtain all possible combinations
-    verticies=np.asarray(list(itertools.product(imgBounds[:,0], imgBounds[:,1], imgBounds[:,2])))
-   
-    #apply affine to obtain subject space coordinates
-    outCoordnates=nib.affines.apply_affine(inputNifti.affine,verticies)
-    
-    #find the min and max in each dimension, and stack acordingly
-    boundingBox=np.vstack([np.max(outCoordnates,axis=0),np.min(outCoordnates,axis=0)])
+    #Claude note: the outer voxel faces, as min / max rows, then flipped
+    #to this function's historical max-first order
+    faceBounds=_imageFaceBounds(inputNifti.affine, inputNifti.shape)
+    boundingBox=faceBounds[::-1].copy()
     
     return boundingBox
 
@@ -284,9 +566,8 @@ def createSphere(r, p, reference, supress=True):
     if not supress:
         print('Creating '+ str(r) +' mm radius spherical roi at '+str(p))
     
-    fullMask = nib.nifti1.Nifti1Image(np.ones(reference.get_data().shape), reference.affine, reference.header)
-    #obtain boundary coords in subject space in order set max min values for interactive visualization
-    convertedBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
+    #Claude note: the image's extent, as its outer voxel faces
+    convertedBoundCoords=_imageFaceBounds(reference.affine, reference.shape)
     
     #if the sphere centroid is outside of the image, throw a full on error
     if np.any(    [np.min(convertedBoundCoords[:,dims])>p[dims] or  
@@ -303,7 +584,9 @@ def createSphere(r, p, reference, supress=True):
     #get the dimensions of the source image
     dims = reference.shape
     
-    imgCoord=np.floor(nib.affines.apply_affine(np.linalg.inv(reference.affine),p))
+    #Claude note: round, not floor: nibabel voxel *centers* sit at integer indexes, so the
+    #nearest voxel to p is the rounded index (floor biased this by up to 1 voxel)
+    imgCoord=np.round(nib.affines.apply_affine(np.linalg.inv(reference.affine),p))
     
     #previous version of this misunderstood this process and included header.zooms
     #radius is interpreted in mm, but image indexing is interpreted in voxels
@@ -324,8 +607,13 @@ def createSphere(r, p, reference, supress=True):
     #NOTE THAT THE SUBSEQUENT FORMULATION HAS IMAGESPACE UNITS ON THE RIGHT
     #AND MM SPACE ON THE LEFT.  AS SUCH WE MUST MODIFY THE DISTANCE COMPUTATION
     #mask_r = x*x + y*y + z*z <= r*r
+    #Claude note: a previous version computed x*x*voxelDims[0], i.e. scaled the
+    #*squared* voxel distance by the voxel size only once.  That is only
+    #correct for 1mm voxels; for 2mm voxels the sphere radius came out ~41%
+    #too large (sqrt(2)), and for 1.25mm (HCP) ~12% too large.  The
+    #distance in mm is (voxelCount*voxelSize), and *that* gets squared.
     voxelDims=reference.header.get_zooms()
-    mask_r = x*x*voxelDims[0] + y*y*voxelDims[1] + z*z*voxelDims[2] <= r*r
+    mask_r = (x*voxelDims[0])**2 + (y*voxelDims[1])**2 + (z*voxelDims[2])**2 <= r*r
 
     outSphereROI = np.zeros(dims, dtype=bool)
     outSphereROI[mask_r] = True
@@ -369,19 +657,26 @@ def multiROIrequestToMask(atlas,roiNums,inflateIter=0):
     #force input roiNums to array, don't want to deal with lists and dicts
     roiNumsInArray=np.asarray(roiNums)
     
-    if  np.logical_not(np.all(np.isin(roiNumsInArray,np.unique(np.round(atlas.get_data()).astype(int))))):
-        import warnings
-        warnings.warn("WMA.multiROIrequestToMask WARNING: ROI label " + str(list(roiNumsInArray[np.logical_not(np.isin(roiNumsInArray,np.unique(np.round(atlas.get_data()).astype(int))))])) + " not found in input Nifti structure.")
-        
-    #obtain coordiantes of all relevant label 
+    #Claude note: the atlas data are read and rounded once, and the
+    #presence check only considers the requested labels' voxels: a requested
+    #label is in np.unique(roundedAtlas) iff it is among the labels of the
+    #voxels that matched a request.
     #ATLASES ARE ACTING WEIRD THESE DAYS, gotta do round then int, not other way
     #if you don't do it this way, somehow you get a reduced number of labels
-    labelCoords=np.where(np.isin(np.round(atlas.get_data()).astype(int),roiNumsInArray))
-
+    roundedAtlasData=np.round(np.asanyarray(atlas.dataobj)).astype(int)
+    labelMask=np.isin(roundedAtlasData,roiNumsInArray)
+    presentRequestedLabels=np.unique(roundedAtlasData[labelMask])
+    
+    if  np.logical_not(np.all(np.isin(roiNumsInArray,presentRequestedLabels))):
+        import warnings
+        warnings.warn("WMA.multiROIrequestToMask WARNING: ROI label " + str(list(roiNumsInArray[np.logical_not(np.isin(roiNumsInArray,presentRequestedLabels))])) + " not found in input Nifti structure.")
+        
+    #obtain coordiantes of all relevant label 
     #create blank data structure
     concatData=np.zeros(atlas.shape)
     #set all appropriate values to true
-    concatData[labelCoords]=True
+    #Claude note: boolean mask indexing, same voxels as np.where(labelMask)
+    concatData[labelMask]=True
     
     #if the inflation parameter has been set
     if inflateIter!=0:
@@ -514,43 +809,27 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
     import numpy as np
     
     #get the data
-    inputROINiftiData=inputROINifti.get_data()
-    inputPlanarROIData=inputPlanarROI.get_data()
+    inputROINiftiData=np.asanyarray(inputROINifti.dataobj)
+    inputPlanarROIData=np.asanyarray(inputPlanarROI.dataobj)
     
     #boolean to check if intersection
     intersectBool=np.any(np.logical_and(inputROINiftiData!=0,inputPlanarROIData!=0))
-    if ~intersectBool:
+    if not intersectBool:
         import warnings
         warnings.warn("sliceROIwithPlane WARNING: input planar ROI does not intersect with input ROI.")
 
     #implement test to determine if input planar roi is indeed planar
     #get coordinates of mask voxels in image space
-    planeVoxCoords=np.where(inputPlanarROI.get_data())
+    planeVoxCoords=np.where(np.asanyarray(inputPlanarROI.dataobj))
     #find the unique values of img space coordinates for each dimension
     uniqueCoordCounts=[len(np.unique(iCoords)) for iCoords in planeVoxCoords]
     #one of them should be singular in the case of a planar roi, throw an error if not
-    if ~np.any(np.isin(uniqueCoordCounts,1)):
+    if not np.any(np.isin(uniqueCoordCounts,1)):
         raise ValueError('input cut ROI not planar (i.e. single voxel thick for True values)')
     
-    fullMask = nib.nifti1.Nifti1Image(np.ones(inputROINifti.get_data().shape), inputROINifti.affine, inputROINifti.header)
-    #pass full mask to subject space boundary function
-    fullVolumeBoundCoords=subjectSpaceMaskBoundaryCoords(fullMask)
-    #get boundary mask coords for mask
-    maskVolumeBoundCoords=subjectSpaceMaskBoundaryCoords(inputPlanarROI)
-    #find the subject space plane that the dim is in
-    subjSpacePlaneDimIndex=np.where(~np.all(np.equal(fullVolumeBoundCoords,maskVolumeBoundCoords),axis=0))[0][0]
-    
-    #set up the dictionary for boundaries
-    positionTermsDict={'superior': np.max(fullVolumeBoundCoords[:,2]),
-                      'inferior': np.min(fullVolumeBoundCoords[:,2]),
-                      'medial':   0,
-                      'lateral': [np.min(fullVolumeBoundCoords[:,0]),np.max(fullVolumeBoundCoords[:,0])],
-                      'anterior': np.max(fullVolumeBoundCoords[:,1]),
-                      'posterior': np.min(fullVolumeBoundCoords[:,1]),
-                      'rostral': np.max(fullVolumeBoundCoords[:,1]),
-                      'caudal': np.min(fullVolumeBoundCoords[:,1]),
-                      'left': np.min(fullVolumeBoundCoords[:,0]),
-                      'right': np.max(fullVolumeBoundCoords[:,0])}
+    #Claude note: the keep region is decided directly from each
+    #voxel's subject-space position.  The plane's own voxels
+    #are kept on whichever side is requested, and nothing wraps.
     
     #set up the dictionary for dimensions
     dimensionDict={'superior': 2,
@@ -563,58 +842,51 @@ def sliceROIwithPlane(inputROINifti,inputPlanarROI,relativePosition):
                    'caudal': 1,
                    'left': 0,
                    'right': 0}    
-
-
-    #silly solution to lateral case
-    def find_nearest(array, value):
-        array = np.asarray(array)
-        idx = (np.abs(array - value)).argmin()
-        return array[idx]
-
-    planeCoords=[]
-    #i guess the only way
-    for iDims in list(range(len(inputROINifti.shape))):
-        #set step size at half the voxel length in this dimension
-        stepSize=fullMask.header.get_zooms()[iDims]*.5
-        if iDims==dimensionDict[relativePosition]:
-            #kind of wishy,washy, but because we halved the step size in the previous step
-            #by taking the average of the coord bounds (in subject space) we should actually be fine
-            #we'll use this as one of our two bounds
-            #just do 5 cases
-            if relativePosition=='medial':
-               #i guess it doesn't matter what sign is, one bound is always 0
-               thisDimBounds=np.sort([np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]),0])
-            elif relativePosition=='lateral':
-               #find the nearest x bound, since you're not on the midline, it will work.
-               thisDimBounds=np.sort([np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]),find_nearest([positionTermsDict['left'],positionTermsDict['right']], np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]))])
-       
-            else:
-               thisDimBounds=np.sort([np.mean(maskVolumeBoundCoords[:,subjSpacePlaneDimIndex]),positionTermsDict[relativePosition]])
-           
-        else:
-            thisDimBounds=np.sort([fullVolumeBoundCoords[0,iDims],fullVolumeBoundCoords[1,iDims]])
-           
-        #create a vector with the coords for this dimension
-        dimCoords=np.arange(thisDimBounds[0],thisDimBounds[1],stepSize)
-        #append it to the planeCoords list object
-        planeCoords.append(list(dimCoords))
-            
-    x, y, z = np.meshgrid(planeCoords[0], planeCoords[1], planeCoords[2],indexing='ij')
-    #squeeze the output (maybe not necessary)          
-    planeCloud= np.squeeze([x, y, z])
-    #convert to coordinate vector
-    testSplit=np.vstack(planeCloud).reshape(3,-1).T
-    #use dipy functions to treat point cloud like one big streamline, and move it back to image space
-    import dipy.tracking.utils as ut
-    lin_T, offset =ut._mapping_to_voxel(inputROINifti.affine)
-    inds = ut._to_voxel_coordinates(testSplit, lin_T, offset)
+    if relativePosition not in dimensionDict:
+        raise ValueError('sliceROIwithPlane: relativePosition ' + str(relativePosition) + ' not understood')
+    cutDim=dimensionDict[relativePosition]
     
-    #create a blank array for the keep area mask
-    keepArea=np.zeros(inputPlanarROI.shape).astype(bool)
-    #set the relevant indexes to true
-    #-1 because of zero indexing
-    #could be an issue here if mismatch between input nifti and planar roi
-    keepArea[inds[:,0]-1,inds[:,1]-1,inds[:,2]-1]=True 
+    #Claude note: subject-space position of the plane along the cut dimension,
+    #from the centres of its voxels
+    planeSubjCoords=nib.affines.apply_affine(inputPlanarROI.affine, np.asarray(planeVoxCoords[:3]).T)
+    planeCoord=np.mean(planeSubjCoords[:,cutDim])
+    #Claude note: tolerance for "on the plane", far below a voxel
+    zooms=np.asarray(inputROINifti.header.get_zooms()[:3])
+    onPlaneTol=1e-3*np.min(zooms)
+    if np.ptp(planeSubjCoords[:,cutDim])>onPlaneTol:
+        import warnings
+        warnings.warn('sliceROIwithPlane WARNING: planar ROI is not perpendicular to the ' + relativePosition + ' direction; cutting at its mean position.')
+    
+    #Claude note: the kept interval [lowBound, highBound] along cutDim
+    if relativePosition in ['superior','anterior','rostral','right']:
+        lowBound, highBound = planeCoord, np.inf
+    elif relativePosition in ['inferior','posterior','caudal','left']:
+        lowBound, highBound = -np.inf, planeCoord
+    elif relativePosition=='medial':
+        #between the plane and the midline (x=0)
+        lowBound, highBound = np.sort([planeCoord, 0.0])
+    else:
+        #lateral: between the plane and whichever x edge of the image is nearer
+        #to it (as before)
+        #Claude note: from the image's first and last voxel centres
+        imageBounds=_voxelCentreBounds(inputROINifti.affine, [0,0,0], [n-1 for n in inputROINifti.shape[:3]])
+        xEdges=imageBounds[:,0]
+        nearestEdge=xEdges[np.argmin(np.abs(xEdges-planeCoord))]
+        if nearestEdge>=planeCoord:
+            lowBound, highBound = planeCoord, np.inf
+        else:
+            lowBound, highBound = -np.inf, planeCoord
+    
+    #Claude note: subject-space coordinate of every voxel centre along cutDim,
+    #built by broadcasting one affine row over the three index axes
+    roiShape=inputROINifti.shape[:3]
+    affineRow=inputROINifti.affine[cutDim]
+    voxelCutCoords=(affineRow[0]*np.arange(roiShape[0])[:,None,None]
+                    +affineRow[1]*np.arange(roiShape[1])[None,:,None]
+                    +affineRow[2]*np.arange(roiShape[2])[None,None,:]
+                    +affineRow[3])
+    #Claude note: keep voxels inside the interval, counting the plane itself
+    keepArea=(voxelCutCoords>=lowBound-onPlaneTol) & (voxelCutCoords<=highBound+onPlaneTol)
     
     #create a nifti structure for this object
     sliceKeepNifti=nib.nifti1.Nifti1Image(keepArea, inputPlanarROI.affine, header=inputPlanarROI.header)
@@ -655,7 +927,7 @@ def pointCoordsToNIFTI(coords,refNifti,radius=None):
     
     for iCoords in coords:
         currentSphere=createSphere(radius, iCoords, refNifti, supress=True)
-        blankNiftiData=np.add(blankNiftiData,currentSphere.get_data())
+        blankNiftiData=np.add(blankNiftiData,np.asanyarray(currentSphere.dataobj))
         
     #create the output nifti
     outNifti=nib.nifti1.Nifti1Image(blankNiftiData, refNifti.affine, header=refNifti.header)
@@ -694,18 +966,14 @@ def alignROItoReference(inputROI,reference):
     densityKernel=np.asarray(reference.header.get_zooms())
     
     #get the coordinates themselves
-    roiCoords=seeds_from_mask(inputROI.get_data(), inputROI.affine, density=densityKernel)
+    roiCoords=seeds_from_mask(np.asanyarray(inputROI.dataobj), inputROI.affine, density=densityKernel)
     
-    #use dipy functions to treat point cloud like one big streamline, and move it back to image space
-    import dipy.tracking.utils as ut
-    lin_T, offset =ut._mapping_to_voxel(reference.affine)
-    inds = ut._to_voxel_coordinates(roiCoords, lin_T, offset)
-    #create a blank array for the keep area mask
-    outData=np.zeros(reference.shape).astype(bool)
-    #set the relevant indexes to true
-    #-1 because of zero indexing
-    #TEST THIS
-    outData[inds[:,0]-1,inds[:,1]-1,inds[:,2]-1]=True 
+    #Claude note: mark the reference voxels holding those points.  This used
+    #to map them with dipy and subtract 1 from each index "because of zero
+    #indexing", which moved the ROI one voxel low along every axis (and
+    #wrapped voxels on the lowest index round to the far edge); points outside
+    #the reference image are now dropped (dipy raised on negative indices)
+    outData=_pointsToVoxelMask(roiCoords, reference.affine, reference.shape[:3])
     
     #create a nifti structure for this object
     outROI=nib.nifti1.Nifti1Image(outData, reference.affine, header=reference.header)
@@ -746,12 +1014,9 @@ def alignNiftis(nifti1,nifti2):
         nifti2=resample_img(nifti2,target_affine=nifti1.affine[0:3,0:3])
     #if they are the same resolution you don't do anything
     
-    #roundabout hack: spoof a full mask to get the subject space boundary coords
-    fullMask1 = nib.nifti1.Nifti1Image(np.ones(nifti1.get_data().shape), nifti1.affine, nifti1.header)
-    fullMask2 = nib.nifti1.Nifti1Image(np.ones(nifti2.get_data().shape), nifti2.affine, nifti2.header)
-    #pass full mask to subject space boundary function
-    convertedBoundCoords1=subjectSpaceMaskBoundaryCoords(fullMask1)
-    convertedBoundCoords2=subjectSpaceMaskBoundaryCoords(fullMask2)
+    #Claude note: each image's extent as its outer voxel faces
+    convertedBoundCoords1=_imageFaceBounds(nifti1.affine, nifti1.shape)
+    convertedBoundCoords2=_imageFaceBounds(nifti2.affine, nifti2.shape)
     
     #get the subject space min and max values for these boundaries
     minVals=np.min(np.asarray([convertedBoundCoords1[0,:],convertedBoundCoords2[0,:]]),axis=0)
@@ -806,34 +1071,35 @@ def subjectSpaceMaskBoundaryCoords(maskNifti):
     -------
     subjectSpaceBounds : TYPE
         a 2 x 3 dimensional array indicating the minimum and maximum bounds
-        for each dimension
+        for each dimension (Claude note: the subject-space centres of the
+        outermost mask voxels; before 2026-11 the maximum was one voxel past
+        the mask)
 
     """
     
-    import dipy.segment.mask as mask
-    import numpy as np
-    
-    #get the bounding box in image space
-    refDimBounds=np.asarray(mask.bounding_box(maskNifti.get_data()))
-    
-    #use itertools and cartesian product to generate vertex img space coordinates
-    import itertools
-    outCoordnates=np.asarray(list(itertools.product(refDimBounds[:,0], refDimBounds[:,1], refDimBounds[:,2])))
-     
-    #perform affine
-    import nibabel as nib
-    convertedBoundCoords=nib.affines.apply_affine(maskNifti.affine,outCoordnates)
-    
-    #create holder for output
-    import numpy as np
-    subjectSpaceBounds=np.zeros([2,convertedBoundCoords.shape[1]])
-    
-    #list comprehension to iterate across dimensions
-    #picking out min and max vals
-    #min
-    subjectSpaceBounds[0,:]=[np.min(convertedBoundCoords[:,iDems]) for iDems in list(range(convertedBoundCoords.shape[1]))]
-    #max
-    subjectSpaceBounds[1,:]=[np.max(convertedBoundCoords[:,iDems]) for iDems in list(range(convertedBoundCoords.shape[1]))]
+    #Claude note: the bounds are the subject-space centres of the
+    #mask's outermost voxels on BOTH sides.  For the outer faces of a whole image
+    #see _imageFaceBounds.
+    maskData=np.asanyarray(maskNifti.dataobj)!=0
+    #fold any dimensions past the third into the first three
+    if maskData.ndim>3:
+        maskData=maskData.reshape(maskData.shape[:3]+(-1,)).any(axis=3)
+    indexMins=[]
+    indexMaxs=[]
+    for iAxis in range(3):
+        #indexes along this axis holding any mask voxel
+        otherAxes=tuple(iOther for iOther in range(3) if iOther!=iAxis)
+        occupied=np.flatnonzero(maskData.any(axis=otherAxes))
+        if len(occupied)==0:
+            #empty mask: as before (dipy returned 0 bounds, with a warning)
+            import warnings
+            warnings.warn('subjectSpaceMaskBoundaryCoords: no data found in mask; returning the position of voxel 0.')
+            indexMins, indexMaxs = [0,0,0], [0,0,0]
+            break
+        indexMins.append(int(occupied[0]))
+        indexMaxs.append(int(occupied[-1]))
+    #the corners' subject-space min and max in each dimension
+    subjectSpaceBounds=_voxelCentreBounds(maskNifti.affine, indexMins, indexMaxs)
     
     return subjectSpaceBounds
 
@@ -863,8 +1129,8 @@ def subjectSpaceMaskBoundaryCoords(maskNifti):
 
 #     #get 
 #     #nilearn doesn't handle NAN gracefully, so we have to be inelegant
-#     nifti1=nib.nifti1.Nifti1Image(np.nan_to_num(nifti1.get_data()), nifti1.affine, nifti1.header)
-#     nifti2=nib.nifti1.Nifti1Image(np.nan_to_num(nifti2.get_data()), nifti2.affine, nifti2.header)
+#     nifti1=nib.nifti1.Nifti1Image(np.nan_to_num(np.asanyarray(nifti1.dataobj)), nifti1.affine, nifti1.header)
+#     nifti2=nib.nifti1.Nifti1Image(np.nan_to_num(np.asanyarray(nifti2.dataobj)), nifti2.affine, nifti2.header)
     
 #     cropped1=crop_img(nifti1)
 #     cropped2=crop_img(nifti2)
@@ -880,11 +1146,11 @@ def subjectSpaceMaskBoundaryCoords(maskNifti):
     
 #     return outNifti1, outNifti2
 
-def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=[]):
+def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=None):
     """
     Removes island label values from atlas iteratively across values present.
     Important for when extracted atlas labels are being used as anatomical 
-    markers.  Instead of using erosion, we'll use scipy.ndimage.measurements.label
+    markers.  Instead of using erosion, we'll use scipy.ndimage.label
     
     Potentially faster ways of doing this in other packages.
     
@@ -894,8 +1160,11 @@ def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=[]):
         A multi label atlas/parc, with integer based labels.  Will load if string
         is passed
     ignoreLabelsRequest :  list of int, optional
-        The number of inflate iterations you would like to perform. If no value
-        is passed, no inflation is performedThe default is 0.
+        Label values that should NOT be de-islanded (e.g. labels that are
+        legitimately discontinuous, like some cerebellar or ventricular
+        labels).  These are still reported on in removalReport, but left
+        unmodified.  0 (background) is always ignored, whether or not it is
+        included.  The default is None, i.e. only ignore 0.
 
     Returns
     -------
@@ -910,12 +1179,12 @@ def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=[]):
     #scipy.ndimage.measurements.labeled_comprehension?        
 
     import nibabel as nib
-    from scipy.ndimage.measurements import label
+    #Claude note: scipy.ndimage.measurements is deprecated namespace; label lives
+    #directly in scipy.ndimage
+    from scipy.ndimage import label
     import numpy as np
     import copy
     import pandas as pd
-    #because it unnecessarily warns about things
-    pd.options.mode.chained_assignment = None
     
     if isinstance(atlasNifti,str):
         atlas=nib.load(atlasNifti)
@@ -923,9 +1192,12 @@ def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=[]):
         atlas=atlasNifti
     
     #by default we ignore the background
-    ignoreLabelsRequest.append(0)
+    #Claude note: build a new list rather than appending to the input, so that
+    #neither the caller's list nor a shared default is mutated across calls
+    if ignoreLabelsRequest is None:
+        ignoreLabelsRequest=[]
     #just in case they included 0 or repeats
-    ignoreLabels=np.unique(ignoreLabelsRequest)
+    ignoreLabels=np.unique(list(ignoreLabelsRequest)+[0])
 
     #do something to ensure that it is int based
     atlasData=np.round( np.asanyarray(atlas.dataobj)).astype(int)
@@ -936,66 +1208,67 @@ def removeIslandsFromAtlas_viaLabelCount(atlasNifti,ignoreLabelsRequest=[]):
     #get counts of the unique lables
     [labels,counts]=np.unique(atlasData, return_counts=True)
     
-    #create a report of the island removal process
-    removalReport=pd.DataFrame(columns=['labelVal','startVoxCount','islandCount','totalIslandVox','endVoxCount'])
-    removalReport['labelVal']=labels
-    removalReport['startVoxCount']=counts
+    #Claude note: rather than writing into the report table cell-by-cell inside the loop
+    #(which is slow, and which pandas >=3 silently turns into a no-op due to
+    #copy-on-write) we accumulate per-label values here, and build the
+    #report once at the end
+    islandCounts=np.zeros(len(labels),dtype=int)
+    islandVoxCounts=np.zeros(len(labels),dtype=int)
     
-    
+    #Claude note: first pass: remove islands from all non-ignored labels
+    #second pass (below) : report on, but don't modify, the ignored labels
+    #Claude note: connected components are found within each label's bounding
+    #box (see _labelBoundingBoxes) rather than across the whole volume: a
+    #label's components all lie inside its box, and scipy numbers them in the
+    #same scan order, so the result is identical.
+    labelBoxes=_labelBoundingBoxes(atlasData, labels)
     for labelIterator,iLabels in enumerate(labels):
-        #we don't want to do 0
+        labelBox=labelBoxes[iLabels]
+        #label the distinct elements of the parcellation matching the current label
+        #~.5 of .9 seconds per loop here
+        labeled_array, num_features = label(atlasData[labelBox]==iLabels)
+        #get the counts for these elements
+        #Claude note: equivalent to np.unique(labeled_array, return_counts=True)
+        #over the whole volume: components 1..num_features are all present,
+        #and 0 (background) is present iff the label doesn't fill the volume
+        componentCounts=np.bincount(labeled_array.ravel(),minlength=num_features+1)[1:]
+        backgroundCount=atlasData.size-counts[labelIterator]
+        if backgroundCount>0:
+            curr_counts=np.concatenate([[backgroundCount],componentCounts])
+        else:
+            curr_counts=componentCounts
         
+        #Claude note: if the label occupies the entire volume (e.g. an all-zero
+        #background-less image), there is no "0" component to skip, and thus
+        #nothing to compare against
+        if len(curr_counts)<2:
+            continue
 
+        #always ignore 0, add 1 because you're ignoring it
+        maxSizeIndex=np.where(curr_counts[1:]==np.max(curr_counts[1:]))[0][0]+1
+        #create a mask of the locations to be zeroed out
+        currIslandMask=np.logical_and(labeled_array>0,labeled_array!=maxSizeIndex)
+        
+        #compute and populate the data for the report
+        #-2 because we don't include 0 or the largest island
+        islandCounts[labelIterator]=len(curr_counts)-2
+        islandVoxCounts[labelIterator]=np.sum(currIslandMask)
+        
+        #Claude note: use the mask to set the relevant voxels to 0, but only if this
+        #label isn't one we've been asked to leave alone
         if not iLabels in ignoreLabels:
-            #label the distinct elements of the parcellation matching the current label
-            #startLabel = time.time()
-            #~.5 of .9 seconds per loop here
-            labeled_array, num_features = label(atlasData==iLabels)
-            #endLabel = time.time()
-            #print(endLabel - startLabel)
-            #get the counts for these elements
-            [curr_labels,curr_counts]=np.unique(labeled_array, return_counts=True)
-
-            #always ignore 0, add 1 because you're ignoring it
-            maxSizeIndex=np.where(curr_counts[1:]==np.max(curr_counts[1:]))[0][0]+1
-            #create a mask of the locations to be zeroed out
-            currIslandMask=np.logical_and(labeled_array>0,labeled_array!=maxSizeIndex)
-            
-            #compute and populate the data for the report
-            #-2 because we don't include 0 or the largest island
-            removalReport['islandCount'].loc[removalReport['labelVal']==iLabels]=len(curr_counts)-2
-            removalReport['totalIslandVox'].loc[removalReport['labelVal']==iLabels]=np.sum(currIslandMask)
-            
-            #use the mask to set the relevant voxels to 0
-            noIslandData[currIslandMask]=0
-            
-            #count the new total voxel count for this label
-            removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=np.sum(noIslandData==iLabels)
-            #print(removalReport.loc[removalReport['labelVal']==iLabels])
-
+            noIslandData[labelBox][currIslandMask]=0
     
-    #now populate data for the lables we didn't modify
-    for iLabels in ignoreLabels:
-            labeled_array, num_features = label(atlasData==iLabels)
-            #get the counts for these elements
-            [curr_labels,curr_counts]=np.unique(labeled_array, return_counts=True)
-
-            #always ignore 0, add 1 because you're ignoring it
-            maxSizeIndex=np.where(curr_counts[1:]==np.max(curr_counts[1:]))[0][0]+1
-            #create a mask of the locations to be zeroed out
-            currIslandMask=np.logical_and(labeled_array>0,labeled_array!=maxSizeIndex)
-            
-            #compute and populate the data for the report
-            #-2 because we don't include 0 or the largest island
-            removalReport['islandCount'].loc[removalReport['labelVal']==iLabels]=len(curr_counts)-2
-            removalReport['totalIslandVox'].loc[removalReport['labelVal']==iLabels]=np.sum(currIslandMask)
-            
-            #use the mask to set the relevant voxels to 0
-            #except we arent changing these
-            #noIslandData[currIslandMask]=0
-            
-            #count the new total voxel count for this label
-            removalReport['endVoxCount'].loc[removalReport['labelVal']==iLabels]=np.sum(noIslandData==iLabels)
+    #Claude note: count the new total voxel count for each label
+    endCountsDict=dict(zip(*np.unique(noIslandData, return_counts=True)))
+    endVoxCounts=[endCountsDict.get(iLabels,0) for iLabels in labels]
+    
+    #create a report of the island removal process
+    removalReport=pd.DataFrame({'labelVal':labels,
+                                'startVoxCount':counts,
+                                'islandCount':islandCounts,
+                                'totalIslandVox':islandVoxCounts,
+                                'endVoxCount':endVoxCounts})
             
     #now prepare the nifti output
     atlasNiftiOut=nib.Nifti1Image(noIslandData, atlas.affine, atlas.header)
@@ -1105,7 +1378,7 @@ def preProcParc(inParc,deIslandBool=True,inflateIter=0,retainOrigBorders=False,m
     return atlasNiftiOut,deIslandReport,inflationReport
     
 
-def removeIslandsFromAtlas(atlasNifti):
+def removeIslandsFromAtlas(atlasNifti,backgroundLabel=None):
     """
     Removes island label values from atlas iteratively across values present.
     Important for when extracted atlas labels are being used as anatomical 
@@ -1118,6 +1391,11 @@ def removeIslandsFromAtlas(atlasNifti):
     atlasNifti : String path to file loadable via nib.load or NIFTI-like object
         A multi label atlas, with integer based labels.  Will load if string
         is passed
+    backgroundLabel : int, optional
+        (Claude note.)  The atlas's background label, which
+        removed island voxels are set to.  If None (the default), it is
+        inferred as the most common label, with a warning if that
+        isn't 0 (the inference is unreliable for e.g. cropped atlases).
 
     Returns
     -------
@@ -1141,23 +1419,38 @@ def removeIslandsFromAtlas(atlasNifti):
         atlas=atlasNifti
 
 
-    # atlasData=np.round(atlas.get_data()).astype(int)
+    # atlasData=np.round(np.asanyarray(atlas.dataobj)).astype(int)
     # #COSIDER REPLACING ALL OR MOST OF THIS WITH
     #Doesn't seem to work?
     # relabelConnectedData=scipy.ndimage.measurements.label(atlasData.astype(bool))
 
     #count the label instances, and make an inference as to the background value
     #it's almost certianly the most common value, eg. 0
-    (labels,counts)=np.unique(atlas.get_data(), return_counts=True)
-    detectBackground=int(labels[np.where(np.max(counts)==counts)[0]])
+    (labels,counts)=np.unique(np.asanyarray(atlas.dataobj), return_counts=True)
+    #Claude note: explicit backgroundLabel, or the heuristic with a warning
+    detectBackground=_resolveBackgroundLabel(labels,counts,backgroundLabel,'removeIslandsFromAtlas')
     
     #get the list of labels without the background
     atlasLabels=labels.astype(int)[labels.astype(int)!=detectBackground]
     
-    atlasData=atlas.get_data()
+    #Claude note: work on a copy, so the caller's atlas is never
+    #modified in place.
+    atlasData=np.array(np.asanyarray(atlas.dataobj))
+    #Claude note: a separate, unmodified copy of the label data, so a
+    #file-backed nifti isn't re-read and re-decompressed for each label.
+    #Only the current label and background are ever modified, so
+    #reading from this copy is equivalent.
+    origData=np.array(atlasData)
+    #Claude note: each label's morphology is computed within its bounding box
+    #(see _labelBoundingBoxes); identical results, far smaller arrays
+    labelBoxes=_labelBoundingBoxes(origData, atlasLabels)
     removalReport=pd.DataFrame(columns=['label','max_erosion','islands_removed'])
     #remove the background values
     for iLabels in atlasLabels:
+        #Claude note: the label mask within its bounding box, and its voxel count
+        labelBox=labelBoxes[iLabels]
+        labelMask=origData[labelBox]==iLabels
+        labelVoxCount=np.sum(labelMask)
         #create a blank vector to add to the report
         reportRow=[]
         #add the current label
@@ -1166,7 +1459,7 @@ def removeIslandsFromAtlas(atlasNifti):
         #the default max iterations, will be reduced in cases where implementation
         #results in complete loss
         forcedMaxIterations=3
-        currentErosion=atlas.get_data()==iLabels
+        currentErosion=labelMask
         #I guess we can use this to set something like minimum island size?
         #a 3x3 block (last before singleton point) would have 27 voxels in it
         #using strcit less than allows for escape in cases where forcedMaxIterations
@@ -1178,25 +1471,25 @@ def removeIslandsFromAtlas(atlasNifti):
             if np.sum(currentErosion) ==0:
                 forcedMaxIterations=forcedMaxIterations-1
                 erosionIterations=0
-                currentErosion=atlas.get_data()==iLabels
+                currentErosion=labelMask
         #print how much was eroded
-        print(str(np.abs(np.sum(currentErosion) - (np.sum(atlas.get_data()==iLabels))))+ ' of ' + str(np.sum(atlas.get_data()==iLabels)) + ' voxels eroded label ' + str(iLabels) )
+        print(str(np.abs(np.sum(currentErosion) - labelVoxCount))+ ' of ' + str(labelVoxCount) + ' voxels eroded label ' + str(iLabels) )
         #add that value to the report list for this label
-        reportRow.append(np.abs(np.sum(currentErosion) - (np.sum(atlas.get_data()==iLabels))))
+        reportRow.append(np.abs(np.sum(currentErosion) - labelVoxCount))
         #perform the propigation function, wherein the eroded label is inflated back
-        #islandRemoved=scipy.ndimage.binary_propagation(currentErosion, structure=np.ones([3,3,3]).astype(int), mask=atlas.get_data()==iLabels)
-        islandRemoved=scipy.ndimage.binary_propagation(currentErosion, mask=atlas.get_data()==iLabels)
+        #islandRemoved=scipy.ndimage.binary_propagation(currentErosion, structure=np.ones([3,3,3]).astype(int), mask=np.asanyarray(atlas.dataobj)==iLabels)
+        islandRemoved=scipy.ndimage.binary_propagation(currentErosion, mask=labelMask)
         #print the resulting difference between the intitial label and this eroded+inflated one
-        print(str(np.abs(np.sum(islandRemoved) - (np.sum(atlas.get_data()==iLabels))))+ ' of ' + str(np.sum(atlas.get_data()==iLabels)) + ' voxels removed for label ' + str(iLabels) )
+        print(str(np.abs(np.sum(islandRemoved) - labelVoxCount))+ ' of ' + str(labelVoxCount) + ' voxels removed for label ' + str(iLabels) )
         #add that value to the report list for this label
-        reportRow.append(np.abs(np.sum(islandRemoved) - (np.sum(atlas.get_data()==iLabels))))
+        reportRow.append(np.abs(np.sum(islandRemoved) - labelVoxCount))
         #add the row to the output report
         removalReport.loc[len(removalReport)]=reportRow
 
         #now actually modify the data
         #what you want are the areas that are true in the origional atlas but false in the eroded+inflated version
         #set those to background
-        atlasData[np.logical_and(atlas.get_data()==iLabels,np.logical_not(islandRemoved))]=detectBackground
+        atlasData[labelBox][np.logical_and(labelMask,np.logical_not(islandRemoved))]=detectBackground
     
         #make a nifti of it
         atlasNiftiOut=nib.Nifti1Image(atlasData, atlas.affine, atlas.header)
@@ -1238,7 +1531,7 @@ def inflateAtlas(atlasNifti,iterations):
     try: 
         import tqdm
         tqdmFlag=True
-    except:
+    except ImportError:
         tqdmFlag=False
         
     
@@ -1328,7 +1621,7 @@ def inflateAtlas(atlasNifti,iterations):
                     #just in case
                     window=window+1
 
-                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner[0])
                 del voteWinner
         else: 
             for iInflationTargetCoords in inflationTargetCoords:
@@ -1352,7 +1645,7 @@ def inflateAtlas(atlasNifti,iterations):
                     #just in case
                     window=window+1
 
-                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
+                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner[0])
                 del voteWinner
             
         #once the inflations are done for this round, set the values in the atlas data
@@ -1377,7 +1670,7 @@ def inflateAtlas(atlasNifti,iterations):
     return inflatedAtlas,removalReport
     
 
-def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
+def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False,reportSavePath='de-island_report.csv',backgroundLabel=None):
     """
     Inflates label values of input atlas into (INFERRED, SEE IN CODE NOTES)
     white matter labels, and background 0 labels.  Will perform island removal
@@ -1390,15 +1683,37 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
 
     Parameters
     ----------
-    atlasNifti : TYPE
-        An integer based, multi label nifti atlas.
-    iterations : TYPE
+    atlasNifti : string path to file loadable via nib.load or nifti-like object
+        An integer based, multi label nifti atlas.  Will load if string is
+        passed.
+    iterations : int
         The number of iterations to perform the inflation.  Proceeds voxelwise.
+    inferWM : bool, optional
+        (Claude note: description derived from the in-code notes below.)
+        Whether to infer which labels are white matter, from the proportion
+        of total labeled volume each label occupies, and also inflate into
+        those.  The default is False, i.e. inflate only into background.
+    reportSavePath : string path, optional
+        (Claude note.)  Where to save the de-islanding report
+        (see removeIslandsFromAtlas) as a csv.  This report is a provenance /
+        QC product: per-label island counts and voxel counts, useful for
+        checking whether inflation went awry, and for diagnosing problems in
+        the source (e.g. FreeSurfer) segmentation.  The default is
+        'de-island_report.csv' in the current working directory.  Pass a path to save it elsewhere (e.g. an app's output
+        directory), or None to not save it.
+        The default is 'de-island_report.csv'.
+    backgroundLabel : int, optional
+        (Claude note.)  The atlas's background label, i.e. the
+        label inflated into.  If None (the default), it is inferred as the
+        most common label, with a warning if that isn't 0 (the
+        inference is unreliable for e.g. cropped atlases, where the most
+        common label may be white matter).
 
     Returns
     -------
-    atlasNiftiOut : TYPE
+    atlasNiftiOut : nibabel.nifti1.Nifti1Image
         The input atlas nifti, but with islands removed and then inflated into
+        background (and, if inferWM, presumed white matter) labels.
 
     """
     import nibabel as nib
@@ -1409,7 +1724,7 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
     try: 
         import tqdm
         tqdmFlag=True
-    except:
+    except ImportError:
         tqdmFlag=False
         
     from nilearn.image import crop_img, resample_img
@@ -1422,9 +1737,12 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
         atlas=atlasNifti
     
     #first perform the island removal operation
-    [noIslandAtlas,report]=removeIslandsFromAtlas(atlasNifti)
+    #Claude note: the background label is passed on, so both steps agree
+    [noIslandAtlas,report]=removeIslandsFromAtlas(atlasNifti,backgroundLabel=backgroundLabel)
     #just save it
-    report.to_csv('de-island_report.csv')
+    #Claude note: the location is caller-controlled; None skips saving
+    if reportSavePath is not None:
+        report.to_csv(reportSavePath)
     
     
     #now we need to detect the wm and bg labels
@@ -1433,8 +1751,14 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
         
     #count the label instances, and make an inference as to the background value
     #it's almost certianly the most common value, eg. 0
-    (labels,counts)=np.unique(atlas.get_data(), return_counts=True)
-    detectBackground=int(labels[np.where(np.max(counts)==counts)[0]])
+    (labels,counts)=np.unique(np.asanyarray(atlas.dataobj), return_counts=True)
+    #Claude note: explicit backgroundLabel, or the heuristic.  removeIslandsFromAtlas
+    #above has already warned if the heuristic's answer looks doubtful, so the
+    #warning is not repeated here.
+    import warnings
+    with warnings.catch_warnings():
+        warnings.simplefilter('ignore')
+        detectBackground=_resolveBackgroundLabel(labels,counts,backgroundLabel,'inflateAtlasIntoWMandBG')
     
     #now comes a tougher part, how do we detect WM labels, if any (because they might not be there)
     #one heuristic would be that it would be the label that would be inflated into most 
@@ -1490,10 +1814,9 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
     #so long as nothing is on the edge this will probably work, due to coord weirdness
     #This was forshadowing, code updated on 1/12/22 to take care of this
     #get the image data
-    noIslandAtlasData=noIslandAtlas.get_data()
+    noIslandAtlasData=np.asanyarray(noIslandAtlas.dataobj)
     noIslandAtlasData=np.round(noIslandAtlasData).astype(int)
     
-    atlasBounds=subjectSpaceMaskBoundaryCoords(atlas)  
     
     for iInflations in range(iterations):
         print('inflation iteration ' + str(iInflations+1))
@@ -1505,6 +1828,14 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
         dataMask=np.isin(noIslandAtlasData,remaining)
         #get essentially the opposite of this, in the form of the mask of the inflation targets
         inflationTargetsMask=np.isin(noIslandAtlasData,inflationLabelTargets)
+        #Claude note: the one-voxel padding is not data.  It is neither a
+        #source nor a target, and is excluded from votes on both sides (else,
+        #if the background label isn't 0, the padding's 0s could count as a
+        #label to inflate from, and a target voxel could end up with no votes).
+        paddingShell=np.ones(noIslandAtlasData.shape,dtype=bool)
+        paddingShell[1:-1,1:-1,1:-1]=False
+        dataMask[paddingShell]=False
+        inflationTargetsMask[paddingShell]=False
         #inflate the datamask
         inflatedLabelsMask=scipy.ndimage.binary_dilation(dataMask)
         #find the intersection of the inflated data mask and the inflation targets
@@ -1515,85 +1846,12 @@ def inflateAtlasIntoWMandBG(atlasNifti,iterations,inferWM=False):
         #this manuver is going to cost us .gif
         #NOTE, sequencing of coordinates may influence votes
         #create a dummy array for each inflation iteration to avoid this
-        if  tqdmFlag:
-            for iInflationTargetCoords in tqdm.tqdm(inflationTargetCoords):
-                #because I dont trust iteration in 
-                #print(str(iInflationTargetCoords))
-                #set some while loop iteration values
-                #this is the voxel-wise radius of the expans you're considering
-                window=1
-                #if you set the vector to 2 or longer by default, it will run until fixed
-                voteWinner=[0,0]
-                while len(voteWinner)>1:
-                #+2 because python is weird and doesn't include the top index
-                    #we need to consider those cases in which the voxels are adjacent to the edge of the volume
-                    xRange=np.asarray(range((iInflationTargetCoords[0]-window),(iInflationTargetCoords[0]+1+window)))
-                    yRange=np.asarray(range((iInflationTargetCoords[1]-window),(iInflationTargetCoords[1]+1+window)))
-                    zRange=np.asarray(range((iInflationTargetCoords[2]-window),(iInflationTargetCoords[2]+1+window)))
-                    #remove invalid indexes
-                    #-1, right?
-                    xRange=xRange[np.all([xRange<noIslandAtlasData.shape[0]-1,  xRange>=0],axis=0)]
-                    yRange=yRange[np.all([yRange<noIslandAtlasData.shape[1]-1,  yRange>=0],axis=0)]
-                    zRange=zRange[np.all([zRange<noIslandAtlasData.shape[2]-1,  zRange>=0],axis=0)]
-                    
-                    x, y, z = np.meshgrid(xRange, yRange, zRange,indexing='ij')
-                    #squeeze the output (maybe not necessary)          
-                    windowBlock= np.squeeze([x, y, z])
-                    #convert to array of coordinates
-                    windowIndexes=np.vstack(windowBlock).reshape(3,-1).T
-     
-                    #probably dumb and inefficient, but here we are
-                    voxelVotes=np.asarray([noIslandAtlasData[iVoxel[0],iVoxel[1],iVoxel[2]] for iVoxel in list(windowIndexes)])
-                    #get the vote counts
-                    (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
-                    voteWinner=labels[np.where(np.max(counts)==counts)[0]]
-                    #just in case
-                    del voxelVotes
-                    window=window+1
-                #print(str(noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]))
-                #print(str(voteWinner))
-                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
-                del voteWinner
-        else: 
-            #kind of ugly here in that there's duplicated code
-            for iInflationTargetCoords in inflationTargetCoords:
-                #because I dont trust iteration in 
-                #print(str(iInflationTargetCoords))
-                #set some while loop iteration values
-                #this is the voxel-wise radius of the expans you're considering
-                window=1
-                #if you set the vector to 2 or longer by default, it will run until fixed
-                voteWinner=[0,0]
-                while len(voteWinner)>1:
-                #+2 because python is weird and doesn't include the top index
-                    #we need to consider those cases in which the voxels are adjacent to the edge of the volume
-                    xRange=np.asarray(range((iInflationTargetCoords[0]-window),(iInflationTargetCoords[0]+1+window)))
-                    yRange=np.asarray(range((iInflationTargetCoords[1]-window),(iInflationTargetCoords[1]+1+window)))
-                    zRange=np.asarray(range((iInflationTargetCoords[2]-window),(iInflationTargetCoords[2]+1+window)))
-                    #remove invalid indexes
-                    #-1, right?
-                    xRange=xRange[np.all([xRange<noIslandAtlasData.shape[0]-1,  xRange>=0],axis=0)]
-                    yRange=yRange[np.all([yRange<noIslandAtlasData.shape[1]-1,  yRange>=0],axis=0)]
-                    zRange=zRange[np.all([zRange<noIslandAtlasData.shape[2]-1,  zRange>=0],axis=0)]
-                    
-                    x, y, z = np.meshgrid(xRange, yRange, zRange,indexing='ij')
-                    #squeeze the output (maybe not necessary)          
-                    windowBlock= np.squeeze([x, y, z])
-                    #convert to array of coordinates
-                    windowIndexes=np.vstack(windowBlock).reshape(3,-1).T
-     
-                    #probably dumb and inefficient, but here we are
-                    voxelVotes=np.asarray([noIslandAtlasData[iVoxel[0],iVoxel[1],iVoxel[2]] for iVoxel in list(windowIndexes)])
-                    #get the vote counts
-                    (labels,counts)=np.unique(voxelVotes[np.isin(voxelVotes,inflationLabelTargets,invert=True)], return_counts=True)
-                    voteWinner=labels[np.where(np.max(counts)==counts)[0]]
-                    #just in case
-                    del voxelVotes
-                    window=window+1
-                #print(str(noIslandAtlasData[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]))
-                #print(str(voteWinner))
-                newIDentityHolder[iInflationTargetCoords[0],iInflationTargetCoords[1],iInflationTargetCoords[2]]=int(voteWinner)
-                del voteWinner
+        #Claude note: the per-voxel voting loop runs vectorised over all target
+        #voxels in _inflationVotes; only tied votes go through the per-voxel
+        #window-growing loop (_inflationVoteForVoxel).
+        voteWinners=_inflationVotes(noIslandAtlasData,inflationTargetCoords,inflationLabelTargets)
+        if len(inflationTargetCoords)>0:
+            newIDentityHolder[inflationTargetCoords[:,0],inflationTargetCoords[:,1],inflationTargetCoords[:,2]]=voteWinners
             
         #once the inflations are done for this round, set the values in the atlas data
         #to their new identities
@@ -1638,6 +1896,7 @@ def extendROIinDirection(roiNifti,direction,iterations):
     """
     from scipy import ndimage
     import nibabel as nib
+    import numpy as np
     
     #first, get the planar bounding box of the input ROI
     boundaryDictionary=boundaryROIPlanesFromMask(roiNifti)
@@ -1653,7 +1912,7 @@ def extendROIinDirection(roiNifti,direction,iterations):
         direction=list(direction)
         
     #go ahead and do the inflation
-    concatData=ndimage.binary_dilation(roiNifti.get_data(), iterations=iterations)
+    concatData=ndimage.binary_dilation(np.asanyarray(roiNifti.dataobj), iterations=iterations)
     
     #convert that data array to a nifti
     extendedROI=nib.Nifti1Image(concatData, roiNifti.affine, roiNifti.header)
@@ -1685,12 +1944,13 @@ def boundaryROIPlanesFromMask(inputMask):
 
     """
     import nibabel as nib
+    import numpy as np
     
     if isinstance(inputMask,str):
         inputMask=nib.load(inputMask)
         
     #create a binarized copy of the mask
-    binarizedMask=nib.Nifti1Image(inputMask.get_data()>0, inputMask.affine, inputMask.header)
+    binarizedMask=nib.Nifti1Image(np.asanyarray(inputMask.dataobj)>0, inputMask.affine, inputMask.header)
     
     #initialize the output directory
     borderDict={}
@@ -1746,7 +2006,7 @@ def findROISintersection(ROIs,inflateiter=0):
     intersectionNifti=masking.intersect_masks(ROIs, threshold=1)
     
     #if it's empty throw a warning
-    if not np.any(intersectionNifti.get_data()):
+    if not np.any(np.asanyarray(intersectionNifti.dataobj)):
         import warnings
         warnings.warn("Empty mask for intersection returned; likely no mutual intersection between input " + str(len(ROIs)) + "ROIs")
                       
@@ -1755,7 +2015,7 @@ def findROISintersection(ROIs,inflateiter=0):
 def changeLabelValue(inputParc,targetLabelNum,newLabelNum):
     import numpy as np
     import nibabel as nib
-    parcData=inputParc.get_data().astype(int)
+    parcData=np.asanyarray(inputParc.dataobj).astype(int)
     locations=np.where(parcData==targetLabelNum)
     #this takes a bewilderingly long time
     #I must be using it wrong
@@ -1868,8 +2128,8 @@ def mergeVolParcellations(parc1, parc2, parc1LUT, parc2LUT,parc1_override_labels
     
     #detect conflicts
     #extract data
-    parc1Data=parc1.get_data().astype(int)
-    parc2Data=parc2.get_data().astype(int)
+    parc1Data=np.asanyarray(parc1.dataobj).astype(int)
+    parc2Data=np.asanyarray(parc2.dataobj).astype(int)
     
     #find out which one is bigger, use datasize as the guide.  Datatype shouldn't
     #be a confound at this point because we converted to int
@@ -1882,12 +2142,12 @@ def mergeVolParcellations(parc1, parc2, parc1LUT, parc2LUT,parc1_override_labels
         print ('parc1 size of ' + str(np.round(parc1DataSize/(1024**2))) + ' MB greater than parc2 size of ' + str(np.round(parc2DataSize/(1024**2))) + ' MB')
         print ('resampling to parc1' )
         parc2=resample_img(parc2,target_affine=parc1.affine,target_shape=(parc1.shape),interpolation='nearest')
-        parc2Data=parc2.get_data().astype(int)
+        parc2Data=np.asanyarray(parc2.dataobj).astype(int)
     elif parc2DataSize>parc1DataSize:
         print ('parc2 size of ' + str(np.round(parc2DataSize/(1024**2))) + ' MB greater than parc1 size of ' + str(np.round(parc1DataSize/(1024**2))) + ' MB')
         print ('resampling to parc2' )
         parc1=resample_img(parc1,target_affine=parc2.affine,target_shape=(parc2.shape),interpolation='nearest')
-        parc1Data=parc1.get_data().astype(int)
+        parc1Data=np.asanyarray(parc1.dataobj).astype(int)
     elif parc1Data.shape==parc2Data.shape:
         print ('Input parcellations same data shape, proceeding without modification')
     else:

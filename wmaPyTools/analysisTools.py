@@ -4,6 +4,85 @@ Created on Sun Dec  5 16:03:22 2021
 
 @author: Daniel
 """
+def _streamGeomRowsChunk(streamlines, nColumns):
+    """
+    Claude note: one chunk of _streamGeomRowsVectorised.
+    """
+    import numpy as np
+    from wmaPyTools.segmentationTools import _arraySequenceRowIndexes
+    rowIndexes, lengths = _arraySequenceRowIndexes(streamlines)
+    nodes=streamlines._data[rowIndexes]
+    starts=np.cumsum(lengths)-lengths
+    #Claude note: per-segment lengths, for all node-to-node steps (including, harmlessly,
+    #those spanning two streamlines, which are never summed below)
+    segmentLengths=np.linalg.norm(np.diff(nodes,axis=0),axis=1)
+    #Claude note: MATLAB-style midpoint index, as in streamGeomQuantifications
+    midIndexes=(np.floor(lengths/2+.5)-1).astype(np.intp)
+    longEnough=np.where(lengths>=5)[0]
+    nLong=len(longEnough)
+    firstHalfLength=np.zeros(nLong,dtype=segmentLengths.dtype)
+    secondHalfLength=np.zeros(nLong,dtype=segmentLengths.dtype)
+    sqDisplacement=np.zeros(nLong,dtype=nodes.dtype)
+    sqFirstHalfDisp=np.zeros(nLong,dtype=nodes.dtype)
+    sqSecondHalfDisp=np.zeros(nLong,dtype=nodes.dtype)
+    firstNodes=nodes[starts[longEnough]]
+    lastNodes=nodes[starts[longEnough]+lengths[longEnough]-1]
+    midNodes=nodes[starts[longEnough]+midIndexes[longEnough]]
+    displacementVecs=firstNodes-lastNodes
+    firstHalfVecs=firstNodes-midNodes
+    secondHalfVecs=lastNodes-midNodes
+    add=np.add
+    for iLong,iStream in enumerate(longEnough):
+        iStart=starts[iStream]
+        iMid=midIndexes[iStream]
+        #Claude note: the same np.sum (pairwise) over the same segment lengths as arcLength
+        firstHalfLength[iLong]=add.reduce(segmentLengths[iStart:iStart+iMid])
+        secondHalfLength[iLong]=add.reduce(segmentLengths[iStart+iMid:iStart+lengths[iStream]-1])
+        #Claude note: np.linalg.norm of a vector is sqrt(x.dot(x)); the dot is kept as is
+        sqDisplacement[iLong]=displacementVecs[iLong].dot(displacementVecs[iLong])
+        sqFirstHalfDisp[iLong]=firstHalfVecs[iLong].dot(firstHalfVecs[iLong])
+        sqSecondHalfDisp[iLong]=secondHalfVecs[iLong].dot(secondHalfVecs[iLong])
+    streamLength=firstHalfLength+secondHalfLength
+    displacement=np.sqrt(sqDisplacement)
+    firstHalfDisp=np.sqrt(sqFirstHalfDisp)
+    secondHalfDisp=np.sqrt(sqSecondHalfDisp)
+    with np.errstate(divide='ignore',invalid='ignore'):
+        efficiencyRatio=np.divide(displacement,streamLength)
+        asymmetryRatio=np.square(np.divide(firstHalfDisp,firstHalfLength)-np.divide(secondHalfDisp,secondHalfLength))
+        bioPriorCost=np.divide(1,(1-asymmetryRatio))
+    results=np.column_stack([streamLength, displacement, efficiencyRatio, asymmetryRatio, bioPriorCost])
+    #Claude note: assemble rows exactly as the loop does: numpy scalars, or NaN rows
+    rowList=[[np.nan]*nColumns for iStream in range(len(lengths))]
+    for iLong,iStream in enumerate(longEnough):
+        rowList[iStream]=list(results[iLong])
+    return rowList
+
+def _streamGeomRowsVectorised(streamlines, nColumns):
+    """
+    Claude note: vectorised core of streamGeomQuantifications, for nibabel
+    ArraySequence / dipy Streamlines input.  Produces the identical row list
+    the per-streamline loop produces: the same float arithmetic, in the
+    streamlines' own dtype, with the two order-sensitive steps (numpy's
+    pairwise summation of segment lengths, and the BLAS dot product inside
+    np.linalg.norm of a single vector) still performed by the very same numpy
+    calls on the very same values, just without the rest of the per-
+    streamline overhead.
+
+    Returns
+    -------
+    rowList : list of lists, or None if the input is not an ArraySequence
+    """
+    import numpy as np
+    from nibabel.streamlines import ArraySequence
+    from wmaPyTools.segmentationTools import _streamlineChunks
+    
+    if not isinstance(streamlines, ArraySequence) or len(streamlines)==0 or streamlines._data.ndim!=2:
+        return None
+    rowList=[]
+    for firstIndex, chunk in _streamlineChunks(streamlines):
+        rowList+=_streamGeomRowsChunk(chunk, nColumns)
+    return rowList
+
 def streamGeomQuantifications(tractogram):
     """
     This function quantifies a number of streamline-based quantities
@@ -15,27 +94,38 @@ def streamGeomQuantifications(tractogram):
     and would thus require a collection of such streamlines.
     
     see https://github.com/DanNBullock/wma_tools#connectometestq
-    for more details.
+    for more details, and
+    https://github.com/DanNBullock/wma_tools/blob/master/Analysis/ConnectomeTestQ_v2.m
+    for the reference implementation this follows.
 
     Parameters
     ----------
-    tractogram : TYPE
+    tractogram : StatefulTractogram, or Streamlines / list of (N,3) arrays
         An input stateful tractogram or streamlines
 
     Returns
     -------
-    quantificationTable : TYPE
-        A pandas table documenting the streamline based quantificaton. 
+    quantificationTable : pandas.DataFrame
+        A pandas table documenting the streamline based quantificaton.
+        (Claude note: column descriptions below derived from
+        ConnectomeTestQ_v2.m.)  One row per streamline, with columns:
+            length : total arc length of the streamline (mm)
+            fullDisp : straight-line distance between the two endpoints (mm)
+            efficiencyRat : fullDisp / length.  1 for a perfectly straight
+                streamline, approaching 0 for a looping one.
+            asymRat : (firstHalfDisp/firstHalfLength - secondHalfDisp/secondHalfLength)^2
+                i.e. how differently "efficient" the two halves are, in [0,1]
+            bioPriorCost : 1/(1-asymRat).  Claude note: this is inf when asymRat==1
+                (one half perfectly straight, the other a perfect loop), as
+                in the MATLAB original.
+        Streamlines with fewer than 5 nodes are given NaN for all values, as
+        in the MATLAB original.
 
     """
     import pandas as pd
     import numpy as np
     #establish the dataframe
     column_names = ["length", "fullDisp", "efficiencyRat", "asymRat", "bioPriorCost"]
-    quantificationTable = pd.DataFrame(columns = column_names)
-    #begin the iteration
-    from dipy.tracking.streamline import length
-    import math
     
     #pull out the streamlines if necessary
     if hasattr(tractogram,'streamlines'):
@@ -44,29 +134,63 @@ def streamGeomQuantifications(tractogram):
         #guess we're just assuming it's ready to go
         currentStreams=tractogram
     
+    #Claude note: helper for the arc length of an (N,3) array of nodes
+    def arcLength(nodes):
+        return np.sum(np.linalg.norm(np.diff(nodes,axis=0),axis=1))
+    
+    #Claude note: accumulate rows in a list, then build the table once at the end.
+    #Claude note: a previous version called quantificationTable.append(...) without
+    #reassigning the result, so it always returned an empty table (and on
+    #pandas>=2, .append no longer exists at all)
+    rowList=[]
+    #Claude note: for Streamlines / ArraySequence input, the same quantities
+    #are computed for all streamlines at once (identical values; see
+    #_streamGeomRowsVectorised).  Other inputs use the loop below.
+    vectorisedRows=_streamGeomRowsVectorised(currentStreams, len(column_names))
+    if vectorisedRows is not None:
+        rowList=vectorisedRows
+        currentStreams=[]
     for iStreamlines in currentStreams:
+        iStreamlines=np.asarray(iStreamlines)
+        nodeCount=len(iStreamlines)
+        
+        #Claude note: too few nodes to meaningfully split into halves; mirror MATLAB's NaN
+        if nodeCount<5:
+            rowList.append([np.nan]*len(column_names))
+            continue
+        
+        #Claude note: index of the midpoint node.  MATLAB: fiberNodeNum=round(n/2), 1-based.
+        #MATLAB's round is half-away-from-zero (python's round is half-to-even)
+        #so floor(x+.5) is used, and -1 converts to 0-based.
+        #Claude note: a previous version of this port used iStreamlines[1,:] as the
+        #first endpoint -- a carryover of MATLAB's 1-based indexing -- and so
+        #silently dropped the first node, and also dropped the last node from
+        #the second half.  Both halves share the midpoint node, as in MATLAB.
+        midIndex=int(np.floor(nodeCount/2+.5))-1
+        firstHalf=iStreamlines[:midIndex+1,:]
+        secondHalf=iStreamlines[midIndex:,:]
+        
         #compute lengths
-        streamLength=length(iStreamlines)
-        firstHalfLength=length(iStreamlines[1:int(round(len(iStreamlines)/2)),:])
-        secondHalfLength=length(iStreamlines[int(round(len(iStreamlines)/2))+1:-1,:])
+        firstHalfLength=arcLength(firstHalf)
+        secondHalfLength=arcLength(secondHalf)
+        streamLength=firstHalfLength+secondHalfLength
     
         #compute displacements
-        displacement=math.dist(iStreamlines[1,:],iStreamlines[-1,:]) 
-        firstHalfDisp=math.dist(iStreamlines[1,:],iStreamlines[int(round(len(iStreamlines)/2)),:])
-        secondHalfDisp=math.dist(iStreamlines[int(round(len(iStreamlines)/2))+1,:],iStreamlines[-1,:])
+        displacement=np.linalg.norm(iStreamlines[0,:]-iStreamlines[-1,:])
+        firstHalfDisp=np.linalg.norm(iStreamlines[0,:]-iStreamlines[midIndex,:])
+        secondHalfDisp=np.linalg.norm(iStreamlines[-1,:]-iStreamlines[midIndex,:])
     
         #compute ratios
-        efficiencyRatio=displacement/streamLength
-        asymetryRatio=np.square((firstHalfDisp/firstHalfLength)-(secondHalfDisp/secondHalfLength))
-        bioPriorCost=1/(1-asymetryRatio)
+        #Claude note: errstate: degenerate (zero length) halves produce nan/inf here, which
+        #is the honest answer, rather than a warning per streamline
+        with np.errstate(divide='ignore',invalid='ignore'):
+            efficiencyRatio=np.divide(displacement,streamLength)
+            asymmetryRatio=np.square(np.divide(firstHalfDisp,firstHalfLength)-np.divide(secondHalfDisp,secondHalfLength))
+            bioPriorCost=np.divide(1,(1-asymmetryRatio))
+        
+        rowList.append([streamLength, displacement, efficiencyRatio, asymmetryRatio, bioPriorCost])
     
-        
-        
-        
-        #append to dataframe
-        rowVector=[streamLength, displacement, efficiencyRatio, asymetryRatio, bioPriorCost]
-        rowAsSeries = pd.Series(rowVector, index = quantificationTable.columns)
-        quantificationTable.append(rowAsSeries,ignore_index=True)
+    quantificationTable = pd.DataFrame(rowList, columns = column_names)
         
     return quantificationTable
 
@@ -144,7 +268,7 @@ def endpointDispersionMapping(streamlines,referenceNifti,distanceParameter):
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
+        currentSphereImgCoords = np.array(np.where(np.asanyarray(currentSphere.dataobj))).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -226,7 +350,7 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     try: 
         import tqdm
         tqdmFlag=True
-    except:
+    except ImportError:
         tqdmFlag=False
     
     import wmaPyTools.streamlineTools 
@@ -285,7 +409,8 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
         for iCoords in coordsToCheck:
             try:
                 streamIndexes=streamIndexes+streamlineMapping[tuple(iCoords)]
-            except:
+            #Claude note: KeyError only: a voxel with no streamlines simply isn't in the mapping
+            except KeyError:
                 pass
         streamIndexes=np.unique(streamIndexes)
         return streamIndexes
@@ -293,7 +418,9 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     #now do it many times in a parallel pool 
     #processesCount=os.cpu_count()
     #processes_pool = Pool(processesCount)
-    t1_start=time.process_time()
+    #Claude note: timed with genUtils.StageTimer (wall-clock; silenced by
+    #genUtils.setTimingVerbose(False)) instead of time.process_time
+    stageTimer=wmaPyTools.genUtils.StageTimer('find streamline groups')
     #streamsListList=processes_pool.map(partial(streamsInImgSpaceWindow,streamlineMapping=streamlineMapping,mask_r=mask_r), imgCoords)
     print('computing voxel-wise collections of streamlines to check for while using a ' + str(distanceParameter) + 'mm spherical window')
     if tqdmFlag:
@@ -301,9 +428,7 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     else:
         streamsListList=[streamsInImgSpaceWindow(iCoords,streamlineMapping,mask_r) for iCoords in imgCoords]
            
-    t1_stop=time.process_time()
-    modifiedTime=t1_stop-t1_start
-    print(str(modifiedTime) + ' seconds to find streamline groups to check')  
+    stageTimer.finish(lambda modifiedTime: str(modifiedTime) + ' seconds to find streamline groups to check')  
     
     #create an output structure
     #remember it's endpoints1 Avg, endpoints1 Var, endpoints2 Avg, endpoints2 Var for 4th dim, 
@@ -314,7 +439,7 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     #iterate across repeats
     
     
-    t1_start=time.process_time()
+    stageTimer=wmaPyTools.genUtils.StageTimer('compute endpoint dispersions')
     #compute the dispersion for each subset of streamlines, and output the quantificaitons
     #outValues=processes_pool.map(computeStreamsDispersion,streamlines[subsampledStreamLists])
     if tqdmFlag:
@@ -327,9 +452,7 @@ def simpleEndpointDispersion_Bootstrap(streamlines,referenceNifti=None,distanceP
     
     #places those quantifications in the correct space in the output array
     outArray[np.asarray(imgCoords)[:,0],np.asarray(imgCoords)[:,1],np.asarray(imgCoords)[:,2],:,:]=np.asarray(outValues)
-    t1_stop=time.process_time()
-    modifiedTime=t1_stop-t1_start
-    print(str(modifiedTime) + ' seconds to compute endpoint dispersions') 
+    stageTimer.finish(lambda modifiedTime: str(modifiedTime) + ' seconds to compute endpoint dispersions') 
      
     #now we actually have to do the output computations
     
@@ -604,7 +727,7 @@ def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParam
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
+        currentSphereImgCoords = np.array(np.where(np.asanyarray(currentSphere.dataobj))).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -645,7 +768,7 @@ def endpointDispersionMapping_Bootstrap(streamlines,referenceNifti,distanceParam
             #select a subset of half the whole streamline group, then 
             #find the intersection fo that set and the current voxel's streamlines
             currentBootstrapStreamsAll=np.random.randint(0,len(streamlines),bootstrapStreamNum)
-            currentBootstrapStreamsSubSelect=np.in1d(streamIndexes,currentBootstrapStreamsAll)
+            currentBootstrapStreamsSubSelect=np.isin(streamIndexes,currentBootstrapStreamsAll)
             
             #compute the subset mean distance and variance for endpoint cluster 1
             avgEndPoint1=np.mean(Endpoints1[currentBootstrapStreamsSubSelect],axis=0)
@@ -802,7 +925,7 @@ def endpointDispersionAsymmetryMapping_Bootstrap(streamlines,referenceNifti,dist
         currentSphere=wmaPyTools.roiTools.createSphere(distanceParameter, subjectSpaceTractCoords[iCoords,:], referenceNifti)
         
         #get the sphere coords in image space
-        currentSphereImgCoords = np.array(np.where(currentSphere.get_data())).T
+        currentSphereImgCoords = np.array(np.where(np.asanyarray(currentSphere.dataobj))).T
         
         #find the roi coords which correspond to voxels within the streamline mask
         validCoords=list(set(list(tuple([tuple(e) for e in currentSphereImgCoords]))) & set(imgSpaceTractVoxels))
@@ -846,7 +969,7 @@ def endpointDispersionAsymmetryMapping_Bootstrap(streamlines,referenceNifti,dist
             #select a subset of half the whole streamline group, then 
             #find the intersection fo that set and the current voxel's streamlines
             currentBootstrapStreamsAll=np.random.randint(0,len(streamlines),bootstrapStreamNum)
-            currentBootstrapStreamsSubSelect=np.in1d(streamIndexes,currentBootstrapStreamsAll)
+            currentBootstrapStreamsSubSelect=np.isin(streamIndexes,currentBootstrapStreamsAll)
             
             #compute the subset mean distance and variance for endpoint cluster 1
             avgEndPoint1=np.mean(Endpoints1[currentBootstrapStreamsSubSelect],axis=0)
@@ -957,7 +1080,7 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     from dipy.tracking.utils import reduce_labels
     from dipy.tracking import utils
     import dipy.tracking.streamline as streamline
-    from dipy.segment.metric import ResampleFeature
+    from dipy.segment.featurespeed import ResampleFeature
     from dipy.segment.metric import AveragePointwiseEuclideanMetric
     from dipy.segment.metric import MinimumAverageDirectFlipMetric
     import itertools
@@ -999,7 +1122,7 @@ def quantifyTractEndpoints(tractStreamlines,atlas,atlasLookupTable):
     
     #segment tractome into connectivity matrix from parcellation
     #   ENDPOINT GROUP MATTERS
-    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=renumberedAtlasNifti.get_data().astype(int),
+    M, grouping=utils.connectivity_matrix(tractStreamlines, atlas.affine, label_volume=np.asanyarray(renumberedAtlasNifti.dataobj).astype(int),
                             symmetric=False,
                             return_mapping=True,
                             mapping_as_streamlines=False)
@@ -1038,7 +1161,7 @@ def inferReduceLUT_to_LabelNameCols(atlas,lookUpTable):
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #first get the data out of the input atlas and *ensure* that it is Int
     #some atlases are being passed as float
-    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+    inputAtlasDataINT=np.round(np.asanyarray(atlas.dataobj)).astype(int)
       
     if isinstance(lookUpTable,str):
         if lookUpTable[-4:]=='.csv':
@@ -1114,7 +1237,7 @@ def coordinateLUTsAndAtlases(LUT1,LUT2,atlas1,atlas2):
     
     #what do we assume about negative numbers?
     #get the atlas data for atlas 2
-    atlas2Data=atlas2.get_data()
+    atlas2Data=np.asanyarray(atlas2.dataobj)
     atlas2Data[atlas2Data>0]=atlas2Data[atlas2Data>0]+newLUT2start
     
     atlas2=nib.Nifti1Image(atlas2Data, atlas2.affine, atlas2.header)
@@ -1135,7 +1258,7 @@ def reduceLUTtoAvail(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColum
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #first get the data out of the input atlas and *ensure* that it is Int
     #some atlases are being passed as float
-    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+    inputAtlasDataINT=np.round(np.asanyarray(atlas.dataobj)).astype(int)
       
     if isinstance(lookUpTable,str):
         if lookUpTable[-4:]=='.csv':
@@ -1213,7 +1336,8 @@ def reduceLUTtoAvail(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColum
         #convert the list of the integer label and the new arbitrary name to a series
         curSeries=pd.Series([labelsNotFound[iMysteryLabels],'mysteryLabel_'+str(iMysteryLabels+1)],index=mysteryTable.columns)
         #append the series to the table
-        mysteryTable=mysteryTable.append(curSeries,ignore_index=True)
+        #Claude note: DataFrame.append was removed in pandas 2; a Series must become a 1-row frame to concat as a row
+        mysteryTable=pd.concat([mysteryTable,curSeries.to_frame().T],ignore_index=True)
 
     labelMappings=np.unique(inputAtlasDataINT)
                 
@@ -1224,15 +1348,15 @@ def reduceLUTtoAvail(atlas,lookUpTable,removeAbsentLabels=True,reduceRenameColum
     
     #ugly, but maybe.
     if 'unknownEntryTable' in locals():
-        LUTWorking=unknownEntryTable.append(LUTWorking,ignore_index=True)    
+        LUTWorking=pd.concat([unknownEntryTable,LUTWorking],ignore_index=True)
         #append the mystery table to the working lookupt table     
-    reducedLookUpTable=LUTWorking.append(mysteryTable,ignore_index=True)
+    reducedLookUpTable=pd.concat([LUTWorking,mysteryTable],ignore_index=True)
     
     #if the input variable has been set to preserve the lookup table entries
     #for labels not found in the atlas
     if not removeAbsentLabels:
         leftOverEntries=lookUpTable[~lookUpTable[columnBestGuess].isin(labelMappings)].reset_index(drop=True)
-        reducedLookUpTable=reducedLookUpTable.append(leftOverEntries,ignore_index=True)
+        reducedLookUpTable=pd.concat([reducedLookUpTable,leftOverEntries],ignore_index=True)
         
     #rename the relevant output colums for standardization purposes
     #don't do this, its actually more useful to just assume that column 0 is
@@ -1318,7 +1442,7 @@ def volParcMeasures(parcNifti,lookupTable=None):
     #columns=['roi_name','roi_label','mm_vol','brain_vol_proportion','centroid_x','centroid_y','centroid_z','medial_border','lateralBorder','anteriorBorder','posteriorBorder','superiorBorder','inferiorBorder','boxyness','island_num','centroid_azimuth','centroid_elevation','centroid_distance']
 
     #whole brain stats
-    wholeParcMask=nib.Nifti1Image(np.asarray(parcData>0).astype(int),parcNifti.affine,parcNifti.header)
+    wholeParcMask=nib.Nifti1Image(np.asarray(parcData>0).astype(np.int32),parcNifti.affine,parcNifti.header)
     tableStart=maskStats(wholeParcMask)
     #Fill in info for whole brain
     tableStart['roi_name'].iloc[0]='whole_brain'
@@ -1485,9 +1609,34 @@ def maskStats(maskNifti):
             pass
         
         borderROI=wmaPyTools.roiTools.planarROIFromAtlasLabelBorder(maskNifti,1, iTerms)
+        #Claude note: the plane's position is its voxel centres.  Every
+        #border plane lies on the mask's edge voxels and the bound is exact,
+        #so the outer faces are recovered explicitly below.
         borderROIBoundCoords=wmaPyTools.roiTools.subjectSpaceMaskBoundaryCoords(borderROI)
         meanCoords=np.mean(borderROIBoundCoords,axis=0)
         borderHolder[iterator]=meanCoords[dimList[iterator]]
+
+    #Claude note: move each pair of borders (superior/inferior, medial/lateral,
+    #anterior/posterior) half a voxel outward from the edge voxel centres to
+    #the mask's outer faces, so the borders and the bounding box (below) span
+    #whole voxels.  Otherwise a mask one voxel thick has a zero-volume box
+    #and boxyness becomes infinite.
+    #Claude note: which border of each pair is on the high-coordinate side,
+    #decided anatomically (not by comparing values, which tie for a mask one
+    #voxel thick): superior and anterior are high; medial is high in the left
+    #hemisphere (x<0) and low in the right; for cross-hemisphere masks the
+    #medial/lateral slots hold left (low) / right (high)
+    if interHemiBool:
+        medialIsHigh=False
+    else:
+        medialIsHigh=roiCentroid[0]<0
+    #(high, low) border indexes for superior/inferior, medial/lateral, anterior/posterior
+    for highIndex, lowIndex in [(0,1),(2,3) if medialIsHigh else (3,2),(4,5)]:
+        pairDim=dimList[highIndex]
+        #voxel length along this subject-space axis
+        halfVoxel=.5*np.linalg.norm(maskNifti.affine[pairDim,:3])
+        borderHolder[lowIndex]=borderHolder[lowIndex]-halfVoxel
+        borderHolder[highIndex]=borderHolder[highIndex]+halfVoxel
 
     #boxyness computation
     #see this for explanation:
@@ -1553,7 +1702,7 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #first get the data out of the input atlas and *ensure* that it is Int
     #some atlases are being passed as float
-    inputAtlasDataINT=np.round(atlas.get_data()).astype(int)
+    inputAtlasDataINT=np.round(np.asanyarray(atlas.dataobj)).astype(int)
     
     [relabeledAtlasData, labelMappings]=reduce_labels(inputAtlasDataINT)
     #create new nifti object
@@ -1636,7 +1785,8 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
         #convert the list of the integer label and the new arbitrary name to a series
         curSeries=pd.Series([labelsNotFound[iMysteryLabels],'mysteryLabel_'+str(iMysteryLabels+1)],index=mysteryTable.columns)
         #append the series to the table
-        mysteryTable=mysteryTable.append(curSeries,ignore_index=True)
+        #Claude note: DataFrame.append was removed in pandas 2; a Series must become a 1-row frame to concat as a row
+        mysteryTable=pd.concat([mysteryTable,curSeries.to_frame().T],ignore_index=True)
 
     #lets just do this by default and see if it causes any problems    
     #if len(lookUpTable)>len(labelMappings):
@@ -1652,15 +1802,15 @@ def reduceAtlasAndLookupTable(atlas,lookUpTable,removeAbsentLabels=True,reduceRe
     
     #ugly, but maybe.
     if 'unknownEntryTable' in locals():
-        LUTWorking=unknownEntryTable.append(LUTWorking,ignore_index=True)    
+        LUTWorking=pd.concat([unknownEntryTable,LUTWorking],ignore_index=True)
         #append the mystery table to the working lookupt table     
-    reducedLookUpTable=LUTWorking.append(mysteryTable,ignore_index=True)
+    reducedLookUpTable=pd.concat([LUTWorking,mysteryTable],ignore_index=True)
     
     #if the input variable has been set to preserve the lookup table entries
     #for labels not found in the atlas
     if not removeAbsentLabels:
         leftOverEntries=lookUpTable[~lookUpTable[columnBestGuess].isin(labelMappings)].reset_index(drop=True)
-        reducedLookUpTable=reducedLookUpTable.append(leftOverEntries,ignore_index=True)
+        reducedLookUpTable=pd.concat([reducedLookUpTable,leftOverEntries],ignore_index=True)
         
     #rename the relevant output colums for standardization purposes
     #don't do this, its actually more useful to just assume that column 0 is
@@ -1703,6 +1853,7 @@ def streamlinePrototypicalityMeasure(streamlines,sumOrMean='sum'):
     import dipy.tracking.utils as ut
     from dipy.tracking.vox2track import streamline_mapping
     import wmaPyTools.streamlineTools
+    import wmaPyTools.genUtils
     
     #create a dummy referencec nifti for the input straemlines
     dummyNifti= wmaPyTools.streamlineTools.dummyNiftiForStreamlines(streamlines)
@@ -1769,15 +1920,15 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
     #identify their types
     #kind of involves an assumption, in that we are inferring that a 2 unique 
     #value ROI is binary, and thus 0 and 1 or some equivalent
-    if len(np.unique(ROI1.get_data()))<=2:
+    if len(np.unique(np.asanyarray(ROI1.dataobj)))<=2:
            ROI1type=bool
     else:
-        ROI1type=ROI1.get_data().dtype
+        ROI1type=np.asanyarray(ROI1.dataobj).dtype
         
-    if len(np.unique(ROI2.get_data()))<=2:
+    if len(np.unique(np.asanyarray(ROI2.dataobj)))<=2:
            ROI2type=bool
     else:
-        ROI2type=ROI2.get_data().dtype
+        ROI2type=np.asanyarray(ROI2.dataobj).dtype
     
     #if either of these are bool, you've got to force them both to boolean
     #so that you can perform dice coefficient
@@ -1787,8 +1938,8 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
         #I'm assuming ravel ravels in a standard fashion and that this is safe.
         #also, we can use ravel given that these ROIs are presumably the same size
         #thanks to wmaPyTools.roiTools.alignNiftis
-        ROI1DataVec=np.ravel(ROI1.get_data().astype(bool))
-        ROI2DataVec=np.ravel(ROI2.get_data().astype(bool))
+        ROI1DataVec=np.ravel(np.asanyarray(ROI1.dataobj).astype(bool))
+        ROI2DataVec=np.ravel(np.asanyarray(ROI2.dataobj).astype(bool))
         #now compute the dice coefficient as the distance measure
         print('Computing dice coefficient')
         distanceMeasure=scipy.spatial.distance.dice(ROI1DataVec,ROI2DataVec)
@@ -1798,8 +1949,8 @@ def quantifyOverlapBetweenNiftis(ROI1,ROI2):
         #thanks to wmaPyTools.roiTools.alignNiftis
         #no need to modify datatype as before, though maybe an issue if different 
         #types, i.e. int vs float.
-        ROI1DataVec=np.ravel(ROI1.get_data())
-        ROI2DataVec=np.ravel(ROI2.get_data())
+        ROI1DataVec=np.ravel(np.asanyarray(ROI1.dataobj))
+        ROI2DataVec=np.ravel(np.asanyarray(ROI2.dataobj))
         #now compute the dice coefficient as the distance measure
         print('Computing cosine distance')
         distanceMeasure=scipy.spatial.distance.cosine(ROI1DataVec,ROI2DataVec)
@@ -1936,7 +2087,7 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     try: 
         import tqdm
         tqdmFlag=True
-    except:
+    except ImportError:
         tqdmFlag=False
     
     #napkin math to predict size of output array:
@@ -1945,7 +2096,7 @@ def voxelwiseAtlasConnectivity(streamlines,atlasNifti,mask=None):
     
     #NOTE astype(int) is causing all sorts of problems, BE WARNED
     #using round as a workaround
-    [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(atlasNifti.get_data()).astype(int))
+    [relabeledAtlasData, labelMappings]=utils.reduce_labels(np.round(np.asanyarray(atlasNifti.dataobj)).astype(int))
     
    
     #if an input mask is actually provided
@@ -2042,7 +2193,7 @@ def voxelAtlasDistanceMatrix(voxelAtlasConnectivityTable,reductionFactor=None):
     try: 
         import tqdm
         tqdmFlag=True
-    except:
+    except ImportError:
         tqdmFlag=False
     
     from sklearn.metrics.pairwise import cosine_similarity
@@ -2157,7 +2308,7 @@ def iteratedTractSubComponentDensity(streamlines,atlas,lookupTable,refAnatT1,out
     
    
     #get the endpoint identities
-    M, grouping=utils.connectivity_matrix(streamlines, renumberedAtlasNifti.affine, label_volume=np.round(renumberedAtlasNifti.get_data()).astype(int),
+    M, grouping=utils.connectivity_matrix(streamlines, renumberedAtlasNifti.affine, label_volume=np.round(np.asanyarray(renumberedAtlasNifti.dataobj)).astype(int),
                             return_mapping=True,
                             mapping_as_streamlines=False)
     #get the keys so that you can iterate through them later

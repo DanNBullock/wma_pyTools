@@ -4,3 +4,19 @@
 *.eps
 #?
 afine.txt
+*.egg-info
+.pytest_cache
+__pycache__
+# Claude note: development / test artifacts that should never be committed
+.ipynb_checkpoints
+.DS_Store
+# neuroimaging data and outputs (test data lives outside the repo; see tests/README.md)
+*.tck
+*.trk
+*.tcks
+*.mat
+*.gif
+*.jpg
+# report tables written to the working directory (refData/ csvs are tracked)
+/*.csv
+*.npy
